@@ -732,9 +732,6 @@ body {
 .btn-activar  { flex: 1; background: var(--azul-claro); color: var(--blanco); }
 .btn-activar:hover { background: var(--azul-medio); }
 
-.btn-completar { background: #dcfce7; color: var(--verde); }
-.btn-completar:hover    { background: #bbf7d0; }
-.btn-completar:disabled { opacity: .5; cursor: default; }
 
 .btn-permalink {
   background: #eff6ff;

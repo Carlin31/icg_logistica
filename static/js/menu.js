@@ -79,11 +79,6 @@ const MSG = {
     "Borrando asignaciones y modificaciones…",
     "Limpiando todos los registros asociados…",
   ],
-  completar: [
-    "Actualizando estado de la logística…",
-    "Guardando el progreso final…",
-    "Marcando como completada…",
-  ],
 };
 
 // ── Init ─────────────────────────────────────────────────────────────────────
@@ -290,9 +285,7 @@ function renderCard(l) {
         <button class="btn btn-activar" onclick="activarLogistica('${l._id}')">
           <i data-lucide="play"></i> ${esActiva ? "En uso" : "Seleccionar"}
         </button>
-        ${!completada
-          ? `<button class="btn btn-completar" onclick="completarLogistica('${l._id}')" title="Marcar como completada"><i data-lucide="check"></i> Completar</button>`
-          : ""}
+
         <a class="btn btn-permalink" href="/extraccion/${esc(l.slug || _slugClient(l.nombre))}" title="Enlace directo a este perfil"><i data-lucide="link"></i></a>
         <button class="btn btn-eliminar" onclick="pedirEliminar('${l._id}', '${esc(l.nombre)}')" title="Eliminar"><i data-lucide="trash-2"></i></button>
       </div>
@@ -327,23 +320,6 @@ async function activarLogistica(id) {
     Loader.hide();
     mostrarToast("Error de conexión.", "error");
     if (btn) { btn.disabled = false; btn.innerHTML = '<i data-lucide="play"></i> Seleccionar'; lucide.createIcons(); }
-  }
-}
-
-// ── Completar logística ───────────────────────────────────────────────────────
-async function completarLogistica(id) {
-  Loader.show("Completando Logística", MSG.completar);
-  try {
-    const res  = await fetch(`/api/completar/${id}`, { method: "POST" });
-    const data = await res.json();
-    if (data.status === "ok") {
-      mostrarToast("Logística marcada como completada.", "ok");
-      await cargarLogisticas();
-    }
-  } catch {
-    mostrarToast("Error al completar.", "error");
-  } finally {
-    Loader.hide();
   }
 }
 

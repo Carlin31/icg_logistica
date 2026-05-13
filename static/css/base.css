@@ -89,7 +89,12 @@
 }
 
 /* ── Base ───────────────────────────────────────────────────────── */
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  /* Tipografía fluida: 14px en móvil/laptop pequeño → 15px en laptop estándar
+     → 16px en pantallas grandes. Todas las unidades rem escalan en cascada. */
+  font-size: clamp(14px, 0.4167vw + 10.667px, 16px);
+}
 
 body {
   font-family: var(--font-body);
@@ -458,6 +463,14 @@ body {
   .header-actions { justify-self: end; }
 }
 
+@media (max-width: 1366px) {
+  .header { padding: 0 1.25rem; gap: 1rem; }
+}
+
+@media (max-width: 768px) {
+  .header { padding: 0 1rem; }
+}
+
 /* ════════════════════════════════════════════════════════════════
    CONTENIDO PRINCIPAL
    ════════════════════════════════════════════════════════════════ */
@@ -467,9 +480,23 @@ body {
   padding: 0 1.5rem 4rem;
 }
 
+@media (max-width: 1366px) {
+  #contenido {
+    margin-top: 1.5rem;
+    padding-bottom: 3rem;
+  }
+}
+
+@media (max-width: 1024px) {
+  #contenido {
+    margin-top: 1.25rem;
+    padding: 0 1.25rem 2.5rem;
+  }
+}
+
 /* ── Tipografía base ────────────────────────────────────────────── */
 h1 {
-  font-size: 1.75rem;
+  font-size: clamp(1.35rem, 2.5vw, 1.75rem);
   font-weight: 800;
   color: var(--azul-oscuro);
   letter-spacing: -.02em;
@@ -477,14 +504,14 @@ h1 {
 }
 
 h2 {
-  font-size: 1.25rem;
+  font-size: clamp(1.05rem, 1.8vw, 1.25rem);
   font-weight: 700;
   color: var(--texto-oscuro);
   margin-bottom: .75rem;
 }
 
 h3 {
-  font-size: 1.05rem;
+  font-size: clamp(0.9rem, 1.4vw, 1.05rem);
   font-weight: 700;
   color: var(--texto-oscuro);
   margin-bottom: .5rem;
