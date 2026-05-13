@@ -45,6 +45,7 @@ body {
   color: var(--texto-oscuro);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  zoom: 1;
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -383,10 +384,6 @@ body {
   border: 1px solid var(--gris-borde);
 }
 
-@media (max-width: 680px) {
-  .hero { grid-template-columns: 1fr; }
-}
-
 .hero-title {
   font-size: 1.6rem;
   font-weight: 800;
@@ -487,6 +484,25 @@ body {
 .btn-crear:hover   { background: var(--acento-hover); }
 .btn-crear:active  { transform: scale(.98); }
 .btn-crear:disabled { opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 680px) {
+  .hero {
+    grid-template-columns: 1fr;
+    padding: 1.5rem 1.25rem 1.5rem;
+  }
+  .form-crear {
+    min-width: 0;
+    width: 100%;
+  }
+  .form-row {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 400px) {
+  .main { padding-left: .75rem; padding-right: .75rem; }
+  .hero { padding: 1.25rem 1rem 1.25rem; }
+}
 
 /* ════════════════════════════════════════════════════════════════
    HISTORIAL
