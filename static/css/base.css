@@ -91,9 +91,9 @@
 /* ── Base ───────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
-  /* Tipografía fluida: 14px en móvil/laptop pequeño → 15px en laptop estándar
-     → 16px en pantallas grandes. Todas las unidades rem escalan en cascada. */
-  font-size: clamp(14px, 0.4167vw + 10.667px, 16px);
+  /* Tipografía fluida: 13px en móvil → 14.5px en laptop estándar.
+     Todas las unidades rem escalan en cascada. */
+  font-size: clamp(13px, 0.4vw + 10px, 14.5px);
 }
 
 body {

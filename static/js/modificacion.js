@@ -23,7 +23,6 @@ let _cancelarBatch    = false;
 let _pendientes             = {};   // { num_tienda: {num_tienda, nombre, latitud, longitud, peso_kg} }
 let _quitarResolve          = null;
 let _crearRuta              = { dia: "", vehiculo: "", sucursales: [], query: "" };
-let _historialAutoGuardado  = false;
 let _configDias             = {};          // config_dias from MongoDB (per-day schedule)
 
 const MSG_MOD = {
@@ -842,8 +841,6 @@ function cambiarVehiculo(ruta, nuevasPlacas) {
     }),
   }).catch(err => console.warn("[actualizar-vehiculo]", err));
 
-  const eraConfirmada = !!_confirmadas[ruta.id];
-  if (eraConfirmada) _guardarHistorialRuta(ruta);
   renderSelectorVehiculo(ruta);
   renderIndicadores(ruta);
   renderNavRutas();
@@ -1120,14 +1117,12 @@ function quitarParada(ruta, idx) {
       }).catch(err => console.warn("[quitar-sucursal]", err));
     }
 
-    const eraConfirmada = !!_confirmadas[ruta.id];
     paradas.splice(idx, 1);
     paradas.forEach((p, i) => { p.orden = i + 1; });
     _sincronizarParadas(ruta, paradas);
     ruta.num_sucursales = ruta.sucursales.length;
 
     delete _tiempos[ruta.id];
-    if (eraConfirmada) _guardarHistorialRuta(ruta);
     renderParadas(ruta);
     _actualizarIndicadoresPeso(ruta);
     renderPendientesLayer();
@@ -1575,10 +1570,8 @@ function agregarSucursal(ruta, suc) {
     descarga_min: Math.min(peso * MIN_DESCARGA_POR_KG, MAX_DESCARGA_MIN),
     orden:        maxOrden + 1,
   });
-  const eraConfirmada = !!_confirmadas[ruta.id];
   ruta.num_sucursales = ruta.sucursales.length;
   delete _tiempos[ruta.id];
-  if (eraConfirmada) _guardarHistorialRuta(ruta);
   renderParadas(ruta);
   _actualizarIndicadoresPeso(ruta);
   actualizarStatusOSRM();
@@ -1669,16 +1662,8 @@ function actualizarProgreso() {
 
   const btnSolo   = document.getElementById("btn-guardar-solo");
   const btnSeguir = document.getElementById("btn-guardar-seguir");
-  if (btnSolo)   btnSolo.disabled   = !todoConfirmado;
-  if (btnSeguir) btnSeguir.disabled = !todoConfirmado;
-
-  // Auto-guardar en historial al completar todas las rutas (una sola vez por sesión)
-  if (todoConfirmado && !_historialAutoGuardado) {
-    _historialAutoGuardado = true;
-    _autoGuardarHistorial();
-  }
-  // Resetear si se desconfirma alguna
-  if (!todoConfirmado) _historialAutoGuardado = false;
+  if (btnSolo)   btnSolo.disabled   = total === 0;
+  if (btnSeguir) btnSeguir.disabled = total === 0;
 }
 
 // ── Autorizar todas ────────────────────────────────────────────
@@ -1835,15 +1820,15 @@ async function guardarTodo(redirigir = false) {
     }
   } finally {
     setTimeout(() => {
-      const todosOk = Object.keys(_confirmadas).length >= _rutas.length && _rutas.length > 0;
+      const hayRutas = _rutas.length > 0;
       if (btnSolo) {
-        btnSolo.disabled = !todosOk;
+        btnSolo.disabled = !hayRutas;
         btnSolo.innerHTML = '<i data-lucide="save"></i> Guardar';
         btnSolo.style.background = ""; btnSolo.style.color = "";
         lucide.createIcons();
       }
       if (btnSeguir) {
-        btnSeguir.disabled = !todosOk;
+        btnSeguir.disabled = !hayRutas;
         btnSeguir.innerHTML = '<i data-lucide="save"></i> Guardar y seguir';
         btnSeguir.style.background = ""; btnSeguir.style.color = "";
         lucide.createIcons();
@@ -1917,63 +1902,6 @@ function renderSelectorDia(ruta) {
     mostrarToastMod(`Día cambiado a ${capitalizar(nuevoDia)}`, "ok");
     renderRutaActiva();
   });
-}
-
-// ═══════════════════════════════════════════════════════════════
-// AUTO-GUARDAR EN HISTORIAL (se dispara al confirmar todas las rutas)
-// ═══════════════════════════════════════════════════════════════
-
-function _guardarHistorialRuta(ruta) {
-  const filas = (ruta.sucursales || [])
-    .filter(s => s.num_tienda != null)
-    .map(s => ({
-      num_tienda:       s.num_tienda,
-      vehiculo:         ruta.vehiculo_abrev || "",
-      dia_semana:       (ruta.dia || "").toUpperCase(),
-      secuencia_visita: s.orden,
-      kg_entrega:       Math.round(_pesos[String(s.num_tienda)] || s.peso_kg || 0),
-    }));
-  if (!filas.length) return;
-  const nombre = `Logística ${new Date().toLocaleDateString("es-MX")}`;
-  fetch("/modificacion/guardar-historico", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ nombre, rutas: filas }),
-  })
-  .then(r => r.json())
-  .then(data => { if (data.status === "ok") mostrarToastMod("Historial actualizado", "ok"); })
-  .catch(err => console.warn("[historial-ruta]", err));
-}
-
-function _autoGuardarHistorial() {
-  const filas = [];
-  for (const ruta of _rutas) {
-    if (!_confirmadas[ruta.id]) continue;
-    for (const suc of (ruta.sucursales || [])) {
-      if (!suc.num_tienda) continue;
-      filas.push({
-        num_tienda:       suc.num_tienda,
-        vehiculo:         ruta.vehiculo_abrev || "",
-        dia_semana:       (ruta.dia || "").toUpperCase(),
-        secuencia_visita: suc.orden,
-        kg_entrega:       Math.round(suc.peso_kg || 0),
-      });
-    }
-  }
-  if (!filas.length) return;
-
-  const nombre = `Logística ${new Date().toLocaleDateString("es-MX")}`;
-  fetch("/modificacion/guardar-historico", {
-    method:  "POST",
-    headers: { "Content-Type": "application/json" },
-    body:    JSON.stringify({ nombre, rutas: filas }),
-  })
-  .then(r => r.json())
-  .then(data => {
-    if (data.status === "ok")
-      mostrarToastMod("Historial actualizado automáticamente", "ok");
-  })
-  .catch(err => console.warn("[auto-historial]", err));
 }
 
 // ── Toast de notificación ──────────────────────────────────────

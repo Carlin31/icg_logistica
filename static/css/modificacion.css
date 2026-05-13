@@ -18,7 +18,8 @@
 .mod-header-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .progreso-badge {
   background: var(--fondo-alt, #f1f5f9);
@@ -155,17 +156,17 @@
 .btn {
   border: none;
   border-radius: 6px;
-  padding: 8px 16px;
-  font-size: 0.82rem;
+  padding: 7px 13px;
+  font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
 }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-sm { padding: 5px 10px; font-size: 0.75rem; }
+.btn-sm { padding: 4px 9px; font-size: 0.72rem; }
 .btn-secondary { background: var(--gris-icono); color: var(--blanco); }
 .btn-secondary:hover:not(:disabled) { background: #4b5563; }
 .btn-danger { background: var(--rojo); color: var(--blanco); }
@@ -1157,3 +1158,61 @@
   transition: background 0.15s;
 }
 .btn-confirm-ok.btn-danger:hover { background: #b91c1c; }
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — Móvil (≤ 640px)
+══════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .mod-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  .mod-header-right {
+    justify-content: flex-start;
+    gap: 6px;
+  }
+  .progreso-badge {
+    width: 100%;
+    text-align: center;
+  }
+  .resumen-fuentes {
+    gap: 8px;
+  }
+  .nav-ruta-btn {
+    min-width: 90px;
+    padding: 8px 10px;
+  }
+  .nav-ruta-nombre { font-size: 0.72rem; }
+  .nav-ruta-dia, .nav-ruta-info { font-size: 0.62rem; }
+  .panel-izq {
+    max-height: none;
+  }
+  .panel-der {
+    min-height: 280px;
+  }
+  .mapa { min-height: 280px; }
+  .resumen-tiempos {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .panel-izq-header {
+    padding: 12px 14px 10px;
+  }
+  .acciones-ruta {
+    padding: 10px 12px;
+  }
+  .zona-vehiculo, .lista-sucursales {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .banner-osrm {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+}
+
+/* ── Tablet (641px–900px) ────────────────────────────────── */
+@media (min-width: 641px) and (max-width: 900px) {
+  .nav-ruta-btn { min-width: 105px; }
+  .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }
+}

@@ -218,15 +218,10 @@ async function cargarLogisticas() {
 
 // ── Filtrar ───────────────────────────────────────────────────────────────────
 function filtrar() {
-  const texto  = document.getElementById("buscador").value.toLowerCase().trim();
-  const estado = document.getElementById("filtro-estado").value;
-
-  const filtradas = _todasLogisticas.filter(l => {
-    const coincideTexto  = !texto  || l.nombre.toLowerCase().includes(texto);
-    const coincideEstado = !estado || l.estado === estado;
-    return coincideTexto && coincideEstado;
-  });
-
+  const texto = document.getElementById("buscador").value.toLowerCase().trim();
+  const filtradas = _todasLogisticas.filter(l =>
+    !texto || l.nombre.toLowerCase().includes(texto)
+  );
   renderizarGrid(filtradas);
 }
 
@@ -250,11 +245,7 @@ function renderizarGrid(lista) {
 }
 
 function renderCard(l) {
-  const esActiva   = l._id === _logisticaActivaId;
-  const completada = l.estado === "completada";
-  const estadoPill = completada
-    ? `<span class="estado-pill completada"><i data-lucide="check-circle-2"></i> Completada</span>`
-    : `<span class="estado-pill en_progreso"><i data-lucide="loader"></i> En progreso</span>`;
+  const esActiva = l._id === _logisticaActivaId;
 
   // ── Dots de progreso por sección ──────────────────────────────────────────
   const secciones = l.secciones_completadas || {};
@@ -269,13 +260,12 @@ function renderCard(l) {
     : "";
 
   return `
-    <div class="card ${completada ? "completada" : ""}" id="card-${l._id}" style="${borderColor}">
+    <div class="card" id="card-${l._id}" style="${borderColor}">
       <div class="card-top"></div>
       <div class="card-body">
         ${esActiva ? `<div class="card-activa-badge"><i data-lucide="play"></i> ACTIVA</div>` : ""}
         <div class="card-nombre">${esc(l.nombre)}</div>
         <div class="card-meta">
-          ${estadoPill}
           <span class="meta-pill"><i data-lucide="calendar"></i> ${formatearFecha(l.fecha_inicio)} — ${formatearFecha(l.fecha_fin)}</span>
           <span class="meta-pill"><i data-lucide="clock"></i> ${l.ultima_modificacion || l.creado_en || "—"}</span>
         </div>
