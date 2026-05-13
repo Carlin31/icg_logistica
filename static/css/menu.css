@@ -45,7 +45,7 @@ body {
   color: var(--texto-oscuro);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  zoom: 0.6;
+  zoom: 0.8;
 }
 
 /* ════════════════════════════════════════════════════════════════
