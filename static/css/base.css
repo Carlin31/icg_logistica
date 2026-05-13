@@ -1,0 +1,604 @@
+/* ================================================================
+   static/css/base.css
+   Estilos base del sistema — Reset, layout y header compartido
+   ================================================================ */
+
+/* ── Tokens de diseño compartidos ──────────────────────────────── */
+:root {
+  /* ── Paleta de marca (header y fondos profundos) ── */
+  --azul-oscuro:   #0f2744;
+  --azul-medio:    #1a4a8a;
+  --azul-claro:    #2d6cca;
+
+  /* ── Azul interactivo (botones, estados activos, foco) ── */
+  --azul:          #2563eb;
+  --azul-dark:     #1d4ed8;
+  --azul-bg:       #eff6ff;
+  --azul-borde:    #bfdbfe;
+
+  /* ── Acento ámbar ── */
+  --acento:        #f59e0b;
+  --acento-hover:  #d97706;
+  --amarillo:      #d97706;
+  --amarillo-bg:   #fef3c7;
+  --amarillo-borde:#fcd34d;
+
+  /* ── Estado positivo ── */
+  --verde:         #16a34a;
+  --verde-dark:    #15803d;
+  --verde-bg:      #dcfce7;
+  --verde-borde:   #86efac;
+
+  /* ── Estado negativo ── */
+  --rojo:          #dc2626;
+  --rojo-dark:     #b91c1c;
+  --rojo-bg:       #fef2f2;
+  --rojo-borde:    #fca5a5;
+
+  /* ── Superficies neutras ── */
+  --gris-bg:       #f1f5f9;
+  --gris-bg-alt:   #f8fafc;
+  --gris-borde:    #e2e8f0;
+  --gris-medio:    #cbd5e1;
+  --gris-icono:    #6b7280;
+  --gris-texto:    #64748b;
+  --texto-oscuro:  #1e293b;
+  --texto-claro:   #94a3b8;
+  --blanco:        #ffffff;
+
+  /* ── Alias para compatibilidad entre secciones ── */
+  --borde:         #e2e8f0;
+  --texto:         #1e293b;
+  --texto-sub:     #64748b;
+  --primario:      #2563eb;
+  --fondo-alt:     #f8fafc;
+
+  /* ── Sombras estandarizadas ── */
+  --sombra-sm:     0 1px 3px rgba(0,0,0,.08);
+  --sombra-md:     0 2px 10px rgba(0,0,0,.08);
+  --sombra-lg:     0 4px 16px rgba(0,0,0,.12);
+  --sombra-xl:     0 8px 32px rgba(0,0,0,.16);
+
+  /* ── Escala de border-radius ── */
+  --radio-xs:      4px;
+  --radio-btn:     6px;
+  --radio-sm:      8px;
+  --radio:         10px;
+  --radio-lg:      12px;
+  --radio-full:    999px;
+
+  /* ── Tipografía ── */
+  --font-body:     'Segoe UI', system-ui, -apple-system, sans-serif;
+  --text-xs:       0.72rem;
+  --text-sm:       0.82rem;
+  --text-base:     0.875rem;
+  --text-md:       0.95rem;
+  --text-lg:       1rem;
+
+  /* ── Header ── */
+  --header-h:      64px;
+  --header-bg:     var(--azul-oscuro);
+  --header-border: rgba(255,255,255,.08);
+}
+
+/* ── Reset ──────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* ── Base ───────────────────────────────────────────────────────── */
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-body);
+  background: var(--gris-bg);
+  color: var(--texto-oscuro);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   HEADER
+   Grid de 3 columnas: [Brand | Nav | Actions]
+   ════════════════════════════════════════════════════════════════ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 200;
+  background: var(--header-bg);
+  height: var(--header-h);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  padding: 0 1.75rem;
+  gap: 1.25rem;
+  border-bottom: 1px solid var(--header-border);
+  /* Sombra sutil para separar visualmente del contenido */
+  box-shadow: 0 1px 0 rgba(255,255,255,.04), 0 2px 12px rgba(0,0,0,.2);
+}
+
+/* ── Marca (izquierda) ──────────────────────────────────────────── */
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  text-decoration: none;
+  color: var(--blanco);
+  flex-shrink: 0;
+  transition: opacity .15s;
+}
+
+.header-brand:hover { opacity: .85; }
+
+.header-brand-icon {
+  width: 38px;
+  height: 38px;
+  background: var(--azul-claro);
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  /* Borde interior sutil */
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.2);
+}
+
+.header-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: .05rem;
+  line-height: 1;
+}
+
+.header-brand-name {
+  font-size: .92rem;
+  font-weight: 700;
+  color: var(--blanco);
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+
+.header-brand-sub {
+  font-size: .7rem;
+  color: rgba(255,255,255,.45);
+  letter-spacing: .03em;
+  white-space: nowrap;
+}
+
+/* ── Navegación central ─────────────────────────────────────────── */
+.header-nav {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: .15rem;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.header-nav::-webkit-scrollbar { display: none; }
+
+/* Enlace de navegación */
+.nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .4rem .7rem;
+  border-radius: var(--radio-sm);
+  color: rgba(255,255,255,.6);
+  text-decoration: none;
+  font-size: .8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  letter-spacing: .01em;
+  transition: background .15s, color .15s;
+  position: relative;
+}
+
+.nav-item:hover {
+  background: rgba(255,255,255,.08);
+  color: rgba(255,255,255,.9);
+}
+
+/* Estado activo — agrega class="active" desde el template hijo */
+.nav-item.active {
+  background: rgba(45,108,202,.28);
+  color: var(--blanco);
+}
+
+/* Línea indicadora bajo el ítem activo */
+.nav-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;             /* flush con el borde del header */
+  left: 20%;
+  right: 20%;
+  height: 2px;
+  background: var(--acento);
+  border-radius: 2px 2px 0 0;
+}
+
+/* ── Íconos del header (filtro para SVGs blancos) ──────────────── */
+/*
+  Las imágenes SVG de la carpeta static/img deben exportarse en
+  color negro (#000) o en currentColor. Este filtro las invierte
+  a blanco para el fondo oscuro del header.
+  Si prefieres SVGs en blanco directamente, retira este filtro.
+*/
+.hdr-icon {
+  filter: invert(1) brightness(1);
+  opacity: .75;
+  display: block;
+  flex-shrink: 0;
+}
+
+.nav-item:hover .hdr-icon,
+.nav-item.active .hdr-icon,
+.header-brand:hover .hdr-icon,
+.header-brand-icon .hdr-icon {
+  opacity: 1;
+}
+
+/* ── Acciones (derecha) ─────────────────────────────────────────── */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  flex-shrink: 0;
+}
+
+/* Botón "Menú" / hamburger */
+.btn-nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .45rem .9rem;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: var(--radio-sm);
+  color: rgba(255,255,255,.82);
+  font-family: var(--font-body);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .01em;
+  cursor: pointer;
+  transition: background .15s, border-color .15s, color .15s;
+}
+
+.btn-nav-toggle:hover {
+  background: rgba(255,255,255,.15);
+  border-color: rgba(255,255,255,.28);
+  color: var(--blanco);
+}
+
+.btn-nav-toggle .hdr-icon { opacity: .8; }
+.btn-nav-toggle:hover .hdr-icon { opacity: 1; }
+
+/* Oculta la etiqueta de texto en pantallas muy pequeñas */
+@media (max-width: 480px) {
+  .btn-nav-label { display: none; }
+  .btn-nav-toggle { padding: .45rem .55rem; }
+}
+
+/* ── Badge de perfil activo en el header ────────────────────────── */
+.perfil-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .45rem;
+  padding: .3rem .7rem;
+  background: rgba(45,108,202,.18);
+  border: 1px solid rgba(45,108,202,.35);
+  border-radius: 20px;
+  text-decoration: none;
+  transition: background .15s, border-color .15s;
+  max-width: 220px;
+  overflow: hidden;
+}
+.perfil-badge:hover {
+  background: rgba(45,108,202,.3);
+  border-color: rgba(45,108,202,.55);
+}
+.perfil-badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #4ade80;
+  box-shadow: 0 0 0 2px rgba(74,222,128,.25);
+  flex-shrink: 0;
+  animation: perfil-pulso 2.4s ease-in-out infinite;
+}
+@keyframes perfil-pulso {
+  0%, 100% { box-shadow: 0 0 0 2px rgba(74,222,128,.25); }
+  50%       { box-shadow: 0 0 0 4px rgba(74,222,128,.12); }
+}
+.perfil-badge-nombre {
+  font-size: .72rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.88);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: .01em;
+}
+@media (max-width: 640px) {
+  .perfil-badge { display: none; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PANEL LATERAL DE NAVEGACIÓN
+   Desliza desde la derecha al activar el toggle
+   ════════════════════════════════════════════════════════════════ */
+.nav-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 280px;
+  background: var(--azul-oscuro);
+  border-left: 1px solid rgba(255,255,255,.08);
+  z-index: 300;
+  transform: translateX(100%);
+  transition: transform .28s cubic-bezier(.4,0,.2,1);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-shadow: -8px 0 32px rgba(0,0,0,.35);
+}
+
+.nav-panel.open { transform: translateX(0); }
+
+.nav-panel-inner {
+  padding: calc(var(--header-h) + 1.5rem) 1.25rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: .2rem;
+}
+
+/* Bloque de perfil activo en el panel lateral */
+.nav-perfil-activo {
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  padding: .6rem .75rem;
+  margin-bottom: .5rem;
+  background: rgba(45,108,202,.15);
+  border: 1px solid rgba(45,108,202,.28);
+  border-radius: var(--radio-sm);
+}
+.nav-perfil-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4ade80;
+  flex-shrink: 0;
+  animation: perfil-pulso 2.4s ease-in-out infinite;
+}
+.nav-perfil-nombre {
+  font-size: .75rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.85);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nav-section-label {
+  font-size: .68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  color: rgba(255,255,255,.35);
+  padding: 0 .5rem .75rem;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  padding: .65rem .75rem;
+  border-radius: var(--radio-sm);
+  color: rgba(255,255,255,.65);
+  text-decoration: none;
+  font-size: .875rem;
+  font-weight: 500;
+  transition: background .15s, color .15s;
+}
+
+.nav-link:hover {
+  background: rgba(255,255,255,.08);
+  color: var(--blanco);
+}
+
+.nav-link.active {
+  background: rgba(45,108,202,.3);
+  color: var(--blanco);
+}
+
+.nav-link-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 7px;
+  background: rgba(255,255,255,.07);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background .15s;
+}
+
+.nav-link:hover .nav-link-icon,
+.nav-link.active .nav-link-icon {
+  background: rgba(45,108,202,.4);
+}
+
+/* Overlay que cierra el panel */
+.nav-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 250;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .28s;
+  backdrop-filter: blur(2px);
+}
+
+.nav-overlay.visible {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   RESPONSIVE — En pantallas medianas, colapsa la nav central
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .header-nav { display: none; }
+  .header { grid-template-columns: auto 1fr; }
+  .header-actions { justify-self: end; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   CONTENIDO PRINCIPAL
+   ════════════════════════════════════════════════════════════════ */
+#contenido {
+  max-width: 1200px;
+  margin: 2rem auto;
+  padding: 0 1.5rem 4rem;
+}
+
+/* ── Tipografía base ────────────────────────────────────────────── */
+h1 {
+  font-size: 1.75rem;
+  font-weight: 800;
+  color: var(--azul-oscuro);
+  letter-spacing: -.02em;
+  margin-bottom: 1rem;
+}
+
+h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--texto-oscuro);
+  margin-bottom: .75rem;
+}
+
+h3 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--texto-oscuro);
+  margin-bottom: .5rem;
+}
+
+p {
+  line-height: 1.6;
+  color: var(--gris-texto);
+}
+
+/* ════════════════════════════════════════════════════════════════
+   FULLSCREEN LOADER — compartido entre todas las secciones
+   Controlado por Loader.show() / Loader.hide() en base.js
+   ════════════════════════════════════════════════════════════════ */
+.fl-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: linear-gradient(155deg, var(--azul-oscuro) 0%, #0e2a50 55%, var(--azul-medio) 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.35rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .3s ease;
+}
+.fl-overlay.fl-visible { opacity: 1; pointer-events: all; }
+
+.fl-brand {
+  position: absolute;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: .55rem;
+  color: rgba(255,255,255,.38);
+  font-size: .78rem;
+  font-weight: 600;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.fl-spinner { position: relative; width: 96px; height: 96px; flex-shrink: 0; }
+
+.fl-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 3px solid rgba(255,255,255,.08);
+  border-top-color: var(--acento);
+  animation: fl-spin .9s linear infinite;
+}
+.fl-ring-outer {
+  position: absolute;
+  inset: -12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.04);
+  border-top-color: rgba(255,255,255,.18);
+  animation: fl-spin 2.2s linear infinite reverse;
+}
+.fl-core {
+  position: absolute;
+  inset: 20px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+@keyframes fl-spin { to { transform: rotate(360deg); } }
+
+.fl-dots { display: flex; gap: .5rem; }
+.fl-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.18);
+  animation: fl-pulse 1.6s ease-in-out infinite;
+}
+.fl-dot:nth-child(2) { animation-delay: .27s; }
+.fl-dot:nth-child(3) { animation-delay: .54s; }
+@keyframes fl-pulse {
+  0%, 100% { background: rgba(255,255,255,.18); transform: scale(1); }
+  50%       { background: var(--acento);        transform: scale(1.45); }
+}
+
+.fl-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: var(--blanco);
+  letter-spacing: -.02em;
+  text-align: center;
+  padding: 0 2rem;
+  line-height: 1.25;
+}
+.fl-msg {
+  font-size: .88rem;
+  color: rgba(255,255,255,.48);
+  text-align: center;
+  padding: 0 2.5rem;
+  min-height: 1.4em;
+  line-height: 1.5;
+  transition: opacity .35s ease;
+}
+.fl-msg.fl-fade { opacity: 0; }
+.fl-footer {
+  position: absolute;
+  bottom: 1.75rem;
+  font-size: .7rem;
+  color: rgba(255,255,255,.18);
+  letter-spacing: .05em;
+  text-transform: uppercase;
+}

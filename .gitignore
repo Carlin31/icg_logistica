@@ -1,0 +1,111 @@
+# ── Entorno virtual ───────────────────────────────────────────
+env/
+venv/
+.venv/
+ENV/
+env.bak/
+venv.bak/
+
+# ── Python bytecode y compilados ──────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/
+MANIFEST
+
+# ── Variables de entorno (NUNCA subir al repo) ────────────────
+.env
+.env.*
+!.env.example
+*.env
+
+# ── Flask ─────────────────────────────────────────────────────
+instance/
+.webassets-cache
+flask_session/
+
+# ── Logs ──────────────────────────────────────────────────────
+*.log
+logs/
+log/
+*.out
+
+# ── Archivos temporales y de datos locales ────────────────────
+static/temp/
+/tmp/
+temp/
+tmp/
+*.pdf
+*.xls
+*.xlsx
+*.csv
+*.json.bak
+
+# ── Archivos de base de datos locales ─────────────────────────
+*.db
+*.sqlite
+*.sqlite3
+
+# ── Editor y sistema operativo ────────────────────────────────
+.vscode/
+.idea/
+*.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+~$*
+$RECYCLE.BIN/
+
+# ── Testing y scripts locales ─────────────────────────────────
+testing/
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+*.cover
+.hypothesis/
+nosetests.xml
+test-results/
+
+# ── Type checkers y linters ───────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+
+# ── Jupyter Notebook ──────────────────────────────────────────
+.ipynb_checkpoints
+*.ipynb
+
+# ── Distribución / empaquetado ────────────────────────────────
+*.spec
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Claude Code ───────────────────────────────────────────────
+.claude/
+.agents/
+
+# ── Otros ─────────────────────────────────────────────────────
+*.bak
+*.swp
+*.swo
+*~

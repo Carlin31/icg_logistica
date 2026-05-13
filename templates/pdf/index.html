@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Generación en PDF{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-pdf.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/pdf.css') }}">
+{% endblock %}
+
+{% block nav_pdf %}active{% endblock %}
+
+{% block content %}
+<h1>Generación de Reporte PDF</h1>
+
+<div id="pdf-container">
+
+    <div id="logistica-info" class="info-card" style="display:none;">
+        <span class="label">Logística activa:</span>
+        <span id="logistica-nombre">—</span>
+        <span class="sep">|</span>
+        <span id="logistica-rango">—</span>
+    </div>
+
+    <div id="sin-logistica" class="alerta-warning" style="display:none;">
+        <i data-lucide="triangle-alert" class="pdf-icon" aria-hidden="true"></i>
+        No hay ninguna logística activa.
+        <a href="/">Selecciona una desde el menú principal</a> antes de continuar.
+    </div>
+
+    <div id="controles" style="display:none;">
+        <p class="descripcion">
+            El reporte incluye, por cada día de la semana, el detalle de peso
+            cargado por ruta y sucursal, junto con el porcentaje de utilización
+            de capacidad del vehículo.<br>
+            Los datos se toman del archivo confirmado en la etapa de
+            <strong>Modificación de Rutas</strong>.
+        </p>
+
+        <!-- Fila de acciones -->
+        <div class="pdf-acciones">
+            <button id="btn-generar" class="btn btn-primary">
+                <i data-lucide="file-text" class="pdf-icon" aria-hidden="true"></i>
+                <span>Generar PDF</span>
+            </button>
+            <button id="btn-descargar" class="btn btn-descargar" disabled>
+                <i data-lucide="download" class="pdf-icon" aria-hidden="true"></i>
+                <span>Descargar PDF</span>
+            </button>
+        </div>
+
+        <div id="mensaje-error" class="alerta-error" style="display:none;"></div>
+
+        <!-- Zona de previsualización (oculta hasta que se genere el PDF) -->
+        <div id="zona-preview" class="zona-preview" style="display:none;">
+            <div class="preview-toolbar">
+                <span class="preview-label">
+                    <i data-lucide="clipboard-list" class="pdf-icon" aria-hidden="true"></i>
+                    Vista previa del reporte
+                </span>
+                <span id="preview-nombre" class="preview-nombre"></span>
+            </div>
+            <iframe id="pdf-iframe" class="pdf-iframe" title="Vista previa del PDF"></iframe>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/pdf.js') }}"></script>
+<script>
+    lucide.createIcons();
+</script>
+{% endblock %}

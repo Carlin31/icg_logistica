@@ -1,0 +1,244 @@
+from bson import ObjectId
+from bson.errors import InvalidId
+from datetime import datetime
+from db import get_db
+
+# ── Helpers ────────────────────────────────────────────────
+ID_CAMPO = {
+    "sucursales":          "num_tienda",
+    "clientes_mayoristas": "id_cliente",
+    # vehículos y productos no tienen ID numérico propio
+}
+
+def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | None:
+    """
+    Devuelve un mensaje de error si el campo ID numérico ya existe en otra doc.
+    Retorna None si la validación pasa (incluye cuando el campo es nulo/vacío).
+    """
+    campo = ID_CAMPO.get(coleccion)
+    if not campo:
+        return None
+
+    valor = datos.get(campo)
+
+    # Permitir nulo, None o string vacío sin validar unicidad
+    if valor is None or valor == "" or valor != valor:  # NaN check
+        return None
+
+    # Solo validar si es un entero real
+    try:
+        valor_int = int(valor)
+    except (ValueError, TypeError):
+        return None
+
+    db = get_db()
+    query = {campo: valor_int}
+    if excluir_oid:
+        query["_id"] = {"$ne": excluir_oid}
+
+    if db[coleccion].find_one(query):
+        return f"Ya existe un registro con {campo} = {valor_int}"
+    return None
+
+def _serialize(doc: dict) -> dict:
+    """Convierte _id ObjectId → str. Opera sobre copia para no mutar el original."""
+    doc = dict(doc)
+    doc["_id"] = str(doc["_id"])
+    return doc
+
+def _parse_oid(doc_id: str) -> ObjectId | None:
+    """Devuelve ObjectId o None si el string es inválido."""
+    try:
+        return ObjectId(doc_id)
+    except (InvalidId, TypeError):
+        return None
+
+def _fecha_completa() -> str:
+    """Genera la estampa de tiempo actual para el sistema."""
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+# ── Config general ─────────────────────────────────────────
+def obtener_configuracion() -> dict:
+    db  = get_db()
+    cfg = db.configuracion.find_one({}) or {}
+    if "_id" in cfg:
+        cfg["_id"] = str(cfg["_id"])
+    return cfg
+
+def guardar_configuracion(datos: dict) -> dict:
+    db = get_db()
+    datos = dict(datos)
+    datos.pop("_id", None)
+    # También rastreamos la modificación en la configuración general
+    datos["ultima_modificacion"] = _fecha_completa()
+    db.configuracion.replace_one({}, datos, upsert=True)
+    return {"status": "ok", "mensaje": "Configuración guardada"}
+
+# ── Helpers de dominio ─────────────────────────────────────
+def _calcular_volumen_producto(datos: dict) -> float:
+    """Calcula volumen (m³) a partir de largo, ancho, alto en cm."""
+    try:
+        largo = float(datos.get('largo') or 0)
+        ancho = float(datos.get('ancho') or 0)
+        alto  = float(datos.get('alto')  or 0)
+        return round((largo * ancho * alto) / 1_000_000, 6)
+    except (TypeError, ValueError):
+        return 0.0
+
+def _calcular_volumen_vehiculo(datos: dict) -> float:
+    """Calcula volumen_m3 = largo_volumetria × ancho_volumetria × alto_volumetria (en metros)."""
+    try:
+        largo = float(datos.get('largo_volumetria') or 0)
+        ancho = float(datos.get('ancho_volumetria') or 0)
+        alto  = float(datos.get('alto_volumetria')  or 0)
+        return round(largo * ancho * alto, 6)
+    except (TypeError, ValueError):
+        return 0.0
+
+# ── Base CRUD ──────────────────────────────────────────────
+def _listar(coleccion: str, campo_busqueda, nombre: str = "", fecha: str = "", sort_field: str = "") -> list:
+    db    = get_db()
+    query: dict = {}
+
+    if nombre:
+        if isinstance(campo_busqueda, list):
+            query["$or"] = [{c: {"$regex": nombre, "$options": "i"}} for c in campo_busqueda]
+        else:
+            query[campo_busqueda] = {"$regex": nombre, "$options": "i"}
+
+    if fecha:
+        # Busca por la parte de la fecha en la cadena de 'ultima_modificacion'
+        query["ultima_modificacion"] = {"$regex": f"^{fecha}"}
+
+    cursor = db[coleccion].find(query)
+    if sort_field:
+        cursor = cursor.sort(sort_field, 1)
+
+    return [_serialize(doc) for doc in cursor]
+
+def _obtener(coleccion: str, doc_id: str) -> dict | None:
+    oid = _parse_oid(doc_id)
+    if oid is None:
+        return None
+    db  = get_db()
+    doc = db[coleccion].find_one({"_id": oid})
+    return _serialize(doc) if doc else None
+
+def _agregar(coleccion: str, datos: dict) -> dict:
+    db = get_db()
+    datos = dict(datos)
+    datos.pop("_id", None)
+
+    # Normalizar campo ID: eliminar si está vacío, o asegurar que sea entero
+    campo = ID_CAMPO.get(coleccion)
+    if campo:
+        valor = datos.get(campo)
+        if valor == "" or valor is None:
+            datos.pop(campo, None) # Removemos la llave para que no se guarde como null
+        else:
+            try:
+                datos[campo] = int(valor)
+            except ValueError:
+                pass
+
+    error = _verificar_id_unico(coleccion, datos)
+    if error:
+        return {"status": "error", "mensaje": error}
+
+    if coleccion == "productos":
+        datos['volumen'] = _calcular_volumen_producto(datos)
+    elif coleccion == "vehiculos":
+        datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
+
+    datos["ultima_modificacion"] = _fecha_completa()
+    result = db[coleccion].insert_one(datos)
+    return {"status": "ok", "id": str(result.inserted_id)}
+
+def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
+    oid = _parse_oid(doc_id)
+    if oid is None:
+        return {"status": "error", "mensaje": "ID inválido"}
+    db = get_db()
+    datos = dict(datos)
+    datos.pop("_id", None)
+
+    # Normalizar campo ID: eliminar si está vacío, o asegurar que sea entero
+    campo = ID_CAMPO.get(coleccion)
+    if campo:
+        valor = datos.get(campo)
+        if valor == "" or valor is None:
+            datos.pop(campo, None) # Removemos la llave para que no se guarde como null
+        else:
+            try:
+                datos[campo] = int(valor)
+            except ValueError:
+                pass
+
+    error = _verificar_id_unico(coleccion, datos, excluir_oid=oid)
+    if error:
+        return {"status": "error", "mensaje": error}
+
+    datos["ultima_modificacion"] = _fecha_completa()
+    # Si la llave se eliminó con pop(), no se sobrescribirá si ya existía. 
+    # Para limpiar un ID existente a vacío, usamos $unset
+    if coleccion == "productos":
+        datos['volumen'] = _calcular_volumen_producto(datos)
+    elif coleccion == "vehiculos":
+        datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
+
+    update_query = {"$set": datos}
+    if campo and campo not in datos:
+        update_query["$unset"] = {campo: ""}
+
+    result = db[coleccion].update_one({"_id": oid}, update_query)
+    
+    if result.matched_count == 0:
+        return {"status": "error", "mensaje": "Documento no encontrado"}
+    return {"status": "ok"}
+
+def _eliminar(coleccion: str, doc_id: str) -> dict:
+    oid = _parse_oid(doc_id)
+    if oid is None:
+        return {"status": "error", "mensaje": "ID inválido"}
+    db     = get_db()
+    result = db[coleccion].delete_one({"_id": oid})
+    if result.deleted_count == 0:
+        return {"status": "error", "mensaje": "Documento no encontrado"}
+    return {"status": "ok"}
+
+# ── Funciones de Dominio (Productos, Sucursales, Vehículos) ──
+def listar_productos(nombre: str = "", fecha: str = ""): return _listar("productos", ["descripcion", "marca"], nombre, fecha, "marca")
+def obtener_producto(producto_id: str): return _obtener("productos", producto_id)
+def agregar_producto(datos: dict): return _agregar("productos", datos)
+def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)
+def eliminar_producto(producto_id: str): return _eliminar("productos", producto_id)
+
+def listar_sucursales(nombre: str = "", fecha: str = ""): return _listar("sucursales", ["nombre_base", "nombre_icg-proalmex", "nombre_bimbo"], nombre, fecha, "num_tienda")
+def obtener_sucursal(sucursal_id: str): return _obtener("sucursales", sucursal_id)
+def agregar_sucursal(datos: dict): return _agregar("sucursales", datos)
+def editar_sucursal(sucursal_id: str, datos: dict): return _editar("sucursales", sucursal_id, datos)
+def eliminar_sucursal(sucursal_id: str): return _eliminar("sucursales", sucursal_id)
+
+def listar_vehiculos(nombre: str = "", fecha: str = ""): return _listar("vehiculos", ["placas", "abreviatura", "descripcion"], nombre, fecha, "placas")
+
+def toggle_activo_vehiculo(vehiculo_id: str) -> dict:
+    oid = _parse_oid(vehiculo_id)
+    if oid is None:
+        return {"status": "error", "mensaje": "ID inválido"}
+    db  = get_db()
+    doc = db.vehiculos.find_one({"_id": oid}, {"activo": 1})
+    if doc is None:
+        return {"status": "error", "mensaje": "Vehículo no encontrado"}
+    nuevo = not doc.get("activo", True)
+    db.vehiculos.update_one({"_id": oid}, {"$set": {"activo": nuevo, "ultima_modificacion": _fecha_completa()}})
+    return {"status": "ok", "activo": nuevo}
+def obtener_vehiculo(vehiculo_id: str): return _obtener("vehiculos", vehiculo_id)
+def agregar_vehiculo(datos: dict): return _agregar("vehiculos", datos)
+def editar_vehiculo(vehiculo_id: str, datos: dict): return _editar("vehiculos", vehiculo_id, datos)
+def eliminar_vehiculo(vehiculo_id: str): return _eliminar("vehiculos", vehiculo_id)
+
+def listar_clientes_mayoristas(nombre: str = "", fecha: str = ""): return _listar("clientes_mayoristas", ["nombre", "poblacion"], nombre, fecha, "id_cliente")
+def obtener_cliente_mayorista(cliente_id: str): return _obtener("clientes_mayoristas", cliente_id)
+def agregar_cliente_mayorista(datos: dict): return _agregar("clientes_mayoristas", datos)
+def editar_cliente_mayorista(cliente_id: str, datos: dict): return _editar("clientes_mayoristas", cliente_id, datos)
+def eliminar_cliente_mayorista(cliente_id: str): return _eliminar("clientes_mayoristas", cliente_id)

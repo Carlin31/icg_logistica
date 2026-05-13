@@ -1,0 +1,380 @@
+{% extends "base.html" %}
+
+{% block title %}Extracción de Datos — Logística{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-extraccion.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/extraccion.css') }}">
+{% endblock %}
+
+{% block nav_ext %}active{% endblock %}
+
+{% block content %}
+<h1>Extracción de datos</h1>
+
+<div class="ext-page-header">
+  <div class="ext-page-header__text">
+
+    <p class="ext-subtitle">Carga los archivos Excel de cada proveedor, revisa los datos por perfil y confirma antes de continuar.</p>
+  </div>
+</div>
+
+<div id="aviso-sin-logistica" class="ext-aviso-error" style="display:none;"></div>
+
+<div id="extraccion-container">
+
+  <!-- ══════════════════════════════════════════════
+       BARRA DE TABS PRINCIPAL
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-tabs-bar" role="tablist">
+
+    <button class="ext-tab active" data-tab="consolidado" role="tab" aria-selected="true">
+      <i data-lucide="layout-grid" class="ext-tab__icon"></i>
+      Consolidado
+    </button>
+
+    <!-- ── Sección: Tiendas Lores ─────────────────── -->
+    <span class="ext-tab-section">Tiendas Lores</span>
+
+    <button class="ext-tab" data-tab="icg" role="tab" aria-selected="false">
+      <span class="ext-tab__dot" id="dot-icg"></span>
+      ICG
+    </button>
+
+    <button class="ext-tab" data-tab="proalmex" role="tab" aria-selected="false">
+      <span class="ext-tab__dot" id="dot-proalmex"></span>
+      Proalmex
+    </button>
+
+    <button class="ext-tab" data-tab="bimbo" role="tab" aria-selected="false">
+      <span class="ext-tab__dot" id="dot-bimbo"></span>
+      Bimbo
+    </button>
+
+    <!-- ── Sección: Clientes Mayoristas ──────────── -->
+    <span class="ext-tab-section">Clientes Mayoristas</span>
+
+    <button class="ext-tab" data-tab="mayoristas" role="tab" aria-selected="false">
+      <span class="ext-tab__dot" id="dot-mayoristas"></span>
+      Mayoristas
+    </button>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       PANEL: CONSOLIDADO
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-panel active" id="panel-consolidado" role="tabpanel">
+
+    <!-- Estado vacío -->
+    <div class="ext-empty" id="empty-consolidado">
+      <div class="ext-empty__icon"><i data-lucide="package"></i></div>
+      <p class="ext-empty__title">Aún no hay datos cargados</p>
+      <p class="ext-empty__hint">
+        Selecciona un perfil (ICG, Proalmex, Bimbo) y sube el archivo Excel correspondiente.
+      </p>
+    </div>
+
+    <!-- Contenido consolidado con dos secciones -->
+    <div id="consolidado-content" style="display:none;">
+
+      <!-- Sub-tabs: Peso / Volumen -->
+      <div class="ext-subtabs-bar">
+        <button class="ext-subtab active" data-subtab="peso" onclick="cambiarSubtab('peso')">
+          <i data-lucide="scale" class="ext-subtab__icon"></i>
+          Consolidado por Peso
+        </button>
+        <button class="ext-subtab" data-subtab="volumen" onclick="cambiarSubtab('volumen')">
+          <i data-lucide="box" class="ext-subtab__icon"></i>
+          Consolidado por Volumen
+        </button>
+      </div>
+
+      <!-- ── Sección Peso ────────────────────────────────── -->
+      <div class="ext-subpanel active" id="subpanel-peso">
+        <p class="ext-tabla-hint">
+          Peso total por sucursal y proveedor (kg). Haz clic en los encabezados para ordenar.
+        </p>
+        <div id="tabla-wrap-consolidado">
+          <div class="table-responsive">
+            <table class="ext-tabla" id="tabla-consolidado">
+              <thead>
+                <tr>
+                  <th class="sortable" data-col="0">ID Suc. <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="1">Sucursal <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="2">ICG (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="3">Proalmex (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="4">Bimbo (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable col-total" data-col="5">Total (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                </tr>
+              </thead>
+              <tbody id="body-consolidado"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Sección Volumen ─────────────────────────────── -->
+      <div class="ext-subpanel" id="subpanel-volumen">
+        <p class="ext-tabla-hint">
+          Volumen total por sucursal y proveedor (m³). Haz clic en los encabezados para ordenar.
+        </p>
+        <div id="empty-volumen" class="ext-vol-empty" style="display:none;">
+          <p>No hay datos de volumen disponibles. Verifica que los productos tengan el campo <strong>volumen (m³)</strong> configurado en el catálogo.</p>
+        </div>
+        <div id="tabla-wrap-volumen">
+          <div class="table-responsive">
+            <table class="ext-tabla" id="tabla-volumen">
+              <thead>
+                <tr>
+                  <th class="sortable" data-col="0">ID Suc. <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="1">Sucursal <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="2">ICG (m³) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="3">Proalmex (m³) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable" data-col="4">Bimbo (m³) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                  <th class="sortable col-total" data-col="5">Total (m³) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+                </tr>
+              </thead>
+              <tbody id="body-volumen"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /#consolidado-content -->
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       PANEL: ICG
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-panel" id="panel-icg" role="tabpanel">
+
+    <div class="ext-upload-zone" id="upload-icg">
+      <div class="ext-upload-zone__icon"><i data-lucide="folder-open"></i></div>
+      <p class="ext-upload-zone__label">Arrastra aquí tu archivo o</p>
+      <label class="ext-btn-upload" for="file_icg">Seleccionar archivo ICG</label>
+      <input type="file" id="file_icg" accept=".xlsx,.xls" style="display:none;">
+      <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+    </div>
+
+    <div class="ext-perfil-loaded" id="loaded-icg" style="display:none;">
+      <div class="ext-perfil-header">
+        <div class="ext-perfil-info">
+          <span class="ext-badge ext-badge--icg">ICG</span>
+          <span class="ext-perfil-filename" id="filename-icg"></span>
+          <span class="ext-perfil-status" id="status-icg"></span>
+        </div>
+        <div class="ext-perfil-actions">
+          <button class="ext-btn-action ext-btn-action--reload" onclick="recargarPerfil('icg')">
+            <i data-lucide="rotate-ccw"></i> Recargar archivo
+          </button>
+          <button class="ext-btn-action ext-btn-action--delete" onclick="eliminarPerfil('icg')">
+            <i data-lucide="trash-2"></i> Eliminar datos
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="ext-tabla ext-tabla--perfil" id="tabla-icg">
+          <thead>
+            <tr>
+              <th>ID Sucursal</th>
+              <th>Sucursal</th>
+              <th>Peso (kg)</th>
+              <th>Volumen (m³)</th>
+            </tr>
+          </thead>
+          <tbody id="body-icg"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       PANEL: PROALMEX
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-panel" id="panel-proalmex" role="tabpanel">
+
+    <div class="ext-upload-zone" id="upload-proalmex">
+      <div class="ext-upload-zone__icon"><i data-lucide="folder-open"></i></div>
+      <p class="ext-upload-zone__label">Arrastra aquí tu archivo o</p>
+      <label class="ext-btn-upload" for="file_proalmex">Seleccionar archivo Proalmex</label>
+      <input type="file" id="file_proalmex" accept=".xlsx,.xls" style="display:none;">
+      <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+    </div>
+
+    <div class="ext-perfil-loaded" id="loaded-proalmex" style="display:none;">
+      <div class="ext-perfil-header">
+        <div class="ext-perfil-info">
+          <span class="ext-badge ext-badge--proalmex">Proalmex</span>
+          <span class="ext-perfil-filename" id="filename-proalmex"></span>
+          <span class="ext-perfil-status" id="status-proalmex"></span>
+        </div>
+        <div class="ext-perfil-actions">
+          <button class="ext-btn-action ext-btn-action--reload" onclick="recargarPerfil('proalmex')">
+            <i data-lucide="rotate-ccw"></i> Recargar archivo
+          </button>
+          <button class="ext-btn-action ext-btn-action--delete" onclick="eliminarPerfil('proalmex')">
+            <i data-lucide="trash-2"></i> Eliminar datos
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="ext-tabla ext-tabla--perfil" id="tabla-proalmex">
+          <thead>
+            <tr>
+              <th>ID Sucursal</th>
+              <th>Sucursal</th>
+              <th>Peso (kg)</th>
+              <th>Volumen (m³)</th>
+            </tr>
+          </thead>
+          <tbody id="body-proalmex"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       PANEL: BIMBO
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-panel" id="panel-bimbo" role="tabpanel">
+
+    <div class="ext-upload-zone" id="upload-bimbo">
+      <div class="ext-upload-zone__icon"><i data-lucide="folder-open"></i></div>
+      <p class="ext-upload-zone__label">Arrastra aquí tu archivo o</p>
+      <label class="ext-btn-upload" for="file_bimbo">Seleccionar archivo Bimbo</label>
+      <input type="file" id="file_bimbo" accept=".xlsx,.xls" style="display:none;">
+      <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+    </div>
+
+    <div class="ext-perfil-loaded" id="loaded-bimbo" style="display:none;">
+      <div class="ext-perfil-header">
+        <div class="ext-perfil-info">
+          <span class="ext-badge ext-badge--bimbo">Bimbo</span>
+          <span class="ext-perfil-filename" id="filename-bimbo"></span>
+          <span class="ext-perfil-status" id="status-bimbo"></span>
+        </div>
+        <div class="ext-perfil-actions">
+          <button class="ext-btn-action ext-btn-action--reload" onclick="recargarPerfil('bimbo')">
+            <i data-lucide="rotate-ccw"></i> Recargar archivo
+          </button>
+          <button class="ext-btn-action ext-btn-action--delete" onclick="eliminarPerfil('bimbo')">
+            <i data-lucide="trash-2"></i> Eliminar datos
+          </button>
+        </div>
+      </div>
+      <div class="table-responsive">
+        <table class="ext-tabla ext-tabla--perfil" id="tabla-bimbo">
+          <thead>
+            <tr>
+              <th>ID Sucursal</th>
+              <th>Sucursal</th>
+              <th>Peso (kg)</th>
+              <th>Volumen (m³)</th>
+            </tr>
+          </thead>
+          <tbody id="body-bimbo"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       PANEL: CLIENTES MAYORISTAS
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-panel" id="panel-mayoristas" role="tabpanel">
+
+    <!-- Zona de carga -->
+    <div class="ext-upload-zone" id="upload-mayoristas">
+      <div class="ext-upload-zone__icon"><i data-lucide="folder-open"></i></div>
+      <p class="ext-upload-zone__label">Arrastra aquí tu archivo o</p>
+      <label class="ext-btn-upload ext-btn-upload--mayoristas" for="file_mayoristas">
+        Seleccionar archivo Mayoristas
+      </label>
+      <input type="file" id="file_mayoristas" accept=".xlsx,.xls" style="display:none;">
+      <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+      <p class="ext-upload-zone__hint">
+        El archivo debe contener las columnas <strong>Cliente</strong> y <strong>Peso total</strong>.
+      </p>
+    </div>
+
+    <!-- Tabla de resultado -->
+    <div class="ext-perfil-loaded" id="loaded-mayoristas" style="display:none;">
+      <div class="ext-perfil-header">
+        <div class="ext-perfil-info">
+          <span class="ext-badge ext-badge--mayoristas">Mayoristas</span>
+          <span class="ext-perfil-filename" id="filename-mayoristas"></span>
+          <span class="ext-perfil-status" id="status-mayoristas"></span>
+        </div>
+        <div class="ext-perfil-actions">
+          <button class="ext-btn-action ext-btn-action--reload" onclick="recargarMayoristas()">
+            <i data-lucide="rotate-ccw"></i> Recargar archivo
+          </button>
+          <button class="ext-btn-action ext-btn-action--delete" onclick="eliminarMayoristas()">
+            <i data-lucide="trash-2"></i> Eliminar datos
+          </button>
+        </div>
+      </div>
+
+      <p class="ext-tabla-hint">
+        Peso total consolidado por cliente mayorista. Haz clic en los encabezados para ordenar.
+      </p>
+
+      <div class="table-responsive">
+        <table class="ext-tabla ext-tabla--mayoristas" id="tabla-mayoristas">
+          <thead>
+            <tr>
+              <th class="sortable" data-col="0">Código <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable" data-col="1">Cliente <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable col-total" data-col="2">Peso total (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+            </tr>
+          </thead>
+          <tbody id="body-mayoristas"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       SPINNER DE CARGA
+  ═══════════════════════════════════════════════ -->
+  <div id="loading-spinner" style="display:none;">
+    <div class="ext-spinner"></div>
+    <p>Procesando archivo, por favor espera…</p>
+  </div>
+
+  <!-- ══════════════════════════════════════════════
+       BARRA DE ACCIONES
+  ═══════════════════════════════════════════════ -->
+  <div class="ext-action-bar" id="action-bar" style="display:none;">
+
+    <div class="ext-action-bar__left">
+      <span id="unsaved-indicator" class="ext-unsaved-badge" style="display:none;">
+        <i data-lucide="circle-dot"></i> Cambios sin guardar
+      </span>
+    </div>
+
+    <div class="ext-action-bar__right">
+      <button id="btn-guardar" class="ext-btn-secondary" onclick="guardarDatos()">
+        <i data-lucide="save"></i> Guardar datos
+      </button>
+      <button id="btn-confirmar" class="ext-btn-confirmar" onclick="confirmarSeleccion()">
+        Confirmar selección <i data-lucide="arrow-right"></i>
+      </button>
+    </div>
+
+  </div>
+
+</div><!-- /#extraccion-container -->
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/extraccion.js') }}"></script>
+{% endblock %}

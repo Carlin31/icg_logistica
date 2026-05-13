@@ -1,0 +1,208 @@
+/* ===== SECCIÓN 7 — Generación de Reporte PDF ===== */
+
+#pdf-container {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 1.5rem 0;
+}
+
+/* ── Tarjeta de logística activa ── */
+.info-card {
+    background: var(--azul-bg);
+    border-left: 4px solid var(--azul);
+    border-radius: var(--radio-btn);
+    padding: 0.7rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: var(--text-base);
+    color: var(--azul-dark);
+}
+
+.info-card .label {
+    font-weight: 700;
+    margin-right: 0.4rem;
+}
+
+.info-card .sep {
+    margin: 0 0.6rem;
+    color: var(--gris-medio);
+}
+
+/* ── Alertas ── */
+.alerta-warning {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--amarillo-bg);
+    border-left: 4px solid var(--acento);
+    border-radius: var(--radio-btn);
+    padding: 0.8rem 1.1rem;
+    margin-bottom: 1.2rem;
+    font-size: var(--text-base);
+    color: #7a5700;
+}
+
+.alerta-warning a {
+    color: var(--azul);
+    font-weight: 600;
+}
+
+.alerta-error {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--rojo-bg);
+    border-left: 4px solid var(--rojo);
+    border-radius: var(--radio-btn);
+    padding: 0.7rem 1rem;
+    margin-top: 1rem;
+    font-size: var(--text-sm);
+    color: #922b21;
+}
+
+.alerta-ok {
+    background: var(--verde-bg);
+    border-left: 4px solid var(--verde);
+    border-radius: var(--radio-btn);
+    padding: 0.7rem 1rem;
+    margin-top: 1rem;
+    font-size: var(--text-sm);
+    color: #1e8449;
+}
+
+/* ── Descripción ── */
+.descripcion {
+    font-size: var(--text-base);
+    color: var(--gris-texto);
+    line-height: 1.6;
+    margin-bottom: 1.3rem;
+}
+
+/* ── Botones ── */
+.btn-primary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--azul);
+    color: var(--blanco);
+    border: none;
+    border-radius: var(--radio-btn);
+    padding: 0.65rem 1.5rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: var(--azul-dark);
+}
+
+.btn-primary:disabled {
+    opacity: .55;
+    cursor: not-allowed;
+}
+
+/* ── Botón "Descargar PDF" ── */
+.btn-descargar {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--blanco);
+    color: var(--azul);
+    border: 1.5px solid var(--azul);
+    border-radius: var(--radio-btn);
+    padding: 0.65rem 1.4rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+}
+.btn-descargar:hover:not(:disabled) {
+    background: var(--azul);
+    color: var(--blanco);
+}
+.btn-descargar:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+/* ── Fila de acciones ── */
+.pdf-acciones {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+}
+
+/* ── Spinner ── */
+.spinner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 0.9rem;
+    font-size: var(--text-sm);
+    color: var(--azul);
+    font-style: italic;
+}
+.spinner-icon {
+    width: 18px;
+    height: 18px;
+    border: 2px solid var(--azul-borde);
+    border-top-color: var(--azul);
+    border-radius: 50%;
+    animation: spin-pdf .7s linear infinite;
+    flex-shrink: 0;
+}
+@keyframes spin-pdf { to { transform: rotate(360deg); } }
+
+/* ── Zona de previsualización ── */
+.zona-preview {
+    margin-top: 1.5rem;
+    border: 1.5px solid var(--gris-borde);
+    border-radius: var(--radio-sm);
+    overflow: hidden;
+    box-shadow: var(--sombra-md);
+}
+
+.preview-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    background: var(--azul-bg);
+    border-bottom: 1px solid var(--azul-borde);
+    gap: 10px;
+    flex-wrap: wrap;
+}
+.preview-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--azul-dark);
+}
+
+.pdf-icon {
+    width: 16px;
+    height: 16px;
+    stroke-width: 2;
+    flex-shrink: 0;
+}
+.preview-nombre {
+    font-size: var(--text-sm);
+    color: var(--gris-texto);
+    font-style: italic;
+    word-break: break-all;
+}
+
+/* ── iframe de previsualización ── */
+.pdf-iframe {
+    display: block;
+    width: 100%;
+    height: 72vh;
+    min-height: 520px;
+    border: none;
+    background: var(--gris-bg-alt);
+}

@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+
+{% block title %}Asignación de Rutas{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-asignacion.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/asignacion.css') }}">
+{% endblock %}
+
+{% block nav_asig %}active{% endblock %}
+
+{% block content %}
+<h1> Asignación de Rutas</h1>
+<div id="asignacion-container">
+
+  <!-- ══════════════════════════════════════════════════════════
+       PANEL VRP HÍBRIDO
+  ═══════════════════════════════════════════════════════════ -->
+  <div class="vrp-panel" id="vrp-panel">
+
+    <div class="vrp-panel__header">
+      <div>
+        <h2 class="vrp-panel__title">
+          <i data-lucide="zap"></i> Generación VRP Híbrida
+        </h2>
+        <p class="vrp-panel__sub">
+          Combina el historial de rutas confirmadas con el modelo VRP para generar la distribución óptima.
+        </p>
+      </div>
+    </div>
+
+    <!-- Estado del sistema -->
+    <div class="vrp-status-cards">
+
+      <div class="vrp-status-card" id="vrp-card-hist">
+        <div class="vrp-status-card__icon"><i data-lucide="folder-open"></i></div>
+        <div class="vrp-status-card__body">
+          <div class="vrp-status-card__title">Historial base</div>
+          <div class="vrp-status-card__val" id="vrp-hist-val">Verificando…</div>
+          <div class="vrp-status-card__sub" id="vrp-hist-sub">—</div>
+        </div>
+        <a href="/configuracion#rutas-historicas" class="vrp-status-card__link" id="vrp-hist-link" style="display:none">
+          <i data-lucide="settings"></i> Configurar
+        </a>
+      </div>
+
+      <div class="vrp-status-card" id="vrp-card-ped">
+        <div class="vrp-status-card__icon"><i data-lucide="package"></i></div>
+        <div class="vrp-status-card__body">
+          <div class="vrp-status-card__title">Pedidos actuales</div>
+          <div class="vrp-status-card__val" id="vrp-ped-val">Verificando…</div>
+          <div class="vrp-status-card__sub" id="vrp-ped-sub">—</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Alerta: sin historial -->
+    <div id="vrp-alert-hist" class="vrp-alert vrp-alert--warn" style="display:none">
+      <i data-lucide="alert-triangle"></i>
+      <span>No hay historial cargado. Ve a <strong>Configuración → Rutas Históricas</strong> y carga al menos un CSV antes de generar.</span>
+    </div>
+
+    <!-- Alerta: sin extracción -->
+    <div id="vrp-alert-ped" class="vrp-alert vrp-alert--warn" style="display:none">
+      <i data-lucide="alert-triangle"></i>
+      <span>No hay datos de extracción. Completa la sección <strong>Extracción</strong> primero.</span>
+    </div>
+
+    <!-- Botón de generación -->
+    <div class="vrp-gen-row">
+      <button class="vrp-btn-generar" id="btn-generar-vrp" disabled>
+        <i data-lucide="zap"></i> Generar Rutas VRP
+      </button>
+      <span id="vrp-gen-hint" class="vrp-gen-hint">Cargando estado del sistema…</span>
+    </div>
+
+    <!-- Spinner de generación -->
+    <div id="vrp-spinner" class="vrp-spinner" style="display:none">
+      <div class="spinner"></div>
+      <span>Generando rutas con VRP híbrido…</span>
+    </div>
+
+    <!-- Reporte VRP (aparece tras generar) -->
+    <div id="vrp-reporte" style="display:none">
+
+      <div class="vrp-reporte__header">
+        <h3>Reporte de Generación VRP</h3>
+        <span id="vrp-reporte-ts" class="vrp-reporte__ts"></span>
+      </div>
+
+      <!-- Resumen por estado -->
+      <div class="vrp-estado-cards" id="vrp-estado-cards"></div>
+
+      <!-- Tabla de rutas -->
+      <div class="vrp-tabla-wrap">
+        <table class="vrp-tabla">
+          <thead>
+            <tr>
+              <th>Vehículo</th>
+              <th>Día</th>
+              <th>Sucursales</th>
+              <th>kg actual</th>
+              <th>kg histórico</th>
+              <th>Desviación</th>
+              <th>Uso cap.</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="vrp-tabla-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Acciones -->
+      <div class="vrp-acciones">
+        <button class="btn btn-success btn-icon-label" id="btn-ir-modificacion">
+          <i data-lucide="edit-3"></i> Revisar y modificar rutas
+          <i data-lucide="arrow-right"></i>
+        </button>
+        <button class="btn btn-secondary btn-icon-label" id="btn-regenerar-vrp">
+          <i data-lucide="refresh-cw"></i> Regenerar
+        </button>
+      </div>
+
+    </div><!-- /#vrp-reporte -->
+
+  </div><!-- /.vrp-panel -->
+
+  <!-- ══════════════════════════════════════════════════════════
+       ZONA DE ASIGNACIÓN (se muestra tras generar)
+  ═══════════════════════════════════════════════════════════ -->
+  <div id="zona-asignacion" style="display:none;">
+
+    <!-- Toolbar -->
+    <div class="asig-toolbar">
+      <div class="asig-toolbar-left">
+        <div class="dia-selector" id="dia-selector"></div>
+      </div>
+      <div class="asig-toolbar-right">
+        <div class="asig-toolbar-group asig-toolbar-group--nav">
+          <button id="btn-volver-sel" class="btn btn-secondary btn-icon-label">
+            <i data-lucide="arrow-left"></i> Reconfigurar
+          </button>
+          <button id="btn-config-dias" class="btn btn-secondary btn-icon-label">
+            <i data-lucide="settings"></i> Días
+          </button>
+        </div>
+        <div class="asig-toolbar-separator"></div>
+        <div class="asig-toolbar-group asig-toolbar-group--opt">
+          <button id="btn-auto-asignar" class="btn btn-auto-asignar btn-icon-label" title="Asigna automáticamente el vehículo más rentable por capacidad e historial">
+            <i data-lucide="zap"></i> Auto-asignar vehículos
+          </button>
+          <button id="btn-config-reacomo" class="btn btn-secondary btn-icon-label" title="Ejecutar reacomodamiento">
+            <i data-lucide="truck"></i> Reacomodamiento
+          </button>
+        </div>
+        <div class="asig-toolbar-separator"></div>
+        <div class="asig-toolbar-group asig-toolbar-group--save">
+          <button id="btn-solo-guardar" class="btn btn-guardar-secundario btn-icon-label">
+            <i data-lucide="save"></i> Solo guardar
+          </button>
+          <button id="btn-guardar-continuar" class="btn btn-success btn-icon-label">
+            <i data-lucide="save"></i> Guardar y continuar <i data-lucide="arrow-right"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Indicadores del día -->
+    <div class="indicadores-dia" id="indicadores-dia">
+      <div class="indicador-card">
+        <div class="label">Rutas del día</div>
+        <div class="valor" id="ind-rutas">—</div>
+        <div class="sub">programadas</div>
+      </div>
+      <div class="indicador-card">
+        <div class="label">Con vehículo</div>
+        <div class="valor" id="ind-asignadas">—</div>
+        <div class="sub">vehículo asignado</div>
+      </div>
+      <div class="indicador-card">
+        <div class="label">Peso total</div>
+        <div class="valor" id="ind-peso">—</div>
+        <div class="sub">del día (toneladas)</div>
+      </div>
+      <div class="indicador-card">
+        <div class="label">Volumen total</div>
+        <div class="valor" id="ind-volumen">—</div>
+        <div class="sub">del día (m³)</div>
+      </div>
+      <div class="indicador-card">
+        <div class="label">Hora salida</div>
+        <div class="valor" id="ind-salida">—</div>
+        <div class="sub" id="ind-limite">límite: —</div>
+      </div>
+    </div>
+
+    <!-- Banner OSRM -->
+    <div id="banner-tiempos" style="
+        display:none; align-items:center; gap:10px;
+        background:#dbeafe; border:1px solid #93c5fd; border-radius:6px;
+        padding:10px 16px; margin-bottom:16px; font-size:0.83rem; color:#1e40af;">
+      <div class="spinner" style="width:18px;height:18px;border-width:2px;border-top-color:#2563eb;"></div>
+      <span>Calculando tiempos con OpenStreetMap…</span>
+    </div>
+
+    <!-- Grid de rutas -->
+    <div id="rutas-grid" class="rutas-grid"></div>
+
+  </div><!-- /#zona-asignacion -->
+
+</div><!-- /#asignacion-container -->
+
+<!-- Modal de Mapa de ruta -->
+<div id="panel-mapa-backdrop" class="panel-mapa__backdrop"></div>
+<div id="panel-mapa" class="panel-mapa" role="dialog" aria-modal="true" aria-labelledby="panel-mapa-nombre">
+  <div class="panel-mapa__header">
+    <div class="panel-mapa__titulo">
+      <i data-lucide="map-pin"></i>
+      <div>
+        <div id="panel-mapa-nombre" class="panel-mapa__ruta-nombre">Ruta</div>
+        <div class="panel-mapa__info" id="panel-mapa-info"></div>
+      </div>
+    </div>
+    <button id="btn-cerrar-mapa" class="panel-mapa__close" aria-label="Cerrar mapa">
+      <i data-lucide="x"></i>
+    </button>
+  </div>
+  <div class="panel-mapa__body">
+    <aside class="panel-mapa__sidebar">
+      <div class="panel-mapa__sidebar-title">
+        <i data-lucide="list-ordered"></i> Secuencia de entrega
+      </div>
+      <div id="panel-mapa-paradas" class="panel-mapa__paradas"></div>
+    </aside>
+    <div id="mapa-leaflet" class="panel-mapa__mapa"></div>
+  </div>
+</div>
+
+<!-- Modal: Configurar días -->
+<div id="modal-config-dias" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-title"><i data-lucide="settings"></i> Configuración de días de operación</div>
+    <div id="config-dias-form"></div>
+    <div class="modal-footer">
+      <button id="modal-dias-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="modal-dias-save"   class="btn btn-primary">Guardar configuración</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Reacomodamiento -->
+<div id="modal-reacomo" class="modal-overlay hidden">
+  <div class="modal-box modal-box--wide">
+    <div class="modal-title">
+      <i data-lucide="truck"></i> Reacomodamiento — Configuración
+    </div>
+
+    <div class="reacomo-desc">
+      Reasigna vehículos a rutas usando la configuración de capacidad definida.
+      Las asignaciones existentes se reemplazan completamente.
+    </div>
+
+    <!-- Parámetro principal -->
+    <div class="reacomo-section">
+      <div class="reacomo-section-title">Tolerancia de capacidad</div>
+      <div class="reacomo-grid">
+        <div class="reacomo-field">
+          <label for="rr-cap-tolerance">Tolerancia (%)</label>
+          <input type="number" id="rr-cap-tolerance" min="1" max="50" step="1" value="30">
+          <span class="reacomo-field-hint">
+            Rango válido: <strong id="rr-tol-min">70</strong> % –
+            <strong id="rr-tol-max">130</strong> % de la capacidad del vehículo.
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reglas del algoritmo -->
+    <div class="reacomo-section">
+      <div class="reacomo-section-title">Cómo funciona el algoritmo</div>
+      <div class="reacomo-hint">
+        <ol style="margin:0;padding-left:1.3rem;line-height:2;">
+          <li>Las rutas se ordenan de <strong>menor a mayor carga (kg)</strong>.</li>
+          <li>Los vehículos se ordenan de <strong>menor a mayor capacidad</strong>.</li>
+          <li>Cada vehículo se usa <strong>máximo una vez por día</strong>.</li>
+          <li>Se asigna el vehículo <strong>más pequeño</strong> donde:<br>
+              <code>carga_ruta ≤ capacidad_vehículo × (1 + tolerancia)</code></li>
+          <li>Si ningún vehículo cumple → la ruta queda <strong>sin vehículo</strong>.</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Indicadores resultantes -->
+    <div class="modal-footer">
+      <button id="modal-reacomo-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="modal-reacomo-apply" class="btn btn-warning btn-icon-label">
+        <i data-lucide="truck"></i> Ejecutar reacomodamiento
+      </button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/asignacion.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+
+{% block title %}Modificación manual de rutas{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-modificacion.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="{{ url_for('static', filename='css/modificacion.css') }}">
+{% endblock %}
+
+{% block nav_mod %}active{% endblock %}
+
+{% block content %}
+<h1>Modificación manual de rutas</h1>
+<div class="mod-header">
+  <div class="mod-header-left">
+    <p class="mod-subtitulo">Revisa la secuencia, ajusta el vehículo y confirma cada ruta.</p>
+  </div>
+  <div class="mod-header-right">
+    <span id="progreso-badge" class="progreso-badge">0 / 0 confirmadas</span>
+    <button id="btn-autorizar-todas" class="btn btn-autorizar-todas" disabled>
+      <i data-lucide="check-check"></i> Autorizar todas
+    </button>
+    <button id="btn-crear-ruta" class="btn btn-crear-ruta">
+      <i data-lucide="plus-circle"></i> Nueva ruta
+    </button>
+    <button id="btn-guardar-solo" class="btn btn-guardar-sec-mod" disabled>
+      <i data-lucide="save"></i> Guardar
+    </button>
+    <button id="btn-guardar-seguir" class="btn btn-guardar" disabled>
+      <i data-lucide="save"></i> Guardar y seguir
+    </button>
+  </div>
+</div>
+
+<!-- Resumen + botón OSRM -->
+<div id="resumen-fuentes" class="resumen-fuentes" style="display:none">
+  <span class="fuente-tag">
+    <span class="tag-dot verde"></span>
+    <span id="cnt-rutas">0</span> rutas asignadas
+  </span>
+  <span class="separador-v"></span>
+  <span id="osrm-status" class="osrm-status">
+    <span class="osrm-dot pendiente"></span>
+    <span id="osrm-status-text">OSRM: 0 / 0 calculadas</span>
+  </span>
+  <button id="btn-calcular-todas" class="btn btn-sm btn-osrm" title="Calcular tiempos de ruta con OpenStreetMap">
+    <i data-lucide="map"></i> Calcular todas con OSM
+  </button>
+</div>
+
+<!-- Banner de carga -->
+<div id="banner-cargando" class="banner-cargando">
+  <div class="spinner"></div>
+  <span>Cargando rutas…</span>
+</div>
+
+<!-- Banner OSRM batch -->
+<div id="banner-osrm" class="banner-osrm" style="display:none">
+  <div class="spinner"></div>
+  <span id="banner-osrm-texto">Calculando rutas con OSRM…</span>
+  <div class="osrm-progress-bar">
+    <div id="osrm-progress-fill" class="osrm-progress-fill" style="width:0%"></div>
+  </div>
+  <button id="btn-cancelar-osrm" class="btn btn-sm btn-cancel-osrm">Detener</button>
+</div>
+
+<!-- Filtro por día -->
+<div id="filtro-dias" class="filtro-dias" style="display:none"></div>
+
+<!-- Panel de sucursales pendientes -->
+<div id="panel-pendientes" class="panel-pendientes" style="display:none"></div>
+
+<!-- Navegador de rutas -->
+<div id="nav-rutas" class="nav-rutas"></div>
+
+<!-- Panel principal: dos columnas -->
+<div id="panel-principal" class="panel-principal" style="display:none">
+
+  <!-- Panel izquierdo -->
+  <div class="panel-izq">
+
+    <!-- Cabecera: nombre de ruta + agregar parada -->
+    <div class="panel-izq-header">
+      <div>
+        <h2 id="titulo-ruta" class="titulo-ruta">—</h2>
+        <div id="meta-ruta" class="meta-ruta"></div>
+      </div>
+      <div class="panel-izq-actions">
+        <button id="btn-agregar-suc" class="btn btn-sm btn-agregar" title="Agregar sucursal">
+          <i data-lucide="plus"></i> Parada
+        </button>
+        <button id="btn-eliminar-ruta" class="btn btn-sm btn-danger" title="Eliminar ruta">
+          <i data-lucide="trash-2"></i> Eliminar
+        </button>
+      </div>
+    </div>
+
+    <!-- Indicador OSRM individual -->
+    <div id="osrm-ruta-status" class="osrm-ruta-status" style="display:none">
+      <div class="spinner-sm"></div>
+      <span>Calculando ruta con OSRM…</span>
+    </div>
+
+    <!-- Selector de vehículo -->
+    <div id="zona-vehiculo" class="zona-vehiculo"></div>
+
+    <!-- Selector de día -->
+    <div id="zona-cambio-dia" class="zona-cambio-dia"></div>
+
+    <!-- Resumen de tiempos -->
+    <div id="resumen-tiempos" class="resumen-tiempos"></div>
+
+    <!-- Indicadores (carga, horario) -->
+    <div id="zona-indicadores"></div>
+
+    <!-- Lista de paradas (sucursales + mayoristas interleaved) -->
+    <div id="lista-sucursales" class="lista-sucursales"></div>
+
+    <!-- Acciones de ruta -->
+    <div class="acciones-ruta">
+      <button id="btn-recalcular" class="btn btn-recalcular">
+        <i data-lucide="rotate-cw"></i> Recalcular tiempos
+      </button>
+      <button id="btn-confirmar" class="btn btn-confirmar">
+        <i data-lucide="check"></i> Confirmar ruta
+      </button>
+    </div>
+  </div>
+
+  <!-- Panel derecho: mapa -->
+  <div class="panel-der">
+    <div id="mapa" class="mapa"></div>
+  </div>
+
+</div>
+
+<!-- Modal de confirmación para quitar parada -->
+<div id="modal-quitar-parada" class="modal-overlay hidden">
+  <div class="confirm-box">
+    <div class="confirm-icon" id="quitar-icon">
+      <i data-lucide="trash-2"></i>
+    </div>
+    <h3 id="quitar-title">Quitar parada de la ruta</h3>
+    <p id="quitar-msg"></p>
+    <div class="confirm-meta" id="quitar-meta"></div>
+    <div class="modal-footer">
+      <button id="quitar-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="quitar-ok" class="btn btn-confirm-ok btn-danger">Quitar parada</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal agregar sucursal -->
+<div id="modal-agregar" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Agregar sucursal a la ruta</h3>
+      <button id="modal-agregar-close" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="text" id="buscar-sucursal" class="input-buscar"
+             placeholder="Buscar por nombre o número…" autocomplete="off">
+      <div id="lista-disponibles" class="lista-disponibles"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal crear ruta manual -->
+<div id="modal-crear-ruta" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Crear ruta manual</h3>
+      <button id="modal-crear-close" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <label class="crear-label" for="crear-dia">Día</label>
+      <select id="crear-dia" class="input-select"></select>
+
+      <label class="crear-label" for="crear-vehiculo">Vehículo</label>
+      <select id="crear-vehiculo" class="input-select"></select>
+
+      <label class="crear-label" for="buscar-sucursal-crear">Sucursales (mínimo 1)</label>
+      <input type="text" id="buscar-sucursal-crear" class="input-buscar"
+             placeholder="Buscar por nombre o número…" autocomplete="off">
+      <div class="crear-meta">
+        <span id="crear-contador">0 seleccionadas</span>
+        <span class="crear-hint">Selecciona al menos una sucursal</span>
+      </div>
+      <div id="lista-suc-crear" class="lista-disponibles"></div>
+    </div>
+    <div class="modal-footer">
+      <button id="btn-crear-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="btn-crear-confirm" class="btn btn-guardar" disabled>
+        <i data-lucide="plus-circle"></i> Crear ruta
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Estado vacío -->
+<div id="estado-vacio" class="estado-vacio" style="display:none">
+  <i data-lucide="inbox" style="width:2.5rem;height:2.5rem;color:#cbd5e1;margin-bottom:12px"></i>
+  <p>No se encontraron rutas para modificar.</p>
+  <p class="sub">Asegúrate de haber guardado la asignación en la sección <strong>Asignación</strong> primero.</p>
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/modificacion.js') }}"></script>
+{% endblock %}

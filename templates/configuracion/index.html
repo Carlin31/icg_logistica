@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}Configuración del Sistema{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-config.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/configuracion.css') }}">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+{% endblock %}
+
+{% block nav_config %}active{% endblock %}
+
+{% block content %}
+<h1>Configuración del Sistema</h1>
+<div id="configuracion-container">
+
+  <ul class="nav-tabs" id="config-tabs">
+    <li class="active"><a href="#tab-general"    data-tab="general">General</a></li>
+    <li><a href="#tab-productos"           data-tab="productos">Productos</a></li>
+    <li><a href="#tab-sucursales"          data-tab="sucursales">Sucursales</a></li>
+    <li><a href="#tab-vehiculos"           data-tab="vehiculos">Vehículos</a></li>
+    <li><a href="#tab-clientes-mayoristas" data-tab="clientes-mayoristas">Clientes Mayoristas</a></li>
+    <li><a href="#tab-rutas-historicas"    data-tab="rutas-historicas"><i data-lucide="folder-open"></i> Rutas Históricas</a></li>
+  </ul>
+
+  <!-- ── TAB GENERAL ── -->
+  <section id="tab-general" class="tab-content active">
+    <h2>Configuración General</h2>
+    <form id="form-general" onsubmit="event.preventDefault();">
+
+
+      <!-- Parámetros de operación -->
+      <fieldset class="config-fieldset">
+        <legend><i data-lucide="settings"></i> Parámetros de Operación</legend>
+        <div class="config-grid-2">
+          <div class="form-group">
+            <label>Velocidad promedio (km/h)</label>
+            <input name="velocidad_kmh" type="number" step="0.1" class="form-control" placeholder="24">
+          </div>
+          <div class="form-group">
+            <label>Min. de descarga por kg</label>
+            <input name="min_descarga_por_kg" type="number" step="0.01" class="form-control" placeholder="0.20">
+          </div>
+          <div class="form-group">
+            <label>Utilización mínima vehículo (%)</label>
+            <input name="utilizacion_min" type="number" step="1" class="form-control" placeholder="80">
+          </div>
+          <div class="form-group">
+            <label>Utilización máxima vehículo (%)</label>
+            <input name="utilizacion_max" type="number" step="1" class="form-control" placeholder="120">
+          </div>
+        </div>
+      </fieldset>
+
+      <!-- Días de operación -->
+      <fieldset class="config-fieldset">
+        <legend><i data-lucide="calendar-days"></i> Días y Horarios de Operación</legend>
+        <p class="config-hint">Configura qué días opera la distribución, la hora de salida desde la matriz y la hora límite de regreso.</p>
+        <div class="dias-config-table">
+          <div class="dias-header">
+            <span></span>
+            <span>Día</span>
+            <span>Hora de salida</span>
+            <span>Hora límite de regreso</span>
+          </div>
+          <div id="dias-rows">
+            <!-- Generado por JS -->
+          </div>
+        </div>
+      </fieldset>
+
+      <div style="text-align:right; margin-top:16px;">
+        <button type="submit" class="btn btn-primary"><i data-lucide="save"></i> Guardar configuración general</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- ── TAB PRODUCTOS ── -->
+  <section id="tab-productos" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Gestión de Productos</h2>
+      <button id="btn-nuevo-producto" class="btn btn-success">+ Nuevo producto</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-producto-nombre" placeholder="Buscar producto…" class="input-search">
+      <input type="date" id="buscar-producto-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-productos" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Marca</th>
+            <th class="sortable col-num">Clave SAE</th>
+            <th class="sortable">Descripción</th>
+            <th class="sortable col-num">Costo</th>
+            <th class="sortable col-num">Peso (kg)</th>
+            <th class="sortable col-num">Largo (cm)</th>
+            <th class="sortable col-num">Ancho (cm)</th>
+            <th class="sortable col-num">Alto (cm)</th>
+            <th class="sortable col-num">Volumen (m³)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB SUCURSALES ── -->
+  <section id="tab-sucursales" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Gestión de Sucursales</h2>
+      <button id="btn-nueva-sucursal" class="btn btn-success">+ Nueva sucursal</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-sucursal-nombre" placeholder="Buscar sucursal…" class="input-search">
+      <input type="date" id="buscar-sucursal-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-sucursales" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable col-num"># Tienda</th>
+            <th class="sortable">Estado</th>
+            <th class="sortable">Nombre Base</th>
+            <th class="sortable">Nombre ICG-Proalmex</th>
+            <th class="sortable">Nombre Bimbo</th>
+            <th class="sortable col-num">Latitud</th>
+            <th class="sortable col-num">Longitud</th>
+            <th class="sortable">Hora Inicio</th>
+            <th class="sortable">Hora Fin</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB VEHÍCULOS ── -->
+  <section id="tab-vehiculos" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Gestión de Vehículos</h2>
+      <button id="btn-nuevo-vehiculo" class="btn btn-success">+ Nuevo vehículo</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-vehiculo-nombre" placeholder="Buscar (placas, abreviatura, desc.)…" class="input-search">
+      <input type="date" id="buscar-vehiculo-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-vehiculos" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Descripción</th>
+            <th class="sortable">Abreviatura</th>
+            <th class="sortable">Placas</th>
+            <th class="sortable">Chofer</th>
+            <th class="sortable col-num">Largo Vol. (m)</th>
+            <th class="sortable col-num">Ancho Vol. (m)</th>
+            <th class="sortable col-num">Alto Vol. (m)</th>
+            <th class="sortable col-num">Cap. (ton)</th>
+            <th class="sortable">Categoría</th>
+            <th class="sortable col-num">Volumen (m³)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+
+  <!-- ── TAB CLIENTES MAYORISTAS ── -->
+  <section id="tab-clientes-mayoristas" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Gestión de Clientes Mayoristas</h2>
+      <button id="btn-nuevo-cliente-mayorista" class="btn btn-success">+ Nuevo cliente</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-cliente_mayorista-nombre" placeholder="Buscar (nombre, nombre comercial)…" class="input-search">
+      <input type="date" id="buscar-cliente_mayorista-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-clientes-mayoristas" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable col-num">ID Cliente</th>
+            <th class="sortable">Nombre</th>
+            <th class="sortable">Población</th>
+            <th class="sortable col-num">Latitud</th>
+            <th class="sortable col-num">Longitud</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+</div>
+
+<!-- Modal de confirmación de estado de vehículo -->
+<div id="confirm-overlay" class="modal-overlay hidden">
+  <div class="confirm-box">
+    <div class="confirm-icon" id="confirm-icon"></div>
+    <h3 id="confirm-title"></h3>
+    <p  id="confirm-msg"></p>
+    <div class="confirm-meta" id="confirm-meta"></div>
+    <div class="modal-footer">
+      <button id="confirm-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="confirm-ok"     class="btn btn-confirm-ok btn-primary">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── TAB RUTAS HISTÓRICAS ── -->
+<section id="tab-rutas-historicas" class="tab-content hidden">
+  <div class="section-header">
+    <h2>Rutas Históricas</h2>
+    <span class="hist-badge" id="hist-resumen-badge">Cargando…</span>
+  </div>
+
+  <p class="config-hint">
+    Carga aquí los archivos CSV de rutas confirmadas para usarlos como base del sistema VRP.
+    Los historiales más recientes reciben mayor peso automáticamente en la generación.
+  </p>
+
+  <!-- Formato esperado -->
+  <div class="hist-format-box">
+    <strong>Formato esperado (CSV):</strong>
+    <pre class="hist-pre">id_sucursal,vehiculo,dia_semana,secuencia_visita,kg_entrega
+21,F 350_1,JUEVES,1,570
+68,F 350_1,JUEVES,2,464</pre>
+    <span class="hist-hint">Este es el mismo formato que exporta la sección de Modificación.</span>
+  </div>
+
+  <!-- Zona de carga -->
+  <div class="hist-upload-zone" id="hist-upload-zone">
+    <div class="hist-upload-icon"><i data-lucide="folder-open"></i></div>
+    <p class="hist-upload-label">Arrastra un CSV aquí o haz clic para seleccionar</p>
+    <input type="file" id="hist-file-input" accept=".csv" style="display:none">
+    <button class="btn btn-primary btn-sm" id="btn-hist-seleccionar">Seleccionar archivo</button>
+  </div>
+  <div id="hist-upload-preview" class="hist-upload-preview" style="display:none">
+    <span class="hist-file-name" id="hist-file-name"></span>
+    <button class="btn btn-success btn-sm" id="btn-hist-cargar"><i data-lucide="upload"></i> Cargar historial</button>
+    <button class="btn btn-secondary btn-sm" id="btn-hist-cancelar"><i data-lucide="x"></i> Cancelar</button>
+  </div>
+  <div id="hist-msg" class="hist-msg" style="display:none"></div>
+
+  <!-- Lista de historiales -->
+  <div class="hist-list-header">
+    <h3>Historiales cargados</h3>
+    <span class="hist-list-sub">El peso aumenta con el orden de carga (más reciente = mayor peso)</span>
+  </div>
+
+  <div id="hist-spinner" class="hist-spinner">
+    <div class="spinner"></div> Cargando…
+  </div>
+
+  <div id="hist-lista" class="hist-lista"></div>
+
+  <div id="hist-empty" class="hist-empty" style="display:none">
+    <p>No hay historiales cargados. Sube un archivo CSV para empezar.</p>
+  </div>
+</section>
+
+<!-- ── Modal mapa de rutas históricas ── -->
+<div id="hist-mapa-overlay" class="hist-mapa-overlay hidden">
+  <div class="hist-mapa-box">
+
+    <!-- Área principal: mapa -->
+    <div class="hist-mapa-main">
+      <div class="hist-mapa-toolbar">
+        <i data-lucide="map" style="width:16px;height:16px;flex-shrink:0;color:var(--azul)"></i>
+        <span class="hist-mapa-titulo" id="hist-mapa-titulo">Historial</span>
+        <button class="btn btn-secondary btn-sm" id="btn-hist-mapa-cerrar">
+          <i data-lucide="x"></i> Cerrar
+        </button>
+      </div>
+      <div id="hist-mapa-map" class="hist-mapa-map"></div>
+      <!-- Barra de progreso OSRM -->
+      <div id="hist-mapa-progreso" class="hist-mapa-progreso" style="display:none">
+        <div class="hist-prog-header">
+          <span class="hist-prog-label" id="hist-prog-label">Iniciando…</span>
+          <span class="hist-prog-pct"   id="hist-prog-pct">0%</span>
+        </div>
+        <div class="hist-prog-track">
+          <div class="hist-prog-fill" id="hist-prog-fill" style="width:0%"></div>
+        </div>
+        <div class="hist-prog-meta" id="hist-prog-meta">&nbsp;</div>
+      </div>
+    </div>
+
+    <!-- Sidebar: lista de rutas -->
+    <div class="hist-mapa-sidebar">
+      <div class="hist-mapa-sidebar-header">
+        <span id="hist-mapa-sidebar-titulo">Rutas disponibles</span>
+        <button class="btn btn-primary btn-sm active" id="btn-hist-mapa-todas" onclick="verTodasHistRutas()">
+          <i data-lucide="layers"></i> Ver todas
+        </button>
+      </div>
+      <div class="hist-mapa-sidebar-list" id="hist-mapa-sidebar-list"></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal genérico -->
+<div id="modal-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3 id="modal-title"></h3>
+    <form id="modal-form" onsubmit="event.preventDefault();"></form>
+    <div class="modal-footer">
+      <button id="modal-cancel" class="btn btn-secondary">Cancelar</button>
+      <button id="modal-save"   class="btn btn-primary">Guardar</button>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="{{ url_for('static', filename='js/configuracion.js') }}"></script>
+{% endblock %}

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Sistema de Rutas{% endblock %}</title>
+    {% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">{% endblock %}
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HEADER / NAVBAR
+     Layout: [Brand] | [Nav links centrados] | [Botón Menú]
+     Íconos SVG en: static/img/
+     ═══════════════════════════════════════════════════════════════ -->
+{# ── URLs con perfil activo: secciones que mantienen contexto de perfil ─ #}
+{% if perfil_activo and perfil_slug %}
+  {% set _url_ext = '/extraccion/'  ~ perfil_slug %}
+  {% set _url_asi = '/asignacion/'  ~ perfil_slug %}
+  {% set _url_mod = '/modificacion/' ~ perfil_slug %}
+  {% set _url_pdf = '/pdf/'         ~ perfil_slug %}
+{% else %}
+  {% set _url_ext = url_for('extraccion.index') %}
+  {% set _url_asi = url_for('asignacion.index') %}
+  {% set _url_mod = url_for('modificacion.index') %}
+  {% set _url_pdf = url_for('pdf.index') %}
+{% endif %}
+<header class="header" id="header" role="banner">
+
+    <!-- ── Izquierda: Marca ───────────────────────────────────── -->
+    <a href="{{ url_for('menu.index') }}" class="header-brand" aria-label="Ir al menú principal">
+        <div class="header-brand-icon" aria-hidden="true">
+            <!--
+              ÍCONO: static/img/icon-brand.svg
+              Sugerencia: logotipo de camión, ruta o flecha de entrega
+              Tamaño recomendado SVG viewBox: 24×24
+            -->
+            <img
+                src="{{ url_for('static', filename='img/icon-brand.svg') }}"
+                alt=""
+                width="22"
+                height="22"
+                class="hdr-icon"
+            >
+        </div>
+        <div class="header-brand-text">
+            <span class="header-brand-name">Sistema de Logística</span>
+            <span class="header-brand-sub">Integradora Comercial del Golfo S.A. de C.V.</span>
+        </div>
+    </a>
+
+    <!-- ── Centro: Navegación ────────────────────────────────── -->
+    <nav class="header-nav" aria-label="Módulos del sistema">
+        <a href="{{ url_for('configuracion.index') }}"  class="nav-item {% block nav_config %}{% endblock %}">
+            <img src="{{ url_for('static', filename='img/icon-config.svg') }}"        alt="" width="15" height="15" class="hdr-icon">
+            <span>Config.</span>
+        </a>
+        <a href="{{ _url_ext }}"                        class="nav-item {% block nav_ext    %}{% endblock %}">
+            <img src="{{ url_for('static', filename='img/icon-extraccion.svg') }}"    alt="" width="15" height="15" class="hdr-icon">
+            <span>Extracción</span>
+        </a>
+        <a href="{{ _url_asi }}"                        class="nav-item {% block nav_asig   %}{% endblock %}">
+            <img src="{{ url_for('static', filename='img/icon-asignacion.svg') }}"    alt="" width="15" height="15" class="hdr-icon">
+            <span>Asignación</span>
+        </a>
+        <a href="{{ _url_mod }}"                        class="nav-item {% block nav_mod    %}{% endblock %}">
+            <img src="{{ url_for('static', filename='img/icon-modificacion.svg') }}"  alt="" width="15" height="15" class="hdr-icon">
+            <span>Modif.</span>
+        </a>
+        <a href="{{ _url_pdf }}"                        class="nav-item {% block nav_pdf    %}{% endblock %}">
+            <img src="{{ url_for('static', filename='img/icon-pdf.svg') }}"           alt="" width="15" height="15" class="hdr-icon">
+            <span>PDF</span>
+        </a>
+    </nav>
+
+    <!-- ── Derecha: Badge de perfil + Botón de menú ─────────── -->
+    <div class="header-actions">
+        {% if perfil_activo %}
+        <a href="{{ url_for('menu.index') }}" class="perfil-badge" title="Cambiar perfil">
+            <span class="perfil-badge-dot" aria-hidden="true"></span>
+            <span class="perfil-badge-nombre">{{ perfil_nombre }}</span>
+        </a>
+        {% endif %}
+        <button
+            class="btn-nav-toggle"
+            id="btn-nav-toggle"
+            aria-label="Abrir navegación completa"
+            aria-expanded="false"
+            aria-controls="nav-panel-full"
+        >
+            <!--
+              ÍCONO: static/img/icon-menu.svg
+              Sugerencia: tres líneas horizontales, trazo fino
+            -->
+            <img
+                src="{{ url_for('static', filename='img/icon-menu.svg') }}"
+                alt=""
+                width="18"
+                height="18"
+                class="hdr-icon"
+            >
+            <span class="btn-nav-label">Menú</span>
+        </button>
+    </div>
+
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PANEL LATERAL DE NAVEGACIÓN COMPLETA (mobile + toggle)
+     ═══════════════════════════════════════════════════════════════ -->
+<nav class="nav-panel" id="nav-panel-full" aria-hidden="true" role="navigation">
+    <div class="nav-panel-inner">
+        {% if perfil_activo %}
+        <div class="nav-perfil-activo">
+            <span class="nav-perfil-dot" aria-hidden="true"></span>
+            <span class="nav-perfil-nombre">{{ perfil_nombre }}</span>
+        </div>
+        {% endif %}
+
+        <div class="nav-section-label">Módulos del sistema</div>
+
+        <a href="{{ url_for('configuracion.index') }}"  class="nav-link">
+            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-config.svg') }}"        alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-label">Configuración</span>
+        </a>
+        <a href="{{ _url_ext }}"                        class="nav-link">
+            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-extraccion.svg') }}"    alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-label">Extracción</span>
+        </a>
+        <a href="{{ _url_asi }}"                        class="nav-link">
+            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-asignacion.svg') }}"    alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-label">Asignación</span>
+        </a>
+        <a href="{{ _url_mod }}"                        class="nav-link">
+            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-modificacion.svg') }}"  alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-label">Modificación</span>
+        </a>
+        <a href="{{ _url_pdf }}"                        class="nav-link">
+            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-pdf.svg') }}"           alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-label">PDF</span>
+        </a>
+    </div>
+</nav>
+
+<div class="nav-overlay" id="nav-overlay" aria-hidden="true"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     CONTENIDO PRINCIPAL
+     ═══════════════════════════════════════════════════════════════ -->
+<main id="contenido">
+    {% block content %}{% endblock %}
+</main>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     FULLSCREEN LOADER — disponible en todas las secciones
+     Controlado por Loader.show() / Loader.hide() en base.js
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
+  <div class="fl-brand">
+    <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
+    Sistema de Logística
+  </div>
+  <div class="fl-spinner">
+    <div class="fl-ring-outer"></div>
+    <div class="fl-ring"></div>
+    <div class="fl-core">
+      <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20" class="hdr-icon">
+    </div>
+  </div>
+  <div class="fl-dots">
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+  </div>
+  <div class="fl-title" id="fl-title">Procesando…</div>
+  <div class="fl-msg"   id="fl-msg">Por favor, espera un momento…</div>
+  <div class="fl-footer">Integradora Comercial del Golfo</div>
+</div>
+
+<script>window.__PERFIL_SLUG__ = {{ perfil_slug | tojson }};</script>
+<script src="{{ url_for('static', filename='js/base.js') }}"></script>
+<script>
+    /* ── Toggle del panel lateral ──────────────────────────────── */
+    (function () {
+        const toggleBtn = document.getElementById('btn-nav-toggle');
+        const panel     = document.getElementById('nav-panel-full');
+        const overlay   = document.getElementById('nav-overlay');
+
+        function openNav() {
+            panel.classList.add('open');
+            overlay.classList.add('visible');
+            toggleBtn.setAttribute('aria-expanded', 'true');
+            panel.setAttribute('aria-hidden', 'false');
+        }
+
+        function closeNav() {
+            panel.classList.remove('open');
+            overlay.classList.remove('visible');
+            toggleBtn.setAttribute('aria-expanded', 'false');
+            panel.setAttribute('aria-hidden', 'true');
+        }
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () =>
+                panel.classList.contains('open') ? closeNav() : openNav()
+            );
+        }
+
+        if (overlay) overlay.addEventListener('click', closeNav);
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && panel?.classList.contains('open')) closeNav();
+        });
+    })();
+</script>
+{% block extra_js %}{% endblock %}
+
+</body>
+</html>

@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sistema de Logística — Menú Principal</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/menu.css') }}">
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     HEADER
+     Layout: [Brand | Page identity (center) | Nav toggle]
+     Íconos SVG en: static/img/
+     ═══════════════════════════════════════════════════════════════ -->
+<header class="header" role="banner">
+
+  <!-- ── Izquierda: Marca ──────────────────────────────────────── -->
+  <div class="header-brand">
+    <div class="header-brand-icon" aria-hidden="true">
+      <!--
+        ÍCONO: static/img/icon-brand.svg
+        Sugerencia: logotipo de camión, ruta o flecha de entrega
+        Tamaño recomendado SVG viewBox: 24×24
+      -->
+      <img
+        src="{{ url_for('static', filename='img/icon-brand.svg') }}"
+        alt=""
+        width="22"
+        height="22"
+        class="hdr-icon"
+      >
+    </div>
+    <div class="header-brand-text">
+      <span class="header-brand-name">Sistema de Logística</span>
+      <span class="header-brand-sub">Integradora Comercial del Golfo</span>
+    </div>
+  </div>
+
+  <!-- ── Centro: Identificador de módulo ──────────────────────── -->
+  <div class="header-center" aria-label="Módulo activo">
+    <div class="header-module-pill">
+      <!--
+        ÍCONO: static/img/icon-home.svg
+        Sugerencia: casa o cuadrícula de menú, trazo fino
+        Tamaño recomendado SVG viewBox: 16×16
+      -->
+      <img
+        src="{{ url_for('static', filename='img/icon-home.svg') }}"
+        alt=""
+        width="14"
+        height="14"
+        class="hdr-icon"
+      >
+      <span>Menú Principal</span>
+    </div>
+  </div>
+
+  <!-- ── Derecha: Botón de navegación ─────────────────────────── -->
+  <div class="header-actions">
+    <button
+      class="btn-nav-toggle"
+      id="btn-nav-toggle"
+      aria-label="Abrir navegación"
+      aria-expanded="false"
+      aria-controls="nav-panel"
+    >
+      <!--
+        ÍCONO: static/img/icon-menu.svg
+        Sugerencia: tres líneas horizontales (hamburger), trazo fino
+        Tamaño recomendado SVG viewBox: 20×20
+      -->
+      <img
+        src="{{ url_for('static', filename='img/icon-menu.svg') }}"
+        alt=""
+        width="18"
+        height="18"
+        class="hdr-icon"
+      >
+      <span class="btn-nav-label">Navegar</span>
+    </button>
+  </div>
+
+</header>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     PANEL DE NAVEGACIÓN DESPLEGABLE
+     Se activa con el botón "Navegar" del header.
+     Cada enlace lleva su ícono SVG referenciado.
+     ═══════════════════════════════════════════════════════════════ -->
+<nav class="nav-panel" id="nav-panel" aria-hidden="true" role="navigation">
+  <div class="nav-panel-inner">
+
+    <div class="nav-section-label">Módulos del sistema</div>
+
+    <a href="{{ url_for('configuracion.index') }}" class="nav-link">
+      <!--
+        ÍCONO: static/img/icon-config.svg
+        Sugerencia: engranaje o ajustes
+      -->
+      <span class="nav-link-icon">
+        <img src="{{ url_for('static', filename='img/icon-config.svg') }}" alt="" width="16" height="16" class="hdr-icon">
+      </span>
+      <span class="nav-link-label">Configuración</span>
+    </a>
+
+    <a href="{{ url_for('extraccion.index') }}" class="nav-link">
+      <!--
+        ÍCONO: static/img/icon-extraccion.svg
+        Sugerencia: flecha hacia abajo sobre documento
+      -->
+      <span class="nav-link-icon">
+        <img src="{{ url_for('static', filename='img/icon-extraccion.svg') }}" alt="" width="16" height="16" class="hdr-icon">
+      </span>
+      <span class="nav-link-label">Extracción</span>
+    </a>
+
+    <a href="{{ url_for('asignacion.index') }}" class="nav-link">
+      <!--
+        ÍCONO: static/img/icon-asignacion.svg
+        Sugerencia: portapapeles con check o lista
+      -->
+      <span class="nav-link-icon">
+        <img src="{{ url_for('static', filename='img/icon-asignacion.svg') }}" alt="" width="16" height="16" class="hdr-icon">
+      </span>
+      <span class="nav-link-label">Asignación</span>
+    </a>
+
+    <a href="{{ url_for('modificacion.index') }}" class="nav-link">
+      <!--
+        ÍCONO: static/img/icon-modificacion.svg
+        Sugerencia: lápiz o pluma de edición
+      -->
+      <span class="nav-link-icon">
+        <img src="{{ url_for('static', filename='img/icon-modificacion.svg') }}" alt="" width="16" height="16" class="hdr-icon">
+      </span>
+      <span class="nav-link-label">Modificación</span>
+    </a>
+
+    <a href="{{ url_for('pdf.index') }}" class="nav-link">
+      <!--
+        ÍCONO: static/img/icon-pdf.svg
+        Sugerencia: hoja de documento con esquina doblada
+      -->
+      <span class="nav-link-icon">
+        <img src="{{ url_for('static', filename='img/icon-pdf.svg') }}" alt="" width="16" height="16" class="hdr-icon">
+      </span>
+      <span class="nav-link-label">PDF</span>
+    </a>
+
+  </div>
+</nav>
+
+<!-- Overlay que cierra el panel al hacer clic fuera -->
+<div class="nav-overlay" id="nav-overlay" aria-hidden="true"></div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     MAIN
+     ═══════════════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- Banner logística activa -->
+  <div class="banner-activa" id="banner-activa" style="display:none;">
+    <div class="banner-activa-info">
+      <div class="banner-activa-indicador" aria-hidden="true"></div>
+      <div>
+        <div class="banner-activa-nombre" id="banner-nombre">—</div>
+        <div class="banner-activa-sub" id="banner-sub">Logística activa en sesión</div>
+      </div>
+    </div>
+    <div class="banner-activa-acciones">
+      <button class="btn-banner btn-ir" onclick="irAExtraccion()">Continuar en Extracción</button>
+      <form action="/salir" method="POST" style="margin:0;">
+        <button type="submit" class="btn-banner btn-salir">Deseleccionar</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div>
+      <h1 class="hero-title">Gestión de Logísticas</h1>
+      <p class="hero-sub">
+        Cada logística agrupa la semana completa de trabajo: extracción de pedidos,
+        asignación de rutas y modificación manual.
+        Crea una nueva o selecciona una existente para continuar donde lo dejaste.
+      </p>
+    </div>
+
+    <!-- Formulario crear nueva logística -->
+    <div class="form-crear">
+      <h3>Nueva Logística</h3>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label>Lunes (inicio)</label>
+          <input type="date" id="fi" onchange="actualizarPreview()" />
+        </div>
+        <div class="form-group">
+          <label>Viernes (fin)</label>
+          <input type="date" id="ff" onchange="actualizarPreview()" />
+        </div>
+      </div>
+
+      <div class="nombre-preview" id="nombre-preview">
+        Selecciona un rango semanal…
+      </div>
+
+      <button class="btn-crear" id="btn-crear" onclick="crearLogistica()">
+        Crear Logística
+      </button>
+    </div>
+  </div>
+
+  <!-- Historial -->
+  <div class="historial-header">
+    <h2>Historial <span class="badge-count" id="badge-total">0</span></h2>
+    <div class="controles">
+      <div class="busqueda">
+        <img
+          src="{{ url_for('static', filename='img/icon-search.svg') }}"
+          alt=""
+          width="15"
+          height="15"
+          class="busqueda-icon hdr-icon"
+          aria-hidden="true"
+        >
+        <input type="text" id="buscador" placeholder="Buscar logística…" oninput="filtrar()" />
+      </div>
+      <select class="filtro-estado" id="filtro-estado" onchange="filtrar()">
+        <option value="">Todos los estados</option>
+        <option value="en_progreso">En progreso</option>
+        <option value="completada">Completada</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="grid-logisticas" id="grid-logisticas">
+    <div class="loader-wrapper"><div class="spinner"></div></div>
+  </div>
+
+</main>
+
+<!-- Toast -->
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<!-- Modal confirmación eliminar -->
+<div class="overlay" id="overlay-eliminar" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal">
+    <h3 id="modal-title">Eliminar logística</h3>
+    <p id="modal-msg">
+      ¿Estás seguro de que deseas eliminar esta logística?<br>
+      <strong>Esta acción no se puede deshacer</strong> y borrará todos los datos asociados.
+    </p>
+    <div class="modal-btns">
+      <button class="btn-cancel" onclick="cerrarModal()">Cancelar</button>
+      <button class="btn-danger" id="btn-confirmar-eliminar">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     FULLSCREEN LOADER
+     Controlado por Loader.show() / Loader.hide() en menu.js
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
+  <div class="fl-brand">
+    <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
+    Sistema de Logística
+  </div>
+
+  <div class="fl-spinner">
+    <div class="fl-ring-outer"></div>
+    <div class="fl-ring"></div>
+    <div class="fl-core">
+      <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20" class="hdr-icon">
+    </div>
+  </div>
+
+  <div class="fl-dots">
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+  </div>
+
+  <div class="fl-title"  id="fl-title">Procesando…</div>
+  <div class="fl-msg"    id="fl-msg">Por favor, espera un momento…</div>
+
+  <div class="fl-footer">Integradora Comercial del Golfo</div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/menu.js') }}"></script>
+<script>
+  /* ── Toggle del panel de navegación ──────────────────────────── */
+  (function () {
+    const toggleBtn = document.getElementById('btn-nav-toggle');
+    const panel     = document.getElementById('nav-panel');
+    const overlay   = document.getElementById('nav-overlay');
+
+    function openNav() {
+      panel.classList.add('open');
+      overlay.classList.add('visible');
+      toggleBtn.setAttribute('aria-expanded', 'true');
+      panel.setAttribute('aria-hidden', 'false');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeNav() {
+      panel.classList.remove('open');
+      overlay.classList.remove('visible');
+      toggleBtn.setAttribute('aria-expanded', 'false');
+      panel.setAttribute('aria-hidden', 'true');
+      overlay.setAttribute('aria-hidden', 'true');
+    }
+
+    toggleBtn.addEventListener('click', () => {
+      panel.classList.contains('open') ? closeNav() : openNav();
+    });
+
+    overlay.addEventListener('click', closeNav);
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && panel.classList.contains('open')) closeNav();
+    });
+  })();
+</script>
+</body>
+</html>
