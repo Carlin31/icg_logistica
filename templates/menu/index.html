@@ -186,6 +186,15 @@
         asignación de rutas y modificación manual.
         Crea una nueva o selecciona una existente para continuar donde lo dejaste.
       </p>
+
+      <!-- Imagen hero — archivo: static/img/hero-logistica.jpg -->
+      <div class="hero-illustration">
+        <img
+          class="hero-img"
+          src="{{ url_for('static', filename='img/hero-logistica.jpg') }}"
+          alt="Gestión de logísticas"
+        >
+      </div>
     </div>
 
     <!-- Formulario crear nueva logística -->
@@ -210,6 +219,56 @@
       <button class="btn-crear" id="btn-crear" onclick="crearLogistica()">
         Crear Logística
       </button>
+    </div>
+  </div>
+
+  <!-- Flujo de trabajo -->
+  <div class="workflow-section">
+    <p class="workflow-label">Flujo de trabajo</p>
+    <div class="workflow-steps">
+
+      <div class="workflow-step">
+        <div class="workflow-step-badge">1</div>
+        <div class="workflow-step-icon"><i data-lucide="settings-2"></i></div>
+        <div class="workflow-step-info">
+          <div class="workflow-step-title">Configurar</div>
+          <div class="workflow-step-desc">Rutas, transportistas y parámetros base</div>
+        </div>
+      </div>
+
+      <div class="workflow-arrow" aria-hidden="true"><i data-lucide="arrow-right"></i></div>
+
+      <div class="workflow-step">
+        <div class="workflow-step-badge">2</div>
+        <div class="workflow-step-icon"><i data-lucide="download"></i></div>
+        <div class="workflow-step-info">
+          <div class="workflow-step-title">Extraer pedidos</div>
+          <div class="workflow-step-desc">Importa y procesa la semana de pedidos</div>
+        </div>
+      </div>
+
+      <div class="workflow-arrow" aria-hidden="true"><i data-lucide="arrow-right"></i></div>
+
+      <div class="workflow-step">
+        <div class="workflow-step-badge">3</div>
+        <div class="workflow-step-icon"><i data-lucide="map-pin"></i></div>
+        <div class="workflow-step-info">
+          <div class="workflow-step-title">Asignar rutas</div>
+          <div class="workflow-step-desc">Distribuye pedidos por transportista y ruta</div>
+        </div>
+      </div>
+
+      <div class="workflow-arrow" aria-hidden="true"><i data-lucide="arrow-right"></i></div>
+
+      <div class="workflow-step">
+        <div class="workflow-step-badge">4</div>
+        <div class="workflow-step-icon"><i data-lucide="file-text"></i></div>
+        <div class="workflow-step-info">
+          <div class="workflow-step-title">Generar PDF</div>
+          <div class="workflow-step-desc">Exporta reportes de pesos y asignaciones</div>
+        </div>
+      </div>
+
     </div>
   </div>
 

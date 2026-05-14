@@ -69,7 +69,7 @@ def generar():
     except Exception as e:
         return jsonify({"status": "error", "mensaje": f"Error al generar el PDF: {e}"}), 500
 
-    nombre_descarga = f"reporte_pesos_{logistica['nombre'].replace(' ', '_')}.pdf"
+    nombre_descarga = f"{logistica['nombre'].replace(' ', '_')}.pdf"
     return send_file(
         ruta_archivo,
         as_attachment=True,
