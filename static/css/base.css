@@ -94,7 +94,6 @@ html {
   /* Tipografía fluida: 13px en móvil → 14.5px en laptop estándar.
      Todas las unidades rem escalan en cascada. */
   font-size: clamp(13px, 0.4vw + 10px, 14.5px);
-  zoom: 0.6;
 }
 
 body {
@@ -103,6 +102,7 @@ body {
   color: var(--texto-oscuro);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  zoom: 0.8;
 }
 
 /* ════════════════════════════════════════════════════════════════
