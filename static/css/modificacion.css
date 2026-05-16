@@ -314,7 +314,6 @@
   display: grid;
   grid-template-columns: clamp(260px, 35%, 340px) 1fr;
   gap: 16px;
-  min-height: 420px;
   align-items: start;
 }
 
@@ -326,7 +325,12 @@
   border: 1px solid var(--borde, #e2e8f0);
   display: flex;
   flex-direction: column;
-  max-height: 75vh;
+  /* Sticky: se ancla justo bajo el header y ocupa todo el espacio restante
+     del viewport, invariante al zoom del navegador. */
+  position: sticky;
+  top: var(--header-h);
+  height: calc(100vh - var(--header-h));
+  height: calc(100dvh - var(--header-h));
   overflow: hidden;
 }
 .panel-izq-header {
@@ -456,7 +460,11 @@
   border-radius: 10px; overflow: hidden;
   box-shadow: 0 1px 6px rgba(0,0,0,0.06);
   border: 1px solid var(--borde, #e2e8f0);
-  height: 75vh;
+  /* Mismo anclaje sticky que panel-izq para que ambos coincidan en altura. */
+  position: sticky;
+  top: var(--header-h);
+  height: calc(100vh - var(--header-h));
+  height: calc(100dvh - var(--header-h));
   min-height: 420px;
 }
 .mapa { width: 100%; height: 100%; background: #e8ecf0; }
@@ -602,7 +610,9 @@
 ══════════════════════════════════════════════════════════════ */
 .zona-vehiculo {
   border-bottom: 1px solid var(--borde, #e2e8f0);
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .vehiculo-selector {
@@ -725,7 +735,7 @@
   display: flex;
   flex-direction: column;
   gap: 5px;
-  max-height: 200px;
+  max-height: 120px;
   overflow-y: auto;
   padding: 0 16px 10px;
 }
