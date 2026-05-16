@@ -1160,58 +1160,75 @@
 .btn-confirm-ok.btn-danger:hover { background: #b91c1c; }
 
 /* ══════════════════════════════════════════════════════════════
-   RESPONSIVE — Móvil (≤ 640px)
+   RESPONSIVE — Header buttons (≤ 900px)
+   Grid 2×2: sin espacios vacíos en cualquier tamaño de pantalla
 ══════════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
+@media (max-width: 900px) {
   .mod-header {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
   }
+
+  /* Grid de 2 columnas exactas — ningún botón queda solo */
   .mod-header-right {
-    justify-content: flex-start;
-    gap: 6px;
-  }
-  .progreso-badge {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
     width: 100%;
+  }
+
+  /* Badge ocupa la fila completa */
+  .progreso-badge {
+    grid-column: 1 / -1;
     text-align: center;
+    width: auto;
   }
-  .resumen-fuentes {
-    gap: 8px;
-  }
-  .nav-ruta-btn {
-    min-width: 90px;
-    padding: 8px 10px;
-  }
-  .nav-ruta-nombre { font-size: 0.72rem; }
-  .nav-ruta-dia, .nav-ruta-info { font-size: 0.62rem; }
-  .panel-izq {
-    max-height: none;
-  }
-  .panel-der {
-    min-height: 280px;
-  }
-  .mapa { min-height: 280px; }
-  .resumen-tiempos {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  .panel-izq-header {
-    padding: 12px 14px 10px;
-  }
-  .acciones-ruta {
-    padding: 10px 12px;
-  }
-  .zona-vehiculo, .lista-sucursales {
-    padding-left: 4px;
-    padding-right: 4px;
-  }
-  .banner-osrm {
-    flex-wrap: wrap;
-    gap: 8px;
+
+  /* Cada botón llena su celda, texto centrado */
+  .mod-header-right .btn {
+    width: 100%;
+    justify-content: center;
+    white-space: nowrap;
   }
 }
 
-/* ── Tablet (641px–900px) ────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — Móvil (≤ 640px)
+══════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+
+  /* ── Resumen de fuentes ── */
+  .resumen-fuentes { gap: 8px; flex-wrap: wrap; }
+  .separador-v { display: none; }
+
+  /* ── Navegador de rutas ── */
+  .nav-ruta-btn { min-width: 90px; padding: 8px 10px; }
+  .nav-ruta-nombre { font-size: 0.72rem; }
+  .nav-ruta-dia, .nav-ruta-info { font-size: 0.62rem; }
+
+  /* ── Panel izquierdo ── */
+  .panel-izq { max-height: none; }
+  .panel-izq-header { padding: 12px 14px 10px; }
+  .acciones-ruta { padding: 10px 12px; gap: 8px; }
+  .acciones-ruta .btn { flex: 1; justify-content: center; white-space: nowrap; }
+  .zona-vehiculo, .lista-sucursales { padding-left: 4px; padding-right: 4px; }
+
+  /* ── Panel mapa ── */
+  .panel-der { min-height: 280px; }
+  .mapa { min-height: 280px; }
+
+  /* ── Resumen de tiempos ── */
+  .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }
+
+  /* ── Banner OSRM ── */
+  .banner-osrm { flex-wrap: wrap; gap: 8px; }
+  .osrm-progress-bar { min-width: 0; flex-basis: 100%; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   RESPONSIVE — Tablet (641px – 900px)
+══════════════════════════════════════════════════════════════ */
 @media (min-width: 641px) and (max-width: 900px) {
   .nav-ruta-btn { min-width: 105px; }
   .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }

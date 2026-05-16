@@ -1299,7 +1299,7 @@ function renderTarjetaRuta(ruta, cfgDia, diaRuta, orden) {
     </div>` : "";
 
   return `
-    <div class="ruta-card">
+    <div class="ruta-card status-${barClass}">
       <div class="ruta-card-header">
         <span class="ruta-nombre">
           <span class="badge-orden-peso">${orden}</span>
@@ -2002,33 +2002,42 @@ function h(s) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 (function initVrpPanel() {
-  const VRP_STATUS_COLOR = {
-    NORMAL:      "#166534",
-    EDGE_CASE:   "#92400e",
-    CRITICO:     "#991b1b",
-    SOBRECARGA:  "#991b1b",
-    OK_PEQUEÑO:  "#1d4ed8",
-    SIN_HIST:    "#475569",
-    CONSOLIDADA: "#6d28d9",
-  };
-  const VRP_STATUS_LABEL = {
-    NORMAL:      "Normal (≤30%)",
-    EDGE_CASE:   "Caso especial (30–50%)",
-    CRITICO:     "Crítico (>50%)",
-    SOBRECARGA:  "Sobrecarga",
-    OK_PEQUEÑO:  "Camión pequeño",
-    SIN_HIST:    "Sin historial",
-    CONSOLIDADA: "Consolidada",
-  };
-  const VRP_STATUS_TOOLTIP = {
-    NORMAL:      "Variación ≤30% respecto al historial. Carga dentro del rango habitual para esta ruta y vehículo.",
-    EDGE_CASE:   "Variación entre 30% y 50% respecto al historial. La carga difiere moderadamente de lo habitual. Revisa si es esperado.",
-    CRITICO:     "Variación >50% respecto al historial. La carga difiere significativamente del comportamiento habitual. Requiere verificación.",
-    SOBRECARGA:  "La carga supera la capacidad del vehículo asignado. Se requiere intervención manual para reasignar paradas o vehículo.",
-    OK_PEQUEÑO:  "Ruta asignada a un vehículo pequeño. La carga es baja pero adecuada para este tipo de unidad.",
-    SIN_HIST:    "Sin historial disponible para esta ruta. No hay datos previos para calcular la desviación típica.",
-    CONSOLIDADA: "Ruta consolidada. Se agruparon sucursales de rutas con carga insuficiente para optimizar el uso de la flota.",
-  };
+  const VRP_CONSOLIDADA_TOOLTIP = "Ruta consolidada. Se agruparon sucursales de rutas con carga insuficiente para optimizar el uso de la flota.";
+
+  const UMBRAL_PEQUEÑO_KG = 1300;
+
+  function _vrpEstado(r) {
+    const uso = r["uso_%"] ?? 0;
+    const pct = `${uso}%`;
+
+    if (r.estado === "CONSOLIDADA") {
+      return { chipCls: "consol", badgeCls: "CONSOLIDADA", label: "Consolidada", badgeLabel: "Consolidada", tooltip: VRP_CONSOLIDADA_TOOLTIP };
+    }
+    const isSmall = r.is_small ?? (r.capacidad_kg != null && r.capacidad_kg <= UMBRAL_PEQUEÑO_KG);
+    if (isSmall) {
+      return { chipCls: "pequeno", badgeCls: "CARGA_PEQUEÑA", label: "Carga pequeña",
+               badgeLabel: `Carga pequeña · ${pct}`,
+               tooltip: `Utilización ${pct}: vehículo de carga reducida. Las reglas de utilización estándar no aplican para esta unidad.` };
+    }
+    if (uso >= 90 && uso <= 110) {
+      return { chipCls: "excelente", badgeCls: "EXCELENTE", label: "Excelente",
+               badgeLabel: `Excelente · ${pct}`,
+               tooltip: `Utilización ${pct}: carga óptima (90–110% de la capacidad).` };
+    }
+    if (uso >= 60 && uso <= 120) {
+      return { chipCls: "normal",    badgeCls: "ACEPTABLE",  label: "Aceptable",
+               badgeLabel: `Aceptable · ${pct}`,
+               tooltip: `Utilización ${pct}: carga aceptable (60–120% de la capacidad).` };
+    }
+    if (uso < 60) {
+      return { chipCls: "critico",   badgeCls: "SUBCARGA",   label: "Subcarga, caso crítico",
+               badgeLabel: `Subcarga, caso crítico · ${pct}`,
+               tooltip: `Utilización ${pct}: carga menor al 60%. Vehículo subutilizado de forma crítica.` };
+    }
+    return       { chipCls: "critico",   badgeCls: "SOBRECARGA", label: "Sobrecarga, caso crítico",
+               badgeLabel: `Sobrecarga, caso crítico · ${pct}`,
+               tooltip: `Utilización ${pct}: carga mayor al 120%. Vehículo sobrecargado de forma crítica.` };
+  }
 
   let _listoParaGenerar = false;
 
@@ -2136,7 +2145,7 @@ function h(s) {
     const msgs = [
       "Cargando historial de rutas…",
       "Construyendo template VRP…",
-      "Calculando desviaciones por ruta…",
+      "Calculando utilización por ruta…",
       "Consolidando rutas subocupadas…",
       "Ordenando secuencias…",
     ];
@@ -2183,35 +2192,30 @@ function h(s) {
         "Generado: " + timestamp.slice(0, 16).replace("T", " ");
     }
 
-    // Chips de estado
-    const conteo = {};
-    reporte.forEach(r => { conteo[r.estado] = (conteo[r.estado] || 0) + 1; });
+    // Chips de estado — agrupados por nuevo estado
+    const conteoChips = {};
+    reporte.forEach(r => {
+      const est = _vrpEstado(r);
+      if (!conteoChips[est.label]) conteoChips[est.label] = { cnt: 0, chipCls: est.chipCls, tooltip: est.tooltip };
+      conteoChips[est.label].cnt++;
+    });
     const chipsEl = document.getElementById("vrp-estado-cards");
-    chipsEl.innerHTML = Object.entries(conteo).map(([estado, cnt]) => {
-      const cls = {
-        NORMAL: "normal", EDGE_CASE: "edge", CRITICO: "critico",
-        SOBRECARGA: "critico", OK_PEQUEÑO: "pequeno",
-        SIN_HIST: "sinhist", CONSOLIDADA: "consol",
-      }[estado] || "sinhist";
-      const tip = VRP_STATUS_TOOLTIP[estado] || "";
-      return `<span class="vrp-estado-chip ${cls}" data-tooltip="${tip}">${cnt} ${VRP_STATUS_LABEL[estado] || estado}</span>`;
-    }).join("");
+    chipsEl.innerHTML = Object.entries(conteoChips).map(([label, { cnt, chipCls, tooltip }]) =>
+      `<span class="vrp-estado-chip ${chipCls}" data-tooltip="${tooltip}">${cnt} ${label}</span>`
+    ).join("");
 
-    // Tabla
+    // Tabla (sin columnas de historial ni desviación)
     const tbody = document.getElementById("vrp-tabla-body");
     tbody.innerHTML = reporte.map(r => {
-      const dev  = r["desviacion_%"] != null ? r["desviacion_%"].toFixed(1) + "%" : "—";
-      const hist = r.kg_hist_avg != null ? r.kg_hist_avg.toLocaleString() : "—";
-      const uso  = r["uso_%"]      != null ? r["uso_%"] + "%" : "—";
+      const uso = r["uso_%"] != null ? r["uso_%"] + "%" : "—";
+      const est = _vrpEstado(r);
       return `<tr>
         <td>${h(r.vehiculo)}</td>
         <td>${h(r.dia_semana)}</td>
         <td>${r.sucursales}</td>
         <td>${r.kg_total.toLocaleString()}</td>
-        <td>${hist}</td>
-        <td>${dev}</td>
         <td>${uso}</td>
-        <td><span class="vrp-estado-badge ${r.estado}" data-tooltip="${VRP_STATUS_TOOLTIP[r.estado] || ''}">${VRP_STATUS_LABEL[r.estado] || r.estado}</span></td>
+        <td><span class="vrp-estado-badge ${est.badgeCls}" data-tooltip="${est.tooltip}">${est.badgeLabel}</span></td>
       </tr>`;
     }).join("");
 

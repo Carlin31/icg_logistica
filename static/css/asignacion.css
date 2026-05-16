@@ -463,9 +463,24 @@
   border-radius: 10px;
   background: #fff;
   box-shadow: 0 1px 4px rgba(0,0,0,0.05);
-  transition: box-shadow 0.2s;
+  transition: box-shadow 0.2s, border-color 0.2s;
+  overflow: hidden;
 }
 .ruta-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.10); }
+
+/* Semáforo — acento lateral + borde de tarjeta */
+.ruta-card.status-ok    { border-color: #86efac; box-shadow: inset 5px 0 0 #22c55e, 0 1px 4px rgba(0,0,0,0.05); }
+.ruta-card.status-warn  { border-color: #fcd34d; box-shadow: inset 5px 0 0 #f59e0b, 0 1px 4px rgba(0,0,0,0.05); }
+.ruta-card.status-error { border-color: #fca5a5; box-shadow: inset 5px 0 0 #ef4444, 0 1px 4px rgba(0,0,0,0.05); }
+
+.ruta-card.status-ok:hover    { box-shadow: inset 5px 0 0 #22c55e, 0 4px 16px rgba(34,197,94,0.15); }
+.ruta-card.status-warn:hover  { box-shadow: inset 5px 0 0 #f59e0b, 0 4px 16px rgba(245,158,11,0.15); }
+.ruta-card.status-error:hover { box-shadow: inset 5px 0 0 #ef4444, 0 4px 16px rgba(239,68,68,0.15); }
+
+/* Header con tinte suave según estado */
+.ruta-card.status-ok .ruta-card-header    { background: #f0fdf4; border-bottom-color: #bbf7d0; }
+.ruta-card.status-warn .ruta-card-header  { background: #fffbeb; border-bottom-color: #fde68a; }
+.ruta-card.status-error .ruta-card-header { background: #fff1f2; border-bottom-color: #fecdd3; }
 
 .ruta-card-header {
   display: flex;
@@ -475,6 +490,7 @@
   background: var(--gris-bg-alt);
   border-bottom: 1px solid var(--borde);
   border-radius: 9px 9px 0 0;
+  transition: background 0.2s, border-color 0.2s;
 }
 .ruta-nombre { font-weight: 700; font-size: 0.95rem; color: var(--texto); }
 .ruta-dia-sugerido {
@@ -519,11 +535,11 @@
   font-weight: 600;
   white-space: nowrap;
 }
-.badge-ok      { background: var(--verde-bg);    color: var(--verde); }
-.badge-warn    { background: var(--amarillo-bg); color: var(--amarillo); }
-.badge-error   { background: var(--rojo-bg);     color: var(--rojo); }
-.badge-info    { background: #dbeafe;            color: var(--azul); }
-.badge-neutral { background: #f1f5f9;            color: var(--texto-sub); }
+.badge-ok      { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge-warn    { background: #fef3c7; color: #78350f; border: 1px solid #fcd34d; }
+.badge-error   { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+.badge-info    { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
+.badge-neutral { background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; }
 
 /* ── Tooltips de estado ──────────────────────────────────────── */
 [data-tooltip] {
@@ -602,11 +618,11 @@
   color: var(--texto-sub);
   margin-bottom: 4px;
 }
-.capacidad-bar { height: 8px; background: var(--borde); border-radius: 4px; overflow: hidden; }
-.capacidad-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s; }
-.capacidad-bar-fill.ok    { background: var(--verde); }
-.capacidad-bar-fill.warn  { background: var(--amarillo); }
-.capacidad-bar-fill.error { background: var(--rojo); }
+.capacidad-bar { height: 10px; background: #e2e8f0; border-radius: 6px; overflow: hidden; }
+.capacidad-bar-fill { height: 100%; border-radius: 6px; transition: width 0.5s ease; }
+.capacidad-bar-fill.ok    { background: linear-gradient(90deg, #4ade80, #16a34a); }
+.capacidad-bar-fill.warn  { background: linear-gradient(90deg, #fcd34d, #d97706); }
+.capacidad-bar-fill.error { background: linear-gradient(90deg, #fb923c, #dc2626); }
 
 /* ── Selector de vehículo ── */
 .vehiculo-selector {
@@ -749,9 +765,9 @@ input:checked + .slider:before { transform: translateX(16px); }
   font-weight: 600;
   margin-bottom: 8px;
 }
-.alerta-tiempo.ok    { background: var(--verde-bg); color: var(--verde); }
-.alerta-tiempo.error { background: var(--rojo-bg);  color: var(--rojo); }
-.alerta-tiempo.warn  { background: var(--amarillo-bg); color: var(--amarillo); }
+.alerta-tiempo.ok    { background: #ecfdf5; color: #065f46; border: 1px solid #a7f3d0; border-left: 3px solid #22c55e; }
+.alerta-tiempo.warn  { background: #fffbeb; color: #78350f; border: 1px solid #fde68a; border-left: 3px solid #f59e0b; }
+.alerta-tiempo.error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; border-left: 3px solid #ef4444; }
 
 /* ── Resumen de asignación ── */
 .resumen-asignacion {
@@ -1759,11 +1775,12 @@ input:checked + .slider:before { transform: translateX(16px); }
   font-weight: 600;
   border: 1px solid transparent;
 }
-.vrp-estado-chip.normal    { background: #dcfce7; color: #166534; border-color: #86efac; }
-.vrp-estado-chip.edge      { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
-.vrp-estado-chip.critico   { background: #fef2f2; color: #991b1b; border-color: #fca5a5; }
-.vrp-estado-chip.pequeno   { background: #eff6ff; color: #1d4ed8; border-color: #bfdbfe; }
-.vrp-estado-chip.sinhist   { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+.vrp-estado-chip.excelente { background: #4ade80; color: #14532d; border-color: #22c55e; }
+.vrp-estado-chip.normal    { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+.vrp-estado-chip.edge      { background: #fef3c7; color: #78350f; border-color: #fcd34d; }
+.vrp-estado-chip.critico   { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+.vrp-estado-chip.pequeno   { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+.vrp-estado-chip.sinhist   { background: #f1f5f9; color: #475569; border-color: #e2e8f0; }
 .vrp-estado-chip.consol    { background: #f5f3ff; color: #6d28d9; border-color: #c4b5fd; }
 
 .vrp-consol-item, .vrp-critica-item {
@@ -1801,19 +1818,60 @@ input:checked + .slider:before { transform: translateX(16px); }
 .vrp-tabla tbody tr:hover { background: #f8fafc; }
 
 .vrp-estado-badge {
-  display: inline-block;
-  padding: 2px 9px;
-  border-radius: 12px;
-  font-size: 0.72rem;
-  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 11px;
+  border-radius: 20px;
+  font-size: 0.74rem;
+  font-weight: 600;
+  white-space: nowrap;
+  letter-spacing: 0.01em;
 }
-.vrp-estado-badge.NORMAL     { background: #dcfce7; color: #166534; }
-.vrp-estado-badge.EDGE_CASE  { background: #fef3c7; color: #92400e; }
-.vrp-estado-badge.CRITICO    { background: #fef2f2; color: #991b1b; }
-.vrp-estado-badge.SOBRECARGA { background: #fef2f2; color: #991b1b; }
-.vrp-estado-badge.OK_PEQUEÑO { background: #eff6ff; color: #1d4ed8; }
-.vrp-estado-badge.SIN_HIST   { background: #f1f5f9; color: #475569; }
-.vrp-estado-badge.CONSOLIDADA{ background: #f5f3ff; color: #6d28d9; }
+/* Punto indicador de semáforo */
+.vrp-estado-badge::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Excelente — verde medio (óptimo) */
+.vrp-estado-badge.EXCELENTE {
+  background: #bbf7d0; color: #14532d; border: 1px solid #4ade80;
+}
+.vrp-estado-badge.EXCELENTE::before { background: #16a34a; }
+
+/* Aceptable — verde claro (dentro del rango) */
+.vrp-estado-badge.ACEPTABLE {
+  background: #f0fdf4; color: #166534; border: 1px solid #86efac;
+}
+.vrp-estado-badge.ACEPTABLE::before { background: #4ade80; }
+
+/* Subcarga — rojo suave (debajo del 60%) */
+.vrp-estado-badge.SUBCARGA {
+  background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;
+}
+.vrp-estado-badge.SUBCARGA::before { background: #ef4444; }
+
+/* Sobrecarga — naranja-rojo (por encima del 120%) */
+.vrp-estado-badge.SOBRECARGA {
+  background: #fff7ed; color: #c2410c; border: 1px solid #fdba74;
+}
+.vrp-estado-badge.SOBRECARGA::before { background: #f97316; }
+
+/* Carga pequeña — azul informativo */
+.vrp-estado-badge.CARGA_PEQUEÑA {
+  background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd;
+}
+.vrp-estado-badge.CARGA_PEQUEÑA::before { background: #3b82f6; }
+
+/* Consolidada — morado */
+.vrp-estado-badge.CONSOLIDADA {
+  background: #f5f3ff; color: #6d28d9; border: 1px solid #c4b5fd;
+}
+.vrp-estado-badge.CONSOLIDADA::before { background: #7c3aed; }
 
 .vrp-acciones {
   display: flex;
