@@ -312,9 +312,9 @@
 /* ── Panel principal ─────────────────────────────────────── */
 .panel-principal {
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 340px 1fr;
   gap: 16px;
-  min-height: 520px;
+  min-height: 420px;
 }
 @media (max-width: 900px) {
   .panel-principal { grid-template-columns: 1fr; min-height: auto; }

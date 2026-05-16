@@ -453,7 +453,7 @@
 /* ── Grid de tarjetas de ruta ── */
 .rutas-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 18px;
 }
 
@@ -965,8 +965,8 @@ input:checked + .slider:before { transform: translateX(16px); }
 
 /* ── Columna de día ── */
 .sel-day-col {
-  flex: 0 0 215px;
-  min-width: 215px;
+  flex: 0 0 175px;
+  min-width: 175px;
   background: #f8fafc;
   border: 1.5px solid var(--borde);
   border-radius: 10px;

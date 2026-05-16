@@ -76,7 +76,7 @@
   --text-lg:       1rem;
 
   /* ── Header ── */
-  --header-h:      64px;
+  --header-h:      52px;
   --header-bg:     var(--azul-oscuro);
   --header-border: rgba(255,255,255,.08);
 }
@@ -91,9 +91,10 @@
 /* ── Base ───────────────────────────────────────────────────────── */
 html {
   scroll-behavior: smooth;
-  /* Tipografía fluida: 13px en móvil → 14.5px en laptop estándar.
-     Todas las unidades rem escalan en cascada. */
-  font-size: clamp(13px, 0.4vw + 10px, 14.5px);
+  /* Tipografía fluida: 10.5px en móvil → 11.6px en desktop.
+     Equivalente visual a clamp(13,14.5px) × 0.8 sin usar zoom.
+     Todos los valores rem escalan en cascada automáticamente. */
+  font-size: clamp(10.5px, 0.32vw + 8px, 11.6px);
 }
 
 body {
@@ -102,7 +103,6 @@ body {
   color: var(--texto-oscuro);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
-  zoom: 0.8;
 }
 
 /* ════════════════════════════════════════════════════════════════
