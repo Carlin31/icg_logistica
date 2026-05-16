@@ -39,6 +39,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from db import get_db
+from logic.mayoristas_logic import calcular_distribucion_mayoristas
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -388,13 +389,26 @@ def _fallback_haversine(coords: list, velocidad_kmh: float = 35.0) -> dict:
 
 # ── Cálculo de tiempos ─────────────────────────────────────────
 
-def calcular_tiempos_ruta(ruta: dict, pesos: dict, usar_cache: bool = True) -> dict:
-    sucursales = _ordenar_sucursales_planificacion(ruta.get("sucursales", []))
+def calcular_tiempos_ruta(
+    ruta: dict,
+    pesos: dict,
+    usar_cache: bool = True,
+    paradas: list | None = None,
+) -> dict:
+    if paradas is None:
+        sucursales = _ordenar_sucursales_planificacion(ruta.get("sucursales", []))
+        mayoristas = ruta.get("mayoristas") or []
+        if mayoristas:
+            paradas = [dict(s, tipo="sucursal") for s in sucursales]
+            paradas += [dict(m, tipo="mayorista") for m in mayoristas]
+            paradas.sort(key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+        else:
+            paradas = [dict(s, tipo="sucursal") for s in sucursales]
     VACIO = {
         "traslado_min": 0.0, "descarga_min": 0.0, "extra_min": HORAS_EXTRA_RUTA_MIN,
         "total_min": 0.0, "distancia_km": 0.0, "origen_tiempo": "sin_coordenadas",
     }
-    if not sucursales:
+    if not paradas:
         return VACIO
 
     cfg          = _obtener_config_general()
@@ -404,9 +418,9 @@ def calcular_tiempos_ruta(ruta: dict, pesos: dict, usar_cache: bool = True) -> d
     velocidad    = float(cfg.get("velocidad_kmh")       or 35.0)
 
     coords = [(matriz_lat, matriz_lon)]
-    for s in sucursales:
-        lat = s.get("latitud")
-        lon = s.get("longitud")
+    for p in paradas:
+        lat = p.get("latitud") if p.get("latitud") is not None else p.get("lat")
+        lon = p.get("longitud") if p.get("longitud") is not None else p.get("lon")
         if lat is not None and lon is not None:
             coords.append((float(lat), float(lon)))
 
@@ -425,10 +439,14 @@ def calcular_tiempos_ruta(ruta: dict, pesos: dict, usar_cache: bool = True) -> d
             _guardar_cache(clave, resultado_traslado)
 
     # Descarga acumulada: cada sucursal tiene su propio tope de 120 min
+    def _peso_descarga(p: dict) -> float:
+        if p.get("tipo") == "mayorista" or (p.get("id_cliente") is not None and p.get("num_tienda") is None):
+            return float(p.get("peso_kg") or 0)
+        return float(pesos.get(str(p.get("num_tienda", "")), p.get("peso_kg") or 0) or 0)
+
     tiempo_descarga = sum(
-        min(pesos.get(str(s.get("num_tienda", "")), 0.0) * min_descarga,
-            MAX_DESCARGA_POR_SUCURSAL)
-        for s in sucursales
+        min(_peso_descarga(p) * min_descarga, MAX_DESCARGA_POR_SUCURSAL)
+        for p in paradas
     )
     traslado_min = resultado_traslado.get("traslado_min", 0.0)
     distancia_km = resultado_traslado.get("distancia_km", 0.0)
@@ -444,12 +462,21 @@ def calcular_tiempos_ruta(ruta: dict, pesos: dict, usar_cache: bool = True) -> d
     }
 
 
-def calcular_tiempos_multiples_rutas(rutas: list, pesos: dict) -> dict:
+def calcular_tiempos_multiples_rutas(rutas: list, pesos: dict, logistica_id: str | None = None) -> dict:
     resultados = {}
-    for ruta in rutas:
-        ruta_id = str(ruta.get("_id", ""))
+    paradas_map: dict = {}
+    if logistica_id:
         try:
-            resultados[ruta_id] = calcular_tiempos_ruta(ruta, pesos)
+            dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+            paradas_map = dist.get("paradas_integradas", {})
+        except Exception:
+            paradas_map = {}
+
+    for ruta in rutas:
+        ruta_id = str(ruta.get("_id", "") or ruta.get("id", ""))
+        try:
+            paradas = paradas_map.get(ruta_id)
+            resultados[ruta_id] = calcular_tiempos_ruta(ruta, pesos, paradas=paradas)
         except Exception:
             resultados[ruta_id] = {
                 "traslado_min": 0.0, "descarga_min": 0.0, "extra_min": HORAS_EXTRA_RUTA_MIN,
@@ -631,12 +658,6 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
     util_min, util_max                    = _leer_rango_utilizacion()
     estrategia_vol, factor_vol, radio_km  = _leer_config_volumen()
 
-    # ── Datos de mayoristas (distribucion_mayoristas + extraccion) ──
-    # Se cargan antes del cálculo de pesos para incluir el peso de los
-    # mayoristas ya distribuidos en el peso total de cada ruta (Fase 1).
-    # Esto garantiza que el vehículo asignado conozca la carga real completa.
-    mayoristas_por_ruta, todos_mayoristas = _cargar_datos_mayoristas(logistica_id)
-
     # ── Días habilitados (orden canónico) ────────────────────────
     dias_hab = [d for d in DIAS_ORDEN if config_dias.get(d, {}).get("habilitado")]
     if not dias_hab:
@@ -644,6 +665,12 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
 
     # ── Filtrar rutas seleccionadas ──────────────────────────────
     rutas = [r for r in rutas_input if str(r.get("_id", "")) not in ids_excluidos]
+
+    # ── Datos de mayoristas (cercanía + extracción) ─────────────────
+    # Se cargan antes del cálculo de pesos para incluir el peso de los
+    # mayoristas ya distribuidos en el peso total de cada ruta (Fase 1).
+    # Esto garantiza que el vehículo asignado conozca la carga real completa.
+    mayoristas_por_ruta, todos_mayoristas = _cargar_datos_mayoristas(logistica_id, rutas)
 
     # ── Vehículos disponibles ordenados de menor a mayor capacidad
     # Solo vehículos activos (activo=True o sin campo, por compatibilidad)
@@ -893,7 +920,7 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
 # BLOQUE 6-7 — Mayoristas: helpers y optimización MAY-1 / MAY-2
 # ═══════════════════════════════════════════════════════════════
 
-def _cargar_datos_mayoristas(logistica_id: str) -> tuple:
+def _cargar_datos_mayoristas(logistica_id: str, rutas: list | None = None) -> tuple:
     """
     Carga los datos de mayoristas necesarios para las fases 1 y 2 de la asignación.
 
@@ -921,124 +948,12 @@ def _cargar_datos_mayoristas(logistica_id: str) -> tuple:
                                 (asignados a rutas + sin_asignar con coords).
                                 Usada para identificar candidatos al agregar (MAY-2).
     """
-    oid = _parse_oid(logistica_id)
-
-    # ── 1. Pesos del ciclo activo (extraccion.mayoristas) ────────
-    # Estructura guardada: [{codigo: int, nombre: str, peso_total_kg: float}]
-    # Regla: solo se consideran mayoristas con pedido real (peso_total_kg > 0).
-    pesos_may: dict = {}
     try:
-        db  = get_db()
-        ext = db["extraccion"].find_one({"logistica_id": oid})
-        if ext:
-            for m in ext.get("mayoristas", []):
-                codigo = m.get("codigo")
-                if codigo is not None:
-                    try:
-                        peso = float(m.get("peso_total_kg", 0) or 0)
-                        if peso > 0:
-                            pesos_may[int(str(codigo).split(".")[0])] = peso
-                    except (ValueError, TypeError):
-                        pass
+        dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+        return dist.get("mayoristas_por_ruta", {}), dist.get("todos_mayoristas", [])
     except Exception as e:
-        print(f"[_cargar_datos_mayoristas] Error al leer pesos: {e}")
-
-    # ── 2. Distribución desde distribucion_mayoristas ────────────
-    # Nota: la clave del documento es '_key' = 'ultimo', no '_tipo'.
-    mayoristas_por_ruta: dict = {}
-    todos_asignados:     list = []   # mayoristas que ya están en alguna ruta
-    ids_sin_asignar:     set  = set()
-
-    try:
-        db   = get_db()
-        dist = db["distribucion_mayoristas"].find_one({"_key": "ultimo"})
-        if dist:
-            # 2a. Mayoristas ya asignados a rutas
-            for ruta in dist.get("rutas", []):
-                ruta_id = str(ruta.get("_id", ""))
-                mays: list = []
-                for p in ruta.get("paradas_integradas", []):
-                    if p.get("tipo") != "mayorista":
-                        continue
-                    id_cl = p.get("id_cliente")
-                    if id_cl is None:
-                        continue
-                    try:
-                        id_int = int(str(id_cl).split(".")[0])
-                    except (ValueError, TypeError):
-                        continue
-                    if id_int not in pesos_may:
-                        continue
-                    lat = p.get("latitud")
-                    lon = p.get("longitud")
-                    entry = {
-                        "id_cliente": id_int,
-                        "nombre":     p.get("nombre_base") or p.get("nombre", ""),
-                        "peso_kg":    pesos_may.get(id_int, 0.0),
-                        "lat":        float(lat) if lat is not None else None,
-                        "lon":        float(lon) if lon is not None else None,
-                    }
-                    mays.append(entry)
-                    todos_asignados.append(entry)
-                if mays:
-                    mayoristas_por_ruta[ruta_id] = mays
-
-            # 2b. Mayoristas con coords pero rutas llenas (sin_asignar)
-            # El documento no guarda sus coordenadas; se obtienen de clientes_mayoristas.
-            for m in dist.get("sin_asignar", []):
-                id_cl = m.get("id_cliente")
-                if id_cl is not None:
-                    try:
-                        id_int = int(str(id_cl).split(".")[0])
-                        if id_int in pesos_may:
-                            ids_sin_asignar.add(id_int)
-                    except (ValueError, TypeError):
-                        pass
-    except Exception as e:
-        print(f"[_cargar_datos_mayoristas] Error al leer distribución: {e}")
-
-    # ── 3. Coordenadas de sin_asignar (lectura mínima) ───────────
-    # Solo se consulta clientes_mayoristas para los id_cliente que están en
-    # sin_asignar y no han aparecido ya en paradas_integradas.
-    sin_asignar_con_coords: list = []
-    ids_ya_asignados = {m["id_cliente"] for m in todos_asignados}
-    ids_a_buscar     = ids_sin_asignar - ids_ya_asignados
-
-    if ids_a_buscar:
-        try:
-            db = get_db()
-            for c in db["clientes_mayoristas"].find(
-                {},
-                {"_id": 0, "id_cliente": 1, "nombre": 1, "latitud": 1, "longitud": 1},
-            ):
-                id_cl = c.get("id_cliente")
-                if id_cl is None:
-                    continue
-                try:
-                    id_int = int(str(id_cl).split(".")[0])
-                except (ValueError, TypeError):
-                    continue
-                if id_int not in ids_a_buscar:
-                    continue
-                lat = c.get("latitud")
-                lon = c.get("longitud")
-                if lat is None or lon is None:
-                    continue
-                sin_asignar_con_coords.append({
-                    "id_cliente": id_int,
-                    "nombre":     c.get("nombre", ""),
-                    "peso_kg":    pesos_may.get(id_int, 0.0),
-                    "lat":        float(lat),
-                    "lon":        float(lon),
-                })
-        except Exception as e:
-            print(f"[_cargar_datos_mayoristas] Error al leer sin_asignar: {e}")
-
-    # todos_mayoristas = asignados a rutas + sin_asignar con coords
-    # Candidatos válidos para agregar en MAY-2 (se filtra por mayoristas_usados al usar)
-    todos_mayoristas = todos_asignados + sin_asignar_con_coords
-
-    return mayoristas_por_ruta, todos_mayoristas
+        print(f"[_cargar_datos_mayoristas] Error al calcular cercania: {e}")
+        return {}, []
 
 
 def _ejecutar_optimizacion_mayoristas(
@@ -1573,66 +1488,23 @@ def guardar_asignacion(payload: dict, logistica_id: str = None) -> dict:
 
 def obtener_mayoristas_por_ruta(logistica_id: str) -> dict:
     """
-    Devuelve {ruta_id: [{id_cliente, nombre, peso_kg, lat, lon, desvio_m, orden}]}
-    leyendo desde distribucion_mayoristas (paradas_integradas) y cruzando los
-    pesos con extraccion.mayoristas del ciclo logístico activo.
+    Devuelve mayoristas asignados por cercanía y el orden sugerido de sucursales.
 
-    Solo incluye mayoristas cuyo tipo sea 'mayorista' en paradas_integradas.
+    Retorna:
+      {
+        "mayoristas": {ruta_id: [..] },
+        "orden_sucursales": {ruta_id: {num_tienda: orden}}
+      }
     """
-    oid = _parse_oid(logistica_id)
-    result: dict = {}
     try:
-        db = get_db()
-
-        # Pesos del ciclo activo
-        # Regla: solo mayoristas con pedido (peso_total_kg > 0).
-        pesos_may: dict = {}
-        ext = db["extraccion"].find_one({"logistica_id": oid})
-        if ext:
-            for m in ext.get("mayoristas", []):
-                codigo = m.get("codigo")
-                if codigo is not None:
-                    try:
-                        peso = float(m.get("peso_total_kg", 0) or 0)
-                        if peso > 0:
-                            pesos_may[int(str(codigo).split(".")[0])] = peso
-                    except (ValueError, TypeError):
-                        pass
-
-        # Distribución desde colección principal
-        dist = db["distribucion_mayoristas"].find_one({"_key": "ultimo"})
-        if dist:
-            for ruta in dist.get("rutas", []):
-                ruta_id = str(ruta.get("_id", ""))
-                mays: list = []
-                for p in ruta.get("paradas_integradas", []):
-                    if p.get("tipo") != "mayorista":
-                        continue
-                    id_cl = p.get("id_cliente")
-                    if id_cl is None:
-                        continue
-                    try:
-                        id_int = int(str(id_cl).split(".")[0])
-                    except (ValueError, TypeError):
-                        continue
-                    if id_int not in pesos_may:
-                        continue
-                    lat = p.get("latitud")
-                    lon = p.get("longitud")
-                    mays.append({
-                        "id_cliente": id_int,
-                        "nombre":     p.get("nombre_base") or p.get("nombre", ""),
-                        "peso_kg":    pesos_may.get(id_int, 0.0),
-                        "lat":        float(lat) if lat is not None else None,
-                        "lon":        float(lon) if lon is not None else None,
-                        "desvio_m":   p.get("desvio_m"),
-                        "orden":      p.get("orden"),
-                    })
-                if mays:
-                    result[ruta_id] = mays
+        dist = calcular_distribucion_mayoristas(logistica_id)
+        return {
+            "mayoristas": dist.get("mayoristas_por_ruta", {}),
+            "orden_sucursales": dist.get("orden_sucursales", {}),
+        }
     except Exception as e:
         print(f"[obtener_mayoristas_por_ruta] Error: {e}")
-    return result
+        return {"mayoristas": {}, "orden_sucursales": {}}
 
 
 def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
@@ -1683,43 +1555,30 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
     except Exception:
         pass
 
-    # ── Paradas ordenadas ────────────────────────────────────────
+    # ── Paradas ordenadas (cercanía) ────────────────────────────
     paradas: list = []
     try:
-        db   = get_db()
-        dist = db["distribucion_mayoristas"].find_one({"_key": "ultimo"})
-        if dist:
-            for ruta in dist.get("rutas", []):
-                if str(ruta.get("_id", "")) != ruta_id:
-                    continue
-                for p in ruta.get("paradas_integradas", []):
-                    lat = p.get("latitud")
-                    lon = p.get("longitud")
-                    if lat is None or lon is None:
-                        continue
-                    tipo   = p.get("tipo", "sucursal")
-                    id_cl  = p.get("id_cliente")
-                    peso   = 0.0
-                    if tipo == "mayorista":
-                        if id_cl is None:
-                            continue
-                        try:
-                            id_int = int(str(id_cl).split(".")[0])
-                        except (ValueError, TypeError):
-                            continue
-                        if id_int not in pesos_may:
-                            continue
-                        peso = pesos_may.get(id_int, 0.0)
-                    paradas.append({
-                        "tipo":     tipo,
-                        "nombre":   p.get("nombre_base") or p.get("nombre", ""),
-                        "lat":      float(lat),
-                        "lon":      float(lon),
-                        "orden":    p.get("orden"),
-                        "peso_kg":  peso,
-                        "desvio_m": p.get("desvio_m"),
-                    })
-                break
+        dist = calcular_distribucion_mayoristas(logistica_id)
+        base = dist.get("paradas_integradas", {}).get(ruta_id, [])
+        for p in base:
+            lat = p.get("latitud")
+            lon = p.get("longitud")
+            if lat is None or lon is None:
+                continue
+            tipo = p.get("tipo", "sucursal")
+            nombre = p.get("nombre_base") or p.get("nombre", "")
+            peso = float(p.get("peso_kg") or 0)
+            paradas.append({
+                "tipo":     tipo,
+                "nombre":   nombre,
+                "lat":      float(lat),
+                "lon":      float(lon),
+                "orden":    p.get("orden"),
+                "peso_kg":  peso,
+                "desvio_m": p.get("desvio_m"),
+                "num_tienda": p.get("num_tienda"),
+                "id_cliente": p.get("id_cliente"),
+            })
     except Exception as e:
         print(f"[obtener_geometria_ruta] Error leyendo distribución: {e}")
 

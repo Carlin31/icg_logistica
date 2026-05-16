@@ -218,8 +218,22 @@ async function cargarMayoristas() {
     const res = await fetch("/asignacion/mayoristas-por-ruta");
     if (res.ok) {
       const data = await res.json();
-      // data es { ruta_id: [{id_cliente, nombre, peso_kg, lat, lon, ...}] }
-      _mayoristas = data || {};
+      // data es { mayoristas: {ruta_id: [...]}, orden_sucursales: {ruta_id: [num_tienda...]}}
+      const may = (data && data.mayoristas) ? data.mayoristas : {};
+      const ordenSuc = (data && data.orden_sucursales) ? data.orden_sucursales : {};
+      _mayoristas = may || {};
+
+      _rutas.forEach(r => {
+        const rutaId = String(r._id);
+        const ordenList = ordenSuc[rutaId];
+        if (!Array.isArray(ordenList) || ordenList.length === 0) return;
+        const ordenMap = {};
+        ordenList.forEach((num, idx) => { ordenMap[String(num)] = idx + 1; });
+        (r.sucursales || []).forEach(s => {
+          const ord = ordenMap[String(s.num_tienda)];
+          if (ord != null) s.orden = ord;
+        });
+      });
     }
   } catch (_) {
     _mayoristas = {};
@@ -1244,8 +1258,7 @@ function renderTarjetaRuta(ruta, cfgDia, diaRuta, orden) {
   const numParadas = numSucs + mayRuta.length;
 
   // Combina sucursales y mayoristas en una sola lista ordenada por `orden`
-  // (campo proveniente de distribucion_mayoristas en MongoDB), respetando
-  // la secuencia de entrega exacta tal como está almacenada en la base de datos.
+  // (calculado por cercanía), respetando la secuencia de entrega.
   const paradasCombinadas = [
     ...(ruta.sucursales || []).map(s => ({ tipo: "sucursal", orden: s.orden ?? 9999, data: s })),
     ...mayRuta.map(m => ({ tipo: "mayorista", orden: m.orden ?? 9999, data: m })),

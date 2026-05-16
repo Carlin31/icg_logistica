@@ -335,8 +335,8 @@
 }
 .panel-izq-header {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
   padding: 16px 18px 12px;
   border-bottom: 1px solid var(--borde, #e2e8f0);
 }
@@ -344,6 +344,7 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  flex-wrap: wrap;
 }
 .titulo-ruta { font-size: 1.05rem; margin: 0; color: var(--texto, #1e293b); }
 .meta-ruta {
@@ -605,6 +606,23 @@
   flex-shrink: 0;
 }
 
+.may-quitar {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #c2410c;
+  border-radius: 4px;
+  padding: 2px 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.may-quitar:hover { background: #ffedd5; border-color: #f97316; }
+
+.btn-agregar-may { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+.btn-agregar-may:hover { background: #ffedd5; }
+
 /* ══════════════════════════════════════════════════════════════
    SELECTOR DE VEHÍCULO
 ══════════════════════════════════════════════════════════════ */
@@ -794,6 +812,29 @@
   justify-content: space-between;
   gap: 6px;
 }
+
+.veh-opcion-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ── Indicador de uso semanal X/Y ────────────────────────────── */
+.veh-uso-chip {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.veh-uso-chip.uso-libre  { background: #dcfce7; color: #15803d; }
+.veh-uso-chip.uso-bajo   { background: #dbeafe; color: #1d4ed8; }
+.veh-uso-chip.uso-medio  { background: #fef9c3; color: #92400e; }
+.veh-uso-chip.uso-lleno  { background: #fee2e2; color: #dc2626; }
 
 /* ── Barra de utilización por ruta ───────────────────────────── */
 .veh-util-wrap {

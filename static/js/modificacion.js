@@ -24,6 +24,7 @@ let _pendientes             = {};   // { num_tienda: {num_tienda, nombre, latitu
 let _quitarResolve          = null;
 let _crearRuta              = { dia: "", vehiculo: "", sucursales: [], query: "" };
 let _configDias             = {};          // config_dias from MongoDB (per-day schedule)
+let _mayoristasTodos        = [];          // todos los mayoristas disponibles [{id_cliente, nombre, peso_kg, latitud, longitud}]
 
 const MSG_MOD = {
   recalcular: [
@@ -187,10 +188,18 @@ function bindEventos() {
   document.getElementById("btn-guardar-solo")?.addEventListener("click",   () => guardarTodo(false));
   document.getElementById("btn-guardar-seguir")?.addEventListener("click", () => guardarTodo(true));
   document.getElementById("btn-agregar-suc")?.addEventListener("click", abrirModalAgregar);
+  document.getElementById("btn-agregar-may")?.addEventListener("click", abrirModalAgregarMayorista);
   document.getElementById("btn-crear-ruta")?.addEventListener("click", abrirModalCrearRuta);
   document.getElementById("btn-eliminar-ruta")?.addEventListener("click", eliminarRutaActiva);
   document.getElementById("modal-agregar-close")?.addEventListener("click", cerrarModalAgregar);
+  document.getElementById("modal-may-close")?.addEventListener("click", cerrarModalAgregarMayorista);
   document.getElementById("buscar-sucursal")?.addEventListener("input", filtrarDisponibles);
+  document.getElementById("buscar-mayorista")?.addEventListener("input", () => {
+    renderMayoristasDisponibles(document.getElementById("buscar-mayorista").value);
+  });
+  document.getElementById("modal-agregar-may")?.addEventListener("click", (e) => {
+    if (e.target.id === "modal-agregar-may") cerrarModalAgregarMayorista();
+  });
   document.getElementById("modal-agregar")?.addEventListener("click", (e) => {
     if (e.target.id === "modal-agregar") cerrarModalAgregar();
   });
@@ -266,8 +275,9 @@ async function cargarDatos() {
     _vehiculos      = vehRes.ok ? await vehRes.json() : [];
     try { _configDias = (horariosRes?.ok) ? await horariosRes.json() : {}; } catch (_) { _configDias = {}; }
 
-    _rutas       = rutasData.rutas || [];
-    _logisticaId = rutasData.logistica_id || _logisticaId || "";
+    _rutas          = rutasData.rutas || [];
+    _logisticaId    = rutasData.logistica_id || _logisticaId || "";
+    _mayoristasTodos = rutasData.mayoristas_disponibles || [];
 
     if (rutasData.status !== "ok" || _rutas.length === 0) {
       banner.style.display = "none";
@@ -691,6 +701,10 @@ function renderSelectorVehiculo(ruta) {
   const pctActual    = vehActual && vehActual.capacidad_ton > 0
     ? (pesoTon / vehActual.capacidad_ton) * 100 : null;
 
+  // Días activos en esta logística (para denominador del indicador semanal)
+  const diasConRutas = [...new Set(_rutas.map(r => r.dia).filter(Boolean))];
+  const totalDiasSemana = diasConRutas.length || 5;
+
   // Ordenar: disponibles primero (más cercano al 100%), ocupados al fondo
   const ordenados = [..._vehiculos].sort((a, b) => {
     const aOcu = !!(a.ocupacion || {})[ruta.dia] && a.placas !== placasActual;
@@ -736,6 +750,13 @@ function renderSelectorVehiculo(ruta) {
       badge = `<span class="veh-badge veh-badge--mejor">✦ Mejor ajuste</span>`;
     }
 
+    const diasUsados     = (v.dias_ocupados || []).length;
+    const usoChipClass   = diasUsados === 0 ? "uso-libre"
+                         : diasUsados >= totalDiasSemana ? "uso-lleno"
+                         : diasUsados >= Math.ceil(totalDiasSemana * 0.6) ? "uso-medio"
+                         : "uso-bajo";
+    const usoChip = `<span class="veh-uso-chip ${usoChipClass}" title="Usado ${diasUsados} de ${totalDiasSemana} días esta semana">${diasUsados}/${totalDiasSemana}</span>`;
+
     const tooltip = `${v.abrev || v.descripcion} · ${v.capacidad_ton} ton · ${pctRuta.toFixed(1)}% utilización para esta ruta${v.chofer ? " · " + v.chofer : ""}`;
 
     return `
@@ -746,7 +767,7 @@ function renderSelectorVehiculo(ruta) {
             <span class="veh-nombre">${h(v.abrev || v.descripcion)}</span>
             <span class="veh-detalle">${h(v.placas)} · ${v.capacidad_ton} ton${v.chofer ? " · " + h(v.chofer) : ""}</span>
           </div>
-          ${badge}
+          <div class="veh-opcion-right">${usoChip}${badge}</div>
         </div>
         <div class="veh-util-wrap">
           <div class="veh-util-track">
@@ -962,7 +983,7 @@ function renderParadas(ruta) {
               ${p.latitud == null ? ' · <span style="color:#ef4444;font-size:0.65rem">sin coords</span>' : ""}
             </div>
           </div>
-          <span class="may-peso">${p.peso_kg > 0 ? p.peso_kg.toLocaleString("es-MX") + " kg" : "—"}</span>
+          <button class="suc-quitar may-quitar" data-idx="${i}" title="Quitar de la ruta"><i data-lucide="x" style="width:13px;height:13px"></i></button>
         </div>`;
     }
     // Sucursal
@@ -983,7 +1004,14 @@ function renderParadas(ruta) {
 
   setupDragAndDropParadas(lista, ruta);
 
-  lista.querySelectorAll(".suc-quitar").forEach(btn => {
+  lista.querySelectorAll(".suc-quitar:not(.may-quitar)").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      quitarParada(ruta, Number(btn.dataset.idx));
+    });
+  });
+
+  lista.querySelectorAll(".may-quitar").forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       quitarParada(ruta, Number(btn.dataset.idx));
@@ -1091,8 +1119,18 @@ function quitarParada(ruta, idx) {
   mostrarConfirmQuitarParada(p.nombre).then(async (confirmado) => {
     if (!confirmado) return;
 
-    // Registrar como pendiente si es sucursal regular (no mayorista)
-    if (p.tipo !== "mayorista" && p.num_tienda != null) {
+    if (p.tipo === "mayorista" && p.id_cliente != null) {
+      // Persistir retiro de mayorista en MongoDB (fire-and-forget)
+      fetch("/modificacion/quitar-mayorista", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          ruta_id:    ruta.id,
+          id_cliente: p.id_cliente,
+        }),
+      }).catch(err => console.warn("[quitar-mayorista]", err));
+    } else if (p.tipo !== "mayorista" && p.num_tienda != null) {
+      // Registrar sucursal como pendiente y persistir en MongoDB
       const pesoKg = _pesos[String(p.num_tienda)] || p.peso_kg || 0;
       _pendientes[String(p.num_tienda)] = {
         num_tienda: p.num_tienda,
@@ -1101,18 +1139,17 @@ function quitarParada(ruta, idx) {
         longitud:   p.longitud,
         peso_kg:    pesoKg,
       };
-      // Persistir en MongoDB (fire-and-forget)
       fetch("/modificacion/quitar-sucursal", {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          ruta_id:   ruta.id,
-          dia:       ruta.dia,
+          ruta_id:    ruta.id,
+          dia:        ruta.dia,
           num_tienda: p.num_tienda,
-          nombre:    p.nombre,
-          latitud:   p.latitud,
-          longitud:  p.longitud,
-          peso_kg:   pesoKg,
+          nombre:     p.nombre,
+          latitud:    p.latitud,
+          longitud:   p.longitud,
+          peso_kg:    pesoKg,
         }),
       }).catch(err => console.warn("[quitar-sucursal]", err));
     }
@@ -1579,6 +1616,144 @@ function agregarSucursal(ruta, suc) {
   calcularOSRMParaRuta(ruta).then(() => {
     if (_rutasFiltradas[_indiceActivo]?.id === ruta.id) renderContenidoRuta(ruta);
   });
+}
+
+// ── Modal agregar mayorista ────────────────────────────────────
+function abrirModalAgregarMayorista() {
+  document.getElementById("modal-agregar-may").classList.remove("hidden");
+  document.getElementById("buscar-mayorista").value = "";
+  renderMayoristasDisponibles("");
+  setTimeout(() => document.getElementById("buscar-mayorista").focus(), 100);
+}
+function cerrarModalAgregarMayorista() {
+  document.getElementById("modal-agregar-may").classList.add("hidden");
+}
+
+function renderMayoristasDisponibles(query) {
+  const ruta = _rutasFiltradas[_indiceActivo];
+  if (!ruta) return;
+  const enRuta = new Set((ruta.mayoristas || []).map(m => String(m.id_cliente)));
+  const q = (query || "").toLowerCase().trim();
+
+  const disponibles = _mayoristasTodos.filter(m => {
+    if (enRuta.has(String(m.id_cliente))) return false;
+    if (!q) return true;
+    return (m.nombre || "").toLowerCase().includes(q) || String(m.id_cliente).includes(q);
+  }).slice(0, 50);
+
+  const listaEl = document.getElementById("lista-disponibles-may");
+  if (!listaEl) return;
+
+  if (disponibles.length === 0) {
+    listaEl.innerHTML = `<div style="padding:16px;color:#94a3b8;font-size:0.82rem;text-align:center">
+      ${q ? "Sin resultados para esta búsqueda." : "No hay mayoristas disponibles para agregar."}
+    </div>`;
+    return;
+  }
+
+  listaEl.innerHTML = disponibles.map(m => {
+    const peso = (m.peso_kg || 0).toLocaleString("es-MX");
+    return `
+      <div class="disp-item" data-id="${m.id_cliente}">
+        <div>
+          <span class="nombre">${h(m.nombre || `Cliente ${m.id_cliente}`)}</span>
+          <span class="num" style="color:#f97316">★ Mayorista</span>
+        </div>
+        <span style="color:#2563eb;font-size:0.75rem;font-weight:600">${peso} kg · + Agregar</span>
+      </div>`;
+  }).join("");
+  lucide.createIcons();
+
+  listaEl.querySelectorAll(".disp-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const idCl = Number(item.dataset.id);
+      const may  = _mayoristasTodos.find(m => m.id_cliente === idCl);
+      if (!may) return;
+      agregarMayorista(ruta, may);
+      cerrarModalAgregarMayorista();
+    });
+  });
+}
+
+async function agregarMayorista(ruta, may) {
+  const pesoActual = calcularPesoRuta(ruta);
+
+  try {
+    const res = await fetch("/modificacion/agregar-mayorista", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        ruta_id:          ruta.id,
+        dia:              ruta.dia,
+        id_cliente:       may.id_cliente,
+        nombre:           may.nombre,
+        latitud:          may.latitud,
+        longitud:         may.longitud,
+        peso_kg:          may.peso_kg || 0,
+        peso_ruta_actual: pesoActual,
+      }),
+    });
+    const data = await res.json();
+    if (data.status !== "ok") {
+      mostrarToastMod(`Error al agregar mayorista: ${data.mensaje || "desconocido"}`, "err");
+      return;
+    }
+
+    // Incorporar en el estado en memoria
+    if (!ruta.mayoristas) ruta.mayoristas = [];
+    const paradas  = _paradasDeRuta(ruta);
+    const maxOrden = paradas.reduce((m, p) => Math.max(m, p.orden ?? 0), 0);
+    ruta.mayoristas.push({
+      tipo:       "mayorista",
+      id_cliente: may.id_cliente,
+      nombre:     may.nombre,
+      latitud:    may.latitud,
+      longitud:   may.longitud,
+      peso_kg:    may.peso_kg || 0,
+      orden:      maxOrden + 1,
+    });
+
+    // Si el vehículo fue cambiado automáticamente, actualizar estado en memoria
+    if (data.vehiculo_cambiado && data.nuevo_vehiculo) {
+      _cambiarVehiculoEnMemoria(ruta, data.nuevo_vehiculo);
+      mostrarToastMod(
+        `Vehículo cambiado a ${data.nuevo_vehiculo.abrev || data.nuevo_vehiculo.placas} por capacidad insuficiente`,
+        "warn"
+      );
+    }
+
+    delete _tiempos[ruta.id];
+    renderParadas(ruta);
+    _actualizarIndicadoresPeso(ruta);
+    actualizarStatusOSRM();
+    renderNavRutas();
+    calcularOSRMParaRuta(ruta).then(() => {
+      if (_rutasFiltradas[_indiceActivo]?.id === ruta.id) renderContenidoRuta(ruta);
+    });
+    mostrarToastMod(`${may.nombre || `Cliente ${may.id_cliente}`} agregado a la ruta`, "ok");
+  } catch (err) {
+    console.error("[agregarMayorista]", err);
+    mostrarToastMod("Error al agregar mayorista", "err");
+  }
+}
+
+function _cambiarVehiculoEnMemoria(ruta, nuevoVeh) {
+  const vAntes = _vehiculoPorPlacas(ruta.vehiculo_placas || "");
+  if (vAntes && vAntes.ocupacion) {
+    delete vAntes.ocupacion[ruta.dia];
+    _recalcularMetricasVehiculo(vAntes);
+  }
+  const vNuevo = _vehiculoPorPlacas(nuevoVeh.placas || "");
+  if (vNuevo) {
+    if (!vNuevo.ocupacion) vNuevo.ocupacion = {};
+    vNuevo.ocupacion[ruta.dia] = { ruta_id: ruta.id, ruta_nombre: ruta.nombre };
+    _recalcularMetricasVehiculo(vNuevo);
+  }
+  ruta.vehiculo_placas = nuevoVeh.placas;
+  ruta.vehiculo_abrev  = nuevoVeh.abrev;
+  ruta.capacidad_ton   = nuevoVeh.capacidad_ton;
+  renderSelectorVehiculo(ruta);
+  renderIndicadores(ruta);
 }
 
 // ── Recalcular y confirmar ─────────────────────────────────────

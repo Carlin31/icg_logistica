@@ -129,7 +129,7 @@ def post_calcular_tiempos():
 
     pesos = datos.get("pesos") or obtener_pesos(lid)
     try:
-        return jsonify(calcular_tiempos_multiples_rutas(rutas, pesos))
+        return jsonify(calcular_tiempos_multiples_rutas(rutas, pesos, lid))
     except Exception as e:
         return jsonify({"status": "error", "mensaje": str(e)}), 500
 
@@ -145,7 +145,11 @@ def get_calcular_tiempos_ruta(ruta_id: str):
         if not ruta:
             return jsonify({"error": "Ruta no encontrada"}), 404
         pesos     = obtener_pesos(lid)
-        resultado = calcular_tiempos_ruta(ruta, pesos)
+        # Recalcular paradas integradas por cercanía para incluir mayoristas
+        from logic.mayoristas_logic import calcular_distribucion_mayoristas
+        dist = calcular_distribucion_mayoristas(lid, [ruta])
+        paradas = dist.get("paradas_integradas", {}).get(ruta_id)
+        resultado = calcular_tiempos_ruta(ruta, pesos, paradas=paradas)
         return jsonify(resultado)
     except Exception as e:
         return jsonify({"error": str(e)}), 500

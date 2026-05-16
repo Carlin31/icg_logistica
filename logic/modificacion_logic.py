@@ -22,6 +22,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 
 from db import get_db
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, _integrar_paradas
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -58,6 +59,88 @@ def _obtener_config_general() -> dict:
         return db["configuracion"].find_one({"_tipo": {"$exists": False}}) or {}
     except Exception:
         return {}
+
+
+def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ruta: dict) -> dict:
+    """
+    Aplica los overrides manuales al resultado de calcular_distribucion_mayoristas.
+    overrides = { ruta_id: { excluidos: [id_cl,...], incluidos: [id_cl,...] } }
+    """
+    if not overrides:
+        return dist
+
+    mayoristas_por_ruta = {k: list(v) for k, v in dist.get("mayoristas_por_ruta", {}).items()}
+    todos = (
+        dist.get("todos_mayoristas", [])
+        + dist.get("sin_asignar", [])
+        + dist.get("sin_coords", [])
+    )
+    todos_may_index = {int(m.get("id_cliente", 0)): m for m in todos}
+
+    rutas_afectadas: set = set()
+
+    for ruta_id, ov in overrides.items():
+        excluidos = {int(x) for x in ov.get("excluidos", [])}
+        incluidos = {int(x) for x in ov.get("incluidos", [])}
+
+        if excluidos:
+            antes = mayoristas_por_ruta.get(ruta_id, [])
+            despues = [m for m in antes if int(m.get("id_cliente", 0)) not in excluidos]
+            if len(despues) != len(antes):
+                mayoristas_por_ruta[ruta_id] = despues
+                rutas_afectadas.add(ruta_id)
+
+        if incluidos:
+            for other_rid in list(mayoristas_por_ruta.keys()):
+                if other_rid == ruta_id:
+                    continue
+                prev = mayoristas_por_ruta[other_rid]
+                nuevos = [m for m in prev if int(m.get("id_cliente", 0)) not in incluidos]
+                if len(nuevos) != len(prev):
+                    mayoristas_por_ruta[other_rid] = nuevos
+                    rutas_afectadas.add(other_rid)
+            existing_ids = {int(m.get("id_cliente", 0)) for m in mayoristas_por_ruta.get(ruta_id, [])}
+            for id_cl in incluidos:
+                if id_cl not in existing_ids and id_cl in todos_may_index:
+                    mayoristas_por_ruta.setdefault(ruta_id, []).append(dict(todos_may_index[id_cl]))
+                    rutas_afectadas.add(ruta_id)
+
+    paradas_integradas = dict(dist.get("paradas_integradas", {}))
+    orden_sucursales = dict(dist.get("orden_sucursales", {}))
+
+    for ruta_id in rutas_afectadas:
+        sucs_raw = sucursales_por_ruta.get(ruta_id, [])
+        sucs = sorted(sucs_raw, key=lambda s: int(s.get("orden") or 9999))
+        mays = mayoristas_por_ruta.get(ruta_id, [])
+        paradas = _integrar_paradas(sucs, mays)
+        paradas_integradas[ruta_id] = paradas
+
+        orden_map: dict = {}
+        for p in paradas:
+            if p.get("tipo") != "sucursal":
+                continue
+            nt = p.get("num_tienda")
+            if nt is not None:
+                orden_map[str(nt)] = p.get("orden")
+        orden_sucursales[ruta_id] = orden_map
+
+        orden_may: dict = {}
+        for p in paradas:
+            if p.get("tipo") != "mayorista":
+                continue
+            id_cl = p.get("id_cliente")
+            if id_cl is not None:
+                orden_may[int(id_cl)] = p.get("orden")
+        for m in mays:
+            id_cl = m.get("id_cliente")
+            if id_cl is not None and int(id_cl) in orden_may:
+                m["orden"] = orden_may[int(id_cl)]
+
+    dist = dict(dist)
+    dist["mayoristas_por_ruta"] = mayoristas_por_ruta
+    dist["paradas_integradas"] = paradas_integradas
+    dist["orden_sucursales"] = orden_sucursales
+    return dist
 
 
 
@@ -383,80 +466,13 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     except Exception as e:
         print(f"[obtener_rutas_para_modificar] coords_por_ruta error: {e}")
 
-    # ── 3. Mayoristas desde distribucion_mayoristas ────────────
-    # Los campos canónicos de paradas_integradas son:
-    #   id_cliente, nombre_base|nombre, latitud, longitud, desvio_m
-    # Los pesos vienen de extraccion.mayoristas; la distribución no los guarda.
-    mayoristas_por_ruta: dict = {}
-    try:
-        dist = db["distribucion_mayoristas"].find_one({"_key": "ultimo"})
-        if dist:
-            for ruta_dist in dist.get("rutas", []):
-                rid  = str(ruta_dist.get("_id", ""))
-                mays = []
-                for p in ruta_dist.get("paradas_integradas", []):
-                    if p.get("tipo") != "mayorista":
-                        continue
-                    # La colección usa 'latitud'/'longitud' (no 'lat'/'lon')
-                    lat = p.get("latitud")
-                    lon = p.get("longitud")
-                    mays.append({
-                        "tipo":       "mayorista",
-                        "id_cliente": p.get("id_cliente"),
-                        "nombre":     p.get("nombre_base") or p.get("nombre", ""),
-                        "peso_kg":    float(p.get("peso_kg", 0)),
-                        "latitud":    float(lat) if lat is not None else None,
-                        "longitud":   float(lon) if lon is not None else None,
-                        "orden":      p.get("orden"),
-                    })
-                if mays:
-                    mayoristas_por_ruta[rid] = mays
-    except Exception as e:
-        print(f"[obtener_rutas_para_modificar] mayoristas error: {e}")
-
-    # ── 3b. Enriquecer y filtrar mayoristas según pedidos en extracción ────
-    # distribucion_mayoristas no almacena pesos individuales; el peso real de
-    # cada mayorista vive en extraccion[logistica_id].mayoristas[].peso_total_kg.
-    # Regla: solo se incluyen mayoristas con pedido real (peso_total_kg > 0).
-    try:
-        pesos_may_ext: dict = {}   # id_cliente_int → peso_kg
-        ext_doc = db["extraccion"].find_one({"logistica_id": oid})
-        if ext_doc:
-            for m in ext_doc.get("mayoristas", []):
-                id_cl = m.get("codigo") or m.get("id_cliente")
-                try:
-                    peso = float(m.get("peso_total_kg", 0) or 0)
-                    if peso > 0:
-                        pesos_may_ext[int(id_cl)] = peso
-                except (TypeError, ValueError):
-                    pass
-        for rid, mays in list(mayoristas_por_ruta.items()):
-            filtrados = []
-            for m in mays:
-                id_cl = m.get("id_cliente")
-                try:
-                    id_int = int(str(id_cl).split(".")[0])
-                except (TypeError, ValueError):
-                    continue
-                peso = pesos_may_ext.get(id_int, 0.0)
-                if peso <= 0:
-                    continue
-                m["peso_kg"] = peso
-                filtrados.append(m)
-            if filtrados:
-                mayoristas_por_ruta[rid] = filtrados
-            else:
-                mayoristas_por_ruta.pop(rid, None)
-    except Exception as e:
-        print(f"[obtener_rutas_para_modificar] pesos_may error: {e}")
-
-    # ── 4. Construir lista de rutas desde detalle_por_dia ─────
+    # ── 3. Preconstruir sucursales para cálculo de mayoristas ───
     # Mapa de nombres canónicos desde rutas_config (fuente de verdad)
     nombres_map = _obtener_nombres_sucursales()   # { num_tienda_str: nombre }
 
-    # detalle_por_dia[dia] es un dict  { ruta_id: { campos... } }
-    rutas_normalizadas: list = []
-    procesadas: set          = set()
+    sucursales_por_ruta: dict = {}
+    meta_por_ruta: dict = {}
+    procesadas: set = set()
 
     for dia, rutas_del_dia in detalle_por_dia.items():
         if not isinstance(rutas_del_dia, dict):
@@ -515,42 +531,100 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
                     "longitud":     float(lon) if lon is not None else None,
                 })
 
-            mayoristas_norm = mayoristas_por_ruta.get(ruta_id, [])
+            sucursales_por_ruta[ruta_id] = sucursales_norm
+            meta_por_ruta[ruta_id] = {
+                "dia":          dia,
+                "placas":       placas,
+                "veh_abrev":    veh_abrev,
+                "cap_ton":      cap_ton,
+                "peso_kg":      peso_kg,
+                "pct":          pct,
+                "hora_salida":  hora_salida,
+                "hora_regreso": hora_regreso,
+                "cumple_h":     cumple_h,
+                "nombre_r":     nombre_r,
+            }
 
-            # Calcular peso si vino en cero
-            if not peso_kg:
-                peso_kg = (
-                    sum(s["peso_kg"] for s in sucursales_norm)
-                    + sum(m["peso_kg"] for m in mayoristas_norm)
-                )
+    dist = calcular_distribucion_mayoristas(
+        logistica_id,
+        [
+            {"_id": rid, "sucursales": sucs}
+            for rid, sucs in sucursales_por_ruta.items()
+        ],
+    )
+    overrides = doc_asig.get("mayoristas_overrides", {})
+    if overrides:
+        dist = _aplicar_overrides_mayoristas(dist, overrides, sucursales_por_ruta)
+    mayoristas_por_ruta: dict = dist.get("mayoristas_por_ruta", {})
+    orden_sucursales: dict = dist.get("orden_sucursales", {})
+    mayoristas_disponibles: list = dist.get("todos_mayoristas", [])
 
-            con_coords = sum(1 for s in sucursales_norm if s["latitud"] is not None)
+    # ── 4. Construir lista de rutas desde detalle_por_dia ─────
+    rutas_normalizadas: list = []
 
-            rutas_normalizadas.append({
-                "id":                    ruta_id,
-                "nombre":                nombre_r,
-                "tipo":                  "asignada",
-                "dia":                   dia,
-                "vehiculo_placas":       placas,
-                "vehiculo_abrev":        veh_abrev,
-                "capacidad_ton":         cap_ton,
-                "peso_kg":               peso_kg,
-                "pct_utilizacion":       pct,
-                "cumple_peso":           True,
-                "hora_salida":           hora_salida,
-                "hora_regreso":          hora_regreso,
-                "cumple_horario":        cumple_h,
-                "conduccion_min":        0,
-                "descarga_min":          0,
-                "extra_min":             HORAS_EXTRA_RUTA_MIN,
-                "total_min":             0,
-                "distancia_km":          0,
-                "origen_tiempo":         "pendiente",
-                "num_sucursales":        len(sucursales_norm),
-                "sucursales_con_coords": con_coords,
-                "sucursales":            sucursales_norm,
-                "mayoristas":            mayoristas_norm,
-            })
+    for ruta_id, meta in meta_por_ruta.items():
+        sucursales_norm = sucursales_por_ruta.get(ruta_id, [])
+        orden_map = orden_sucursales.get(ruta_id, {})
+        for s in sucursales_norm:
+            nt = s.get("num_tienda")
+            if nt is None:
+                continue
+            orden = orden_map.get(str(nt))
+            if orden is not None:
+                s["orden"] = orden
+
+        mayoristas_norm = mayoristas_por_ruta.get(ruta_id, [])
+
+        meta = meta_por_ruta.get(ruta_id, {})
+        placas       = meta.get("placas", "")
+        veh_abrev    = meta.get("veh_abrev", "")
+        cap_ton      = meta.get("cap_ton")
+        peso_kg      = float(meta.get("peso_kg") or 0)
+        pct          = float(meta.get("pct") or 0)
+        hora_salida  = meta.get("hora_salida", "08:00")
+        hora_regreso = meta.get("hora_regreso", "")
+        cumple_h     = meta.get("cumple_h", True)
+        nombre_r     = meta.get("nombre_r", ruta_id)
+        dia          = meta.get("dia", "")
+
+        # Calcular peso si vino en cero o si faltan mayoristas
+        peso_calc = (
+            sum(s["peso_kg"] for s in sucursales_norm)
+            + sum(m.get("peso_kg", 0) for m in mayoristas_norm)
+        )
+        if not peso_kg or abs(peso_kg - peso_calc) > 0.1:
+            peso_kg = peso_calc
+
+        if cap_ton and cap_ton > 0:
+            pct = round((peso_kg / 1000 / cap_ton) * 100, 1)
+
+        con_coords = sum(1 for s in sucursales_norm if s["latitud"] is not None)
+
+        rutas_normalizadas.append({
+            "id":                    ruta_id,
+            "nombre":                nombre_r,
+            "tipo":                  "asignada",
+            "dia":                   dia,
+            "vehiculo_placas":       placas,
+            "vehiculo_abrev":        veh_abrev,
+            "capacidad_ton":         cap_ton,
+            "peso_kg":               peso_kg,
+            "pct_utilizacion":       pct,
+            "cumple_peso":           True,
+            "hora_salida":           hora_salida,
+            "hora_regreso":          hora_regreso,
+            "cumple_horario":        cumple_h,
+            "conduccion_min":        0,
+            "descarga_min":          0,
+            "extra_min":             HORAS_EXTRA_RUTA_MIN,
+            "total_min":             0,
+            "distancia_km":          0,
+            "origen_tiempo":         "pendiente",
+            "num_sucursales":        len(sucursales_norm),
+            "sucursales_con_coords": con_coords,
+            "sucursales":            sucursales_norm,
+            "mayoristas":            mayoristas_norm,
+        })
 
     if not rutas_normalizadas:
         return {
@@ -572,6 +646,7 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         "logistica_id":          str(logistica_id),
         "total_rutas":           len(rutas_normalizadas),
         "rutas":                 rutas_normalizadas,
+        "mayoristas_disponibles": mayoristas_disponibles,
         "sucursales_pendientes": sucursales_pendientes,
         "rutas_confirmadas":     rutas_confirmadas,
     }
@@ -610,12 +685,14 @@ def calcular_tiempos_subruta(paradas: list, pesos: dict, hora_salida: str = "08:
     if "error" in resultado:
         resultado = _fallback_haversine(coords, velocidad)
 
-    # Descarga acumulada: cada sucursal tiene su propio tope de 120 min
+    def _peso_descarga(p: dict) -> float:
+        if p.get("tipo") == "mayorista" or (p.get("id_cliente") is not None and p.get("num_tienda") is None):
+            return float(p.get("peso_kg") or 0)
+        return float(pesos.get(str(p.get("num_tienda", "")), p.get("peso_kg") or 0) or 0)
+
     descarga = sum(
-        min(pesos.get(str(p.get("num_tienda", "")), 0.0) * min_descarga,
-            MAX_DESCARGA_POR_SUCURSAL)
+        min(_peso_descarga(p) * min_descarga, MAX_DESCARGA_POR_SUCURSAL)
         for p in paradas
-        if p.get("tipo") == "sucursal" or p.get("num_tienda")
     )
     traslado = resultado.get("traslado_min", 0)
     total    = traslado + descarga + HORAS_EXTRA_RUTA_MIN
@@ -1084,6 +1161,139 @@ def agregar_sucursal_a_asignacion(
             }},
         )
         return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
+# ── Mayoristas: quitar / agregar con overrides ────────────────
+
+def quitar_mayorista_de_ruta(
+    logistica_id: str,
+    ruta_id: str,
+    id_cliente: int,
+) -> dict:
+    """
+    Persiste el retiro de un mayorista de una ruta añadiéndolo a
+    asignaciones.mayoristas_overrides[ruta_id].excluidos.
+    """
+    oid = _parse_oid(logistica_id)
+    if not oid:
+        return {"status": "error", "mensaje": "logistica_id inválido"}
+    try:
+        db = get_db()
+        doc = db["asignaciones"].find_one({"logistica_id": oid})
+        if not doc:
+            return {"status": "error", "mensaje": "No se encontró la asignación"}
+
+        overrides = doc.get("mayoristas_overrides", {})
+        ruta_ov = overrides.get(ruta_id, {"excluidos": [], "incluidos": []})
+        id_cl = int(id_cliente)
+
+        if id_cl not in ruta_ov.get("excluidos", []):
+            ruta_ov.setdefault("excluidos", []).append(id_cl)
+        ruta_ov["incluidos"] = [x for x in ruta_ov.get("incluidos", []) if x != id_cl]
+        overrides[ruta_id] = ruta_ov
+
+        db["asignaciones"].update_one(
+            {"logistica_id": oid},
+            {"$set": {"mayoristas_overrides": overrides}},
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
+def agregar_mayorista_a_ruta(
+    logistica_id: str,
+    ruta_id: str,
+    dia: str,
+    id_cliente: int,
+    nombre: str,
+    latitud,
+    longitud,
+    peso_kg: float,
+    peso_ruta_actual: float,
+) -> dict:
+    """
+    Persiste la incorporación de un mayorista a una ruta mediante override.
+    Si el nuevo peso total supera la capacidad del vehículo, busca el vehículo
+    más pequeño disponible y lo asigna automáticamente.
+    """
+    oid = _parse_oid(logistica_id)
+    if not oid:
+        return {"status": "error", "mensaje": "logistica_id inválido"}
+    try:
+        db = get_db()
+        doc = db["asignaciones"].find_one({"logistica_id": oid})
+        if not doc:
+            return {"status": "error", "mensaje": "No se encontró la asignación"}
+
+        detalle = doc.get("detalle_por_dia", {})
+        ruta_det = detalle.get(dia, {}).get(ruta_id)
+        if ruta_det is None:
+            return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia}"}
+
+        id_cl = int(id_cliente)
+        overrides = doc.get("mayoristas_overrides", {})
+
+        # Limpiar este mayorista de cualquier override previo en OTRAS rutas
+        for rid, ov in overrides.items():
+            if rid != ruta_id:
+                ov["incluidos"] = [x for x in ov.get("incluidos", []) if x != id_cl]
+
+        # En esta ruta: quitar de excluidos y añadir a incluidos
+        ruta_ov = overrides.setdefault(ruta_id, {"excluidos": [], "incluidos": []})
+        ruta_ov["excluidos"] = [x for x in ruta_ov.get("excluidos", []) if x != id_cl]
+        if id_cl not in ruta_ov.get("incluidos", []):
+            ruta_ov.setdefault("incluidos", []).append(id_cl)
+
+        # Verificar capacidad y buscar vehículo alternativo si hace falta
+        nuevo_peso_kg = float(peso_ruta_actual) + float(peso_kg)
+        cap_ton = float(ruta_det.get("capacidad_ton") or 0)
+        vehiculo_cambiado = False
+        nuevo_vehiculo = None
+
+        if cap_ton > 0 and (nuevo_peso_kg / 1000) > cap_ton:
+            placas_en_dia = {
+                v.get("vehiculo_placas", "")
+                for rid2, v in detalle.get(dia, {}).items()
+                if rid2 != ruta_id
+            }
+            candidatos = sorted(
+                [
+                    v for v in db["vehiculos"].find({"activo": True})
+                    if float(v.get("capacidad_toneladas") or 0) * 1000 >= nuevo_peso_kg
+                    and (v.get("placas") or "") not in placas_en_dia
+                    and v.get("placas") != ruta_det.get("vehiculo_placas")
+                ],
+                key=lambda v: float(v.get("capacidad_toneladas") or 0),
+            )
+            if candidatos:
+                mejor = candidatos[0]
+                abrev = mejor.get("abreviatura") or mejor.get("descripcion") or mejor.get("placas", "")
+                cap_nueva = float(mejor.get("capacidad_toneladas") or 0)
+                vehiculo_cambiado = True
+                nuevo_vehiculo = {
+                    "placas":        mejor.get("placas", ""),
+                    "abrev":         abrev,
+                    "capacidad_ton": cap_nueva,
+                }
+
+        update_set: dict = {"mayoristas_overrides": overrides}
+        if vehiculo_cambiado and nuevo_vehiculo:
+            update_set[f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_placas"]      = nuevo_vehiculo["placas"]
+            update_set[f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_abreviatura"] = nuevo_vehiculo["abrev"]
+            update_set[f"detalle_por_dia.{dia}.{ruta_id}.capacidad_ton"]        = nuevo_vehiculo["capacidad_ton"]
+
+        db["asignaciones"].update_one(
+            {"logistica_id": oid},
+            {"$set": update_set},
+        )
+        return {
+            "status":           "ok",
+            "vehiculo_cambiado": vehiculo_cambiado,
+            "nuevo_vehiculo":    nuevo_vehiculo,
+        }
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
 

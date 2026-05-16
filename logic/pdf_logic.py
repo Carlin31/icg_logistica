@@ -22,6 +22,7 @@ from reportlab.platypus import (
 )
 
 from db import get_db
+from logic.mayoristas_logic import calcular_distribucion_mayoristas
 
 # ── Directorio temporal para el PDF generado ─────────────────
 # Se usa /tmp para compatibilidad con entornos de producción (Render, etc.)
@@ -297,9 +298,20 @@ def _rutas_desde_asignaciones(db, oid) -> list:
     if not doc:
         return []
 
-    may_por_ruta = _mayoristas_por_ruta_db(db)
+    coords_map: dict = {}
+    try:
+        for rdoc in db["rutas_config"].find({}, {"sucursales": 1}):
+            for suc in rdoc.get("sucursales", []):
+                nt = str(suc.get("num_tienda", ""))
+                lat = suc.get("latitud")
+                lon = suc.get("longitud")
+                if nt and lat is not None and lon is not None:
+                    coords_map[nt] = (float(lat), float(lon))
+    except Exception:
+        coords_map = {}
 
-    rutas   = []
+    rutas: list = []
+    rutas_base: list = []
     detalle = doc.get("detalle_por_dia", {})
     for dia, rutas_dia in detalle.items():
         if not isinstance(rutas_dia, dict):
@@ -307,16 +319,23 @@ def _rutas_desde_asignaciones(db, oid) -> list:
         for ruta_id, info in rutas_dia.items():
             if not isinstance(info, dict):
                 continue
-            suc_list = [
-                {
+            suc_list = []
+            for i, s in enumerate(info.get("sucursales", [])):
+                nt = s.get("num_tienda")
+                lat, lon = None, None
+                if nt is not None:
+                    coord = coords_map.get(str(nt))
+                    if coord:
+                        lat, lon = coord
+                suc_list.append({
                     "tipo":    "sucursal",
+                    "num_tienda": nt,
                     "orden":   s.get("orden", i + 1),
                     "nombre":  s.get("nombre") or s.get("nombre_tienda") or s.get("nombre_pedido") or "—",
                     "peso_kg": float(s.get("peso_kg", 0) or 0),
-                }
-                for i, s in enumerate(info.get("sucursales", []))
-            ]
-            may_list = may_por_ruta.get(ruta_id, [])
+                    "latitud": lat,
+                    "longitud": lon,
+                })
 
             rutas.append({
                 "id":               ruta_id,
@@ -329,8 +348,23 @@ def _rutas_desde_asignaciones(db, oid) -> list:
                 "peso_kg":          float(info.get("peso_total_kg") or 0),
                 "pct_utilizacion":  float(info.get("porcentaje_utilizacion") or 0),
                 "sucursales":       suc_list,
-                "mayoristas":       may_list,
+                "mayoristas":       [],
             })
+
+            rutas_base.append({"_id": ruta_id, "sucursales": suc_list})
+
+    if rutas_base:
+        dist = calcular_distribucion_mayoristas(str(oid), rutas_base)
+        may_por_ruta = dist.get("mayoristas_por_ruta", {})
+        for r in rutas:
+            may_list = may_por_ruta.get(r.get("id", ""), [])
+            r["mayoristas"] = may_list
+            if may_list:
+                peso_may = sum(float(m.get("peso_kg") or 0) for m in may_list)
+                r["peso_kg"] = float(r.get("peso_kg") or 0) + peso_may
+                cap_ton = float(r.get("capacidad_ton") or 0)
+                if cap_ton > 0:
+                    r["pct_utilizacion"] = round((r["peso_kg"] / 1000 / cap_ton) * 100, 1)
     return rutas
 
 

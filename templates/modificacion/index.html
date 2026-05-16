@@ -90,6 +90,9 @@
         <button id="btn-agregar-suc" class="btn btn-sm btn-agregar" title="Agregar sucursal">
           <i data-lucide="plus"></i> Parada
         </button>
+        <button id="btn-agregar-may" class="btn btn-sm btn-agregar-may" title="Agregar mayorista">
+          <i data-lucide="store"></i> Mayorista
+        </button>
         <button id="btn-eliminar-ruta" class="btn btn-sm btn-danger" title="Eliminar ruta">
           <i data-lucide="trash-2"></i> Eliminar
         </button>
@@ -162,6 +165,21 @@
       <input type="text" id="buscar-sucursal" class="input-buscar"
              placeholder="Buscar por nombre o número…" autocomplete="off">
       <div id="lista-disponibles" class="lista-disponibles"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal agregar mayorista -->
+<div id="modal-agregar-may" class="modal hidden">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h3>Agregar mayorista a la ruta</h3>
+      <button id="modal-may-close" class="modal-close">&times;</button>
+    </div>
+    <div class="modal-body">
+      <input type="text" id="buscar-mayorista" class="input-buscar"
+             placeholder="Buscar por nombre o código…" autocomplete="off">
+      <div id="lista-disponibles-may" class="lista-disponibles"></div>
     </div>
   </div>
 </div>

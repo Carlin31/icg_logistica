@@ -21,6 +21,8 @@ from logic.modificacion_logic import (
     actualizar_rutas_confirmadas,
     crear_ruta_manual,
     eliminar_ruta_manual,
+    quitar_mayorista_de_ruta,
+    agregar_mayorista_a_ruta,
 )
 
 modificacion_bp = Blueprint("modificacion", __name__)
@@ -334,6 +336,65 @@ def post_agregar_sucursal():
             latitud      = datos.get("latitud"),
             longitud     = datos.get("longitud"),
             peso_kg      = float(datos.get("peso_kg") or 0),
+        )
+        code = 200 if resultado.get("status") == "ok" else 500
+        return jsonify(resultado), code
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/quitar-mayorista", methods=["POST"])
+def post_quitar_mayorista():
+    """
+    Registra el retiro de un mayorista de una ruta en mayoristas_overrides.
+    Body: { ruta_id, id_cliente }
+    """
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+    ruta_id    = datos.get("ruta_id", "")
+    id_cliente = datos.get("id_cliente")
+    if not ruta_id or id_cliente is None:
+        return jsonify({"status": "error", "mensaje": "Se requiere ruta_id e id_cliente"}), 400
+    try:
+        resultado = quitar_mayorista_de_ruta(lid, ruta_id, int(id_cliente))
+        code = 200 if resultado.get("status") == "ok" else 500
+        return jsonify(resultado), code
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/agregar-mayorista", methods=["POST"])
+def post_agregar_mayorista():
+    """
+    Incorpora un mayorista a una ruta mediante override y verifica capacidad del vehículo.
+    Body: { ruta_id, dia, id_cliente, nombre, latitud, longitud, peso_kg, peso_ruta_actual }
+    """
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+    ruta_id          = datos.get("ruta_id", "")
+    dia              = datos.get("dia", "")
+    id_cliente       = datos.get("id_cliente")
+    if not ruta_id or not dia or id_cliente is None:
+        return jsonify({"status": "error", "mensaje": "Se requiere ruta_id, dia e id_cliente"}), 400
+    try:
+        resultado = agregar_mayorista_a_ruta(
+            logistica_id     = lid,
+            ruta_id          = ruta_id,
+            dia              = dia,
+            id_cliente       = int(id_cliente),
+            nombre           = datos.get("nombre", ""),
+            latitud          = datos.get("latitud"),
+            longitud         = datos.get("longitud"),
+            peso_kg          = float(datos.get("peso_kg") or 0),
+            peso_ruta_actual = float(datos.get("peso_ruta_actual") or 0),
         )
         code = 200 if resultado.get("status") == "ok" else 500
         return jsonify(resultado), code
