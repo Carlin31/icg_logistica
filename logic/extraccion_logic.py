@@ -181,26 +181,33 @@ def procesar_mayoristas(archivo) -> dict:
         from db import get_db
         db = get_db()
         clientes_db = list(db['clientes_mayoristas'].find(
-            {}, {'_id': 0, 'id_cliente': 1, 'nombre': 1}
+            {}, {'_id': 0, 'id_cliente': 1, 'nombre': 1, 'activo': 1}
         ))
         # id_cliente se guarda como int en MongoDB, pero puede llegar como
         # str, Decimal128 u otro tipo según el cliente que lo insertó.
         map_nombre = {}
+        excluidos  = set()
         for c in clientes_db:
             if 'id_cliente' not in c:
                 continue
             try:
-                map_nombre[int(str(c['id_cliente']).split('.')[0])] = c['nombre']
+                cid = int(str(c['id_cliente']).split('.')[0])
+                map_nombre[cid] = c['nombre']
+                if c.get('activo') is False:
+                    excluidos.add(cid)
             except (ValueError, TypeError):
                 pass
     except Exception as e:
         print(f"[procesar_mayoristas] Error al conectar con MongoDB: {e}")
         map_nombre = {}
+        excluidos  = set()
 
     # ── Construir resultado consolidado ─────────────────────────────────────
     consolidado = []
     for _, row in df.iterrows():
         codigo = int(row['codigo_cliente'])
+        if codigo in excluidos:
+            continue
         nombre = map_nombre.get(codigo, f'Cliente {codigo}')
         consolidado.append({
             'codigo':        codigo,

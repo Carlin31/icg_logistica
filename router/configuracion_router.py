@@ -18,7 +18,7 @@ from logic.configuracion_logic import (
     listar_vehiculos,  obtener_vehiculo,  agregar_vehiculo,  editar_vehiculo,  eliminar_vehiculo,
     toggle_activo_vehiculo,
     listar_clientes_mayoristas, obtener_cliente_mayorista, agregar_cliente_mayorista,
-    editar_cliente_mayorista, eliminar_cliente_mayorista,
+    editar_cliente_mayorista, eliminar_cliente_mayorista, toggle_activo_cliente_mayorista,
 )
 
 configuracion_bp = Blueprint("configuracion", __name__)
@@ -78,7 +78,9 @@ def post_producto():
     datos, err = _json_o_400()
     if err:
         return err
-    return jsonify(agregar_producto(datos)), 201
+    resultado = agregar_producto(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
 
 
 @configuracion_bp.route("/productos/<producto_id>", methods=["PUT"])
@@ -207,6 +209,11 @@ def delete_cliente_mayorista(cliente_id):
     return _respuesta(eliminar_cliente_mayorista(cliente_id))
 
 
+@configuracion_bp.route("/clientes-mayoristas/<cliente_id>/activo", methods=["PUT"])
+def put_cliente_mayorista_activo(cliente_id):
+    return _respuesta(toggle_activo_cliente_mayorista(cliente_id))
+
+
 # ── Utilidad para arreglar índices en la nube ──────────────────
 @configuracion_bp.route("/arreglar-indices-db", methods=["GET"])
 def arreglar_indices_db():
@@ -214,6 +221,23 @@ def arreglar_indices_db():
     db = get_db()
     resultado = []
     
+    # --- PRODUCTOS ---
+    try:
+        db.productos.drop_index("clave_sae_1")
+        resultado.append("✅ Índice estricto de productos eliminado.")
+    except Exception as e:
+        resultado.append(f"⚠️ No se pudo eliminar índice de productos. Detalle: {e}")
+
+    try:
+        db.productos.create_index(
+            "clave_sae",
+            unique=True,
+            partialFilterExpression={"clave_sae": {"$type": "number"}}
+        )
+        resultado.append("✅ Índice parcial de productos (clave_sae) creado.")
+    except Exception as e:
+        resultado.append(f"❌ Error al crear índice de productos: {e}")
+
     # --- SUCURSALES ---
     try:
         db.sucursales.drop_index("num_tienda_1")
@@ -223,8 +247,8 @@ def arreglar_indices_db():
 
     try:
         db.sucursales.create_index(
-            "num_tienda", 
-            unique=True, 
+            "num_tienda",
+            unique=True,
             partialFilterExpression={"num_tienda": {"$type": "number"}}
         )
         resultado.append("✅ Índice parcial de sucursales creado.")

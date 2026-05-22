@@ -331,6 +331,7 @@
               <th class="sortable" data-col="0">Código <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
               <th class="sortable" data-col="1">Cliente <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
               <th class="sortable col-total" data-col="2">Peso total (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="body-mayoristas"></tbody>
@@ -371,6 +372,19 @@
   </div>
 
 </div><!-- /#extraccion-container -->
+
+<!-- Confirm overlay: quitar mayorista de la lista -->
+<div id="ext-confirm-overlay" class="ext-confirm-overlay hidden">
+  <div class="ext-confirm-box">
+    <div class="ext-confirm-icon"><i data-lucide="trash-2"></i></div>
+    <h3>¿Quitar mayorista?</h3>
+    <p id="ext-confirm-msg"></p>
+    <div class="ext-confirm-footer">
+      <button id="ext-confirm-cancel" class="ext-btn-secondary">Cancelar</button>
+      <button id="ext-confirm-ok"     class="ext-btn-eliminar">Quitar</button>
+    </div>
+  </div>
+</div>
 
 {% endblock %}
 

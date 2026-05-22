@@ -5,9 +5,9 @@ from db import get_db
 
 # ── Helpers ────────────────────────────────────────────────
 ID_CAMPO = {
+    "productos":           "clave_sae",
     "sucursales":          "num_tienda",
     "clientes_mayoristas": "id_cliente",
-    # vehículos y productos no tienen ID numérico propio
 }
 
 def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | None:
@@ -242,3 +242,15 @@ def obtener_cliente_mayorista(cliente_id: str): return _obtener("clientes_mayori
 def agregar_cliente_mayorista(datos: dict): return _agregar("clientes_mayoristas", datos)
 def editar_cliente_mayorista(cliente_id: str, datos: dict): return _editar("clientes_mayoristas", cliente_id, datos)
 def eliminar_cliente_mayorista(cliente_id: str): return _eliminar("clientes_mayoristas", cliente_id)
+
+def toggle_activo_cliente_mayorista(cliente_id: str) -> dict:
+    oid = _parse_oid(cliente_id)
+    if oid is None:
+        return {"status": "error", "mensaje": "ID inválido"}
+    db  = get_db()
+    doc = db.clientes_mayoristas.find_one({"_id": oid}, {"activo": 1})
+    if doc is None:
+        return {"status": "error", "mensaje": "Cliente no encontrado"}
+    nuevo = not doc.get("activo", True)
+    db.clientes_mayoristas.update_one({"_id": oid}, {"$set": {"activo": nuevo, "ultima_modificacion": _fecha_completa()}})
+    return {"status": "ok", "activo": nuevo}

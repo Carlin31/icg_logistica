@@ -1212,37 +1212,71 @@
 .btn-confirm-ok.btn-danger:hover { background: #b91c1c; }
 
 /* ══════════════════════════════════════════════════════════════
-   RESPONSIVE — Header buttons (≤ 900px)
-   Grid 2×2: sin espacios vacíos en cualquier tamaño de pantalla
+   RESPONSIVE — Tablet / móvil (≤ 900px)
+   • Header: grid 2×2
+   • Panel principal: columna única — mapa DEBAJO del panel de ruta
 ══════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {
+
+  /* ── Header ── */
   .mod-header {
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
   }
-
-  /* Grid de 2 columnas exactas — ningún botón queda solo */
   .mod-header-right {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
     width: 100%;
   }
-
-  /* Badge ocupa la fila completa */
   .progreso-badge {
     grid-column: 1 / -1;
     text-align: center;
     width: auto;
   }
-
-  /* Cada botón llena su celda, texto centrado */
   .mod-header-right .btn {
     width: 100%;
     justify-content: center;
     white-space: nowrap;
   }
+
+  /* ── Layout: columna única, mapa debajo ── */
+  .panel-principal {
+    grid-template-columns: 1fr !important;
+    gap: 14px;
+  }
+
+  /* Panel izquierdo: deja de ser sticky, altura automática */
+  .panel-izq {
+    position: static;
+    height: auto;
+    max-height: none;
+    overflow: visible;
+  }
+
+  /* La lista de paradas recibe su propia altura máxima con scroll */
+  .lista-sucursales {
+    flex: none;
+    max-height: 45vh;
+    overflow-y: auto;
+  }
+
+  /* Panel mapa: estático, altura generosa */
+  .panel-der {
+    position: static;
+    height: 62vh;
+    min-height: 380px;
+    max-height: 640px;
+  }
+  .mapa {
+    width: 100%;
+    height: 100%;
+    min-height: 380px;
+  }
+
+  /* Resumen de tiempos: 2 columnas en tablet */
+  .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -1250,38 +1284,93 @@
 ══════════════════════════════════════════════════════════════ */
 @media (max-width: 640px) {
 
-  /* ── Resumen de fuentes ── */
-  .resumen-fuentes { gap: 8px; flex-wrap: wrap; }
-  .separador-v { display: none; }
+  /* ── Header: botones en columna única en pantallas muy pequeñas ── */
+  .mod-header-right {
+    grid-template-columns: 1fr;
+  }
+  .mod-subtitulo { font-size: 0.78rem; }
 
-  /* ── Navegador de rutas ── */
-  .nav-ruta-btn { min-width: 90px; padding: 8px 10px; }
-  .nav-ruta-nombre { font-size: 0.72rem; }
+  /* ── Resumen de fuentes ── */
+  .resumen-fuentes { gap: 6px; flex-wrap: wrap; }
+  .separador-v { display: none; }
+  .fuente-tag { font-size: 0.74rem; padding: 4px 10px; }
+
+  /* ── Filtro por día: scroll horizontal ── */
+  .filtro-dias {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 4px;
+    margin-bottom: 10px;
+  }
+  .filtro-dias::-webkit-scrollbar { display: none; }
+  .filtro-dia-btn { flex-shrink: 0; font-size: 0.74rem; padding: 5px 12px; }
+
+  /* ── Navegador de rutas: scroll horizontal ── */
+  .nav-rutas {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 12px;
+    gap: 6px;
+  }
+  .nav-rutas::-webkit-scrollbar { display: none; }
+  .nav-ruta-btn {
+    flex-shrink: 0;
+    min-width: 100px;
+    max-width: 140px;
+    padding: 8px 10px;
+  }
+  .nav-ruta-nombre { font-size: 0.73rem; }
   .nav-ruta-dia, .nav-ruta-info { font-size: 0.62rem; }
 
   /* ── Panel izquierdo ── */
-  .panel-izq { max-height: none; }
-  .panel-izq-header { padding: 12px 14px 10px; }
+  .panel-izq-header { padding: 12px 14px 10px; gap: 8px; }
+  .panel-izq-actions { gap: 6px; }
+  .panel-izq-actions .btn { font-size: 0.72rem; padding: 5px 9px; }
+  .titulo-ruta { font-size: 0.95rem; }
+
+  /* Lista de paradas más compacta */
+  .lista-sucursales { max-height: 38vh; }
+  .suc-item { padding: 8px 10px; gap: 8px; }
+  .suc-nombre { font-size: 0.78rem; }
+
+  /* Acciones de ruta */
   .acciones-ruta { padding: 10px 12px; gap: 8px; }
   .acciones-ruta .btn { flex: 1; justify-content: center; white-space: nowrap; }
-  .zona-vehiculo, .lista-sucursales { padding-left: 4px; padding-right: 4px; }
 
-  /* ── Panel mapa ── */
-  .panel-der { min-height: 280px; }
-  .mapa { min-height: 280px; }
+  /* Zona vehículo / listas internas */
+  .vehiculo-selector { padding: 8px 12px; }
+  .veh-lista { padding: 0 12px 8px; }
 
-  /* ── Resumen de tiempos ── */
+  /* ── Mapa: altura ajustada para móvil ── */
+  .panel-der {
+    height: 55vh;
+    min-height: 320px;
+    max-height: 500px;
+  }
+  .mapa { min-height: 320px; }
+
+  /* ── Resumen de tiempos: 2×2 ── */
   .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }
+  .tiempo-celda { padding: 8px 6px; }
+  .tiempo-celda .t-valor { font-size: 0.82rem; }
 
   /* ── Banner OSRM ── */
-  .banner-osrm { flex-wrap: wrap; gap: 8px; }
+  .banner-osrm { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
   .osrm-progress-bar { min-width: 0; flex-basis: 100%; }
-}
+  .banner-cargando { padding: 12px 14px; font-size: 0.8rem; }
 
-/* ══════════════════════════════════════════════════════════════
-   RESPONSIVE — Tablet (641px – 900px)
-══════════════════════════════════════════════════════════════ */
-@media (min-width: 641px) and (max-width: 900px) {
-  .nav-ruta-btn { min-width: 105px; }
-  .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }
+  /* ── Panel pendientes ── */
+  .panel-pendientes { padding: 8px 12px; font-size: 0.76rem; }
+
+  /* ── Modales ── */
+  .modal-content { width: calc(100vw - 20px); max-height: 88vh; }
+  .modal-header { padding: 14px 16px; }
+  .modal-body { padding: 12px 16px; }
+  .modal-footer { padding: 10px 16px; }
+  .confirm-box { width: calc(100vw - 24px); padding: 28px 18px 20px; }
+  .confirm-box .modal-footer { flex-direction: row; }
 }

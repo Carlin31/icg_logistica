@@ -194,6 +194,7 @@
             <th class="sortable col-num">Latitud</th>
             <th class="sortable col-num">Longitud</th>
             <th class="sortable">Última Modificación</th>
+            <th>Extracción</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -305,6 +306,7 @@
           <i data-lucide="layers"></i> Ver todas
         </button>
       </div>
+      <div id="hist-dia-filtros" class="hist-dia-filtros hidden"></div>
       <div class="hist-mapa-sidebar-list" id="hist-mapa-sidebar-list"></div>
     </div>
 
@@ -316,12 +318,16 @@
   <div class="modal-box">
     <h3 id="modal-title"></h3>
     <form id="modal-form" onsubmit="event.preventDefault();"></form>
+    <div id="modal-error" class="modal-error hidden"></div>
     <div class="modal-footer">
       <button id="modal-cancel" class="btn btn-secondary">Cancelar</button>
       <button id="modal-save"   class="btn btn-primary">Guardar</button>
     </div>
   </div>
 </div>
+
+<!-- Contenedor de notificaciones toast -->
+<div id="cfg-toast-container" class="cfg-toast-container"></div>
 {% endblock %}
 
 {% block extra_js %}

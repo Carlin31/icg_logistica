@@ -22,7 +22,7 @@ const CAMPOS_PRODUCTO = [
   { key: "clave_sae",   label: "Clave SAE",    type: "number" },
   { key: "descripcion", label: "Descripción",  type: "text"   },
   { key: "costo",       label: "Costo",        type: "number" },
-  { key: "peso",        label: "Peso (kg)",    type: "number" },
+  { key: "peso",        label: "Peso (kg)",    type: "number", step: "1", min: "0" },
   { key: "largo",       label: "Largo (cm)",   type: "number" },
   { key: "ancho",       label: "Ancho (cm)",   type: "number" },
   { key: "alto",        label: "Alto (cm)",    type: "number" },
@@ -98,8 +98,49 @@ let modalMode  = null;
 let modalTipo  = null;
 let modalDocId = null;
 
-// ── Confirmación de estado de vehículo ──────────────────────────
+// ── Toast de notificación ───────────────────────────────────────
+function cfgToast(mensaje, tipo = "error", duracion = 4500) {
+  const container = document.getElementById("cfg-toast-container");
+  if (!container) return;
+  const toast = document.createElement("div");
+  toast.className   = `cfg-toast ${tipo}`;
+  toast.textContent = mensaje;
+  container.appendChild(toast);
+  const dismiss = () => {
+    toast.style.animation = "toast-out .22s ease forwards";
+    toast.addEventListener("animationend", () => toast.remove(), { once: true });
+  };
+  toast.addEventListener("click", dismiss);
+  setTimeout(dismiss, duracion);
+}
+
+// ── Error dentro del modal de edición/creación ──────────────────
+function mostrarModalError(mensaje) {
+  const el = document.getElementById("modal-error");
+  if (!el) return;
+  el.textContent = mensaje;
+  el.classList.remove("hidden");
+}
+
+// ── Confirmación genérica (reutiliza el confirm-overlay) ────────
 let _confirmResolve = null;
+
+function mostrarConfirm(titulo, mensaje, okLabel = "Confirmar", tipo = "danger") {
+  const iconEl = document.getElementById("confirm-icon");
+  iconEl.className = `confirm-icon ${tipo}`;
+  iconEl.innerHTML = '<i data-lucide="trash-2"></i>';
+  lucide.createIcons();
+  document.getElementById("confirm-title").textContent = titulo;
+  document.getElementById("confirm-msg").textContent   = mensaje;
+  document.getElementById("confirm-meta").innerHTML    = "";
+  const okBtn = document.getElementById("confirm-ok");
+  okBtn.className   = `btn btn-confirm-ok ${tipo === "danger" ? "btn-danger" : "btn-primary"}`;
+  okBtn.textContent = okLabel;
+  document.getElementById("confirm-overlay").classList.remove("hidden");
+  return new Promise(resolve => { _confirmResolve = resolve; });
+}
+
+// ── Confirmación de estado de vehículo ──────────────────────────
 
 function mostrarConfirmEstado(descripcion, abreviatura, placas, activo) {
   const esActivar = !activo;
@@ -158,8 +199,9 @@ document.addEventListener("DOMContentLoaded", async () => {
         const btn = e.target.closest("button[data-id]");
         if (!btn) return;
         const { id, accion } = btn.dataset;
-        if (accion === "editar")        abrirModal("edit", tipo, id);
-        if (accion === "eliminar")      eliminar(tipo, id);
+        if (accion === "editar")                 abrirModal("edit", tipo, id);
+        if (accion === "eliminar")               eliminar(tipo, id);
+        if (accion === "toggle-activo-mayorista") toggleActivoMayorista(id, btn.dataset.activo === "true");
         if (accion === "toggle-activo") toggleActivo(
           id,
           btn.dataset.descripcion || "",
@@ -225,8 +267,14 @@ function renderDiasConfig(configDias) {
           <span class="slider"></span>
         </label>
         <span class="dia-row-label">${label}</span>
-        <input type="time" id="dia-salida-${key}" value="${d.hora_salida || "07:00"}" ${!d.habilitado ? "disabled" : ""}>
-        <input type="time" id="dia-limite-${key}" value="${d.hora_limite || "18:00"}" ${!d.habilitado ? "disabled" : ""}>
+        <div class="dia-time-group">
+          <span class="dia-time-label">Salida</span>
+          <input type="time" id="dia-salida-${key}" value="${d.hora_salida || "07:00"}" ${!d.habilitado ? "disabled" : ""}>
+        </div>
+        <div class="dia-time-group">
+          <span class="dia-time-label">Regreso</span>
+          <input type="time" id="dia-limite-${key}" value="${d.hora_limite || "18:00"}" ${!d.habilitado ? "disabled" : ""}>
+        </div>
       </div>`;
   }).join("");
 }
@@ -283,7 +331,7 @@ async function guardarConfigGeneral(e) {
       btn.style.background = "#16a34a";
       setTimeout(() => { btn.textContent = orig; btn.style.background = ""; }, 2000);
     } else {
-      alert("Error al guardar la configuración.");
+      cfgToast("Error al guardar la configuración.");
     }
   } catch (err) {
     console.error(err);
@@ -325,7 +373,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 11, sucursal: 11, vehiculo: 13, cliente_mayorista: 7 };
+      const cols = { producto: 11, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -399,7 +447,9 @@ async function cargarDatos(tipo) {
           </td>
         </tr>`}).join("");
     } else if (tipo === "cliente_mayorista") {
-      tbody.innerHTML = data.map(c => `
+      tbody.innerHTML = data.map(c => {
+        const activo = c.activo !== false;
+        return `
         <tr>
           <td>${c.id_cliente ?? ""}</td>
           <td>${h(c.nombre)}</td>
@@ -408,10 +458,18 @@ async function cargarDatos(tipo) {
           <td>${c.longitud ?? "—"}</td>
           <td>${c.ultima_modificacion ?? "-"}</td>
           <td>
+            <button class="btn btn-sm ${activo ? "btn-success" : "btn-secondary"}"
+                    data-id="${c._id}"
+                    data-accion="toggle-activo-mayorista"
+                    data-activo="${activo}">
+              ${activo ? "Incluido" : "Excluido"}
+            </button>
+          </td>
+          <td>
             <button class="btn btn-sm btn-warning" data-id="${c._id}" data-accion="editar">Editar</button>
             <button class="btn btn-sm btn-danger"  data-id="${c._id}" data-accion="eliminar">Eliminar</button>
           </td>
-        </tr>`).join("");
+        </tr>`}).join("");
     }
   } catch (err) {
     console.error(`[cargarDatos:${tipo}]`, err);
@@ -437,7 +495,7 @@ async function abrirModal(mode, tipo, docId = null) {
   document.getElementById("modal-form").innerHTML = campos.map(c => `
     <div class="form-group">
       <label>${h(c.label)}${c.readonly ? ' <span class="config-computed-badge">auto</span>' : ''}</label>
-      <input name="${c.key}" type="${c.type}" value="${existente[c.key] != null ? ha(String(existente[c.key])) : ""}" class="form-control${c.readonly ? ' config-field-readonly' : ''}" id="modal-field-${c.key}"${c.readonly ? ' readonly tabindex="-1"' : ''}>
+      <input name="${c.key}" type="${c.type}" value="${existente[c.key] != null ? ha(String(existente[c.key])) : ""}" class="form-control${c.readonly ? ' config-field-readonly' : ''}" id="modal-field-${c.key}"${c.readonly ? ' readonly tabindex="-1"' : ''}${c.step != null ? ` step="${c.step}"` : ''}${c.min != null ? ` min="${c.min}"` : ''}>
     </div>`).join("");
 
   if (tipo === "producto") {
@@ -475,7 +533,11 @@ function _actualizarVolumenVehiculoModal() {
   if (volEl) volEl.value = (largo * ancho * alto).toFixed(6);
 }
 
-function cerrarModal() { document.getElementById("modal-overlay").classList.add("hidden"); }
+function cerrarModal() {
+  document.getElementById("modal-overlay").classList.add("hidden");
+  const errEl = document.getElementById("modal-error");
+  if (errEl) errEl.classList.add("hidden");
+}
 
 async function guardarModal(e) {
     // 1. Evitamos que el botón recargue la vista y aborte el fetch
@@ -521,16 +583,10 @@ async function guardarModal(e) {
             body: JSON.stringify(payload),
         });
 
-        // Si Python devuelve un error 500 (ej. error de base de datos), evitamos que .json() rompa el código
-        if (!res.ok) {
-            alert(`Error del servidor: ${res.statusText}`);
-            return;
-        }
+        const data = await res.json().catch(() => null);
 
-        const data = await res.json();
-
-        if (data.status === "error") {
-            alert(`Error: ${data.mensaje}`);
+        if (!res.ok || data?.status === "error") {
+            mostrarModalError(data?.mensaje || `Error del servidor: ${res.statusText}`);
             return;
         }
 
@@ -538,12 +594,23 @@ async function guardarModal(e) {
         cargarDatos(modalTipo);
     } catch (error) {
         console.error("Error al guardar:", error);
-        alert("Ocurrió un error de red o de servidor al guardar.");
+        mostrarModalError("Ocurrió un error de red o de servidor al guardar.");
     } finally {
         Loader.hide();
     }
 }
 
+
+async function toggleActivoMayorista(docId, activo) {
+  try {
+    const res = await fetch(`/configuracion/clientes-mayoristas/${docId}/activo`, { method: "PUT" });
+    if (res.ok) cargarDatos("cliente_mayorista");
+    else cfgToast("Error al cambiar el estado del mayorista.");
+  } catch (err) {
+    console.error("[toggleActivoMayorista]", err);
+    cfgToast("Error de conexión al cambiar estado.");
+  }
+}
 
 async function toggleActivo(docId, descripcion, abreviatura, placas, activo) {
   const confirmed = await mostrarConfirmEstado(descripcion, abreviatura, placas, activo);
@@ -557,8 +624,13 @@ async function toggleActivo(docId, descripcion, abreviatura, placas, activo) {
 }
 
 async function eliminar(tipo, docId) {
-  if (!confirm("¿Deseas eliminar este registro de forma permanente?")) return;
   const label = _TIPO_LABEL[tipo] || tipo;
+  const confirmed = await mostrarConfirm(
+    `Eliminar ${label}`,
+    "Este registro se eliminará de forma permanente y no podrá recuperarse.",
+    "Eliminar"
+  );
+  if (!confirmed) return;
   Loader.show(`Eliminando ${label}`, MSG_CFG.eliminar);
   try {
     const res = await fetch(`/configuracion/${getEndpoint(tipo)}/${docId}`, { method: "DELETE" });
@@ -747,7 +819,12 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
 
       lista.querySelectorAll(".btn-hist-eliminar").forEach(btn => {
         btn.addEventListener("click", async () => {
-          if (!confirm("¿Eliminar este historial?")) return;
+          const confirmed = await mostrarConfirm(
+            "Eliminar historial",
+            "Este historial se eliminará de forma permanente y no podrá recuperarse.",
+            "Eliminar"
+          );
+          if (!confirmed) return;
           const id  = btn.dataset.id;
           const res2 = await fetch(`/configuracion/rutas-historicas/${id}`, { method: "DELETE" });
           const d    = await res2.json();
@@ -755,7 +832,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
             await cargarHistoricos();
             await cargarResumen();
           } else {
-            alert("Error al eliminar: " + (d.mensaje || "?"));
+            cfgToast("Error al eliminar: " + (d.mensaje || "?"));
           }
         });
       });

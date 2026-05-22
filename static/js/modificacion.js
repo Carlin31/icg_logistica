@@ -449,6 +449,13 @@ function inicializarMapa() {
   _rutaLayer       = L.layerGroup().addTo(_mapa);
   _pendientesLayer = L.layerGroup().addTo(_mapa);
   _mapa.on("popupopen", () => lucide.createIcons());
+
+  // Recalcula el tamaño del mapa al redimensionar ventana (ej. rotar dispositivo)
+  let _resizeTimer;
+  window.addEventListener("resize", () => {
+    clearTimeout(_resizeTimer);
+    _resizeTimer = setTimeout(() => _mapa && _mapa.invalidateSize(), 150);
+  });
 }
 
 function actualizarMapa(ruta) {

@@ -92,8 +92,29 @@ const MSG_EXT = {
 // INIT
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ── Confirm overlay mayorista ─────────────────────────────────────────────────
+let _extConfirmResolve = null;
+
+function mostrarConfirmMay(nombre) {
+  const msg = document.getElementById('ext-confirm-msg');
+  msg.innerHTML = `¿Seguro que deseas quitar a <span class="ext-confirm-nombre">${nombre}</span> de la lista? Esta acción solo afecta la sesión actual.`;
+  document.getElementById('ext-confirm-overlay').classList.remove('hidden');
+  lucide.createIcons();
+  return new Promise(resolve => { _extConfirmResolve = resolve; });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   lucide.createIcons();
+
+  document.getElementById('ext-confirm-cancel').addEventListener('click', () => {
+    document.getElementById('ext-confirm-overlay').classList.add('hidden');
+    if (_extConfirmResolve) { _extConfirmResolve(false); _extConfirmResolve = null; }
+  });
+  document.getElementById('ext-confirm-ok').addEventListener('click', () => {
+    document.getElementById('ext-confirm-overlay').classList.add('hidden');
+    if (_extConfirmResolve) { _extConfirmResolve(true); _extConfirmResolve = null; }
+  });
+
   verificarLogisticaActiva().then(activa => {
     if (!activa) return;
     inicializarTabs();
@@ -782,7 +803,8 @@ function renderMayoristasCargado() {
     tr.innerHTML = `
       <td>${cliente.codigo}</td>
       <td>${cliente.nombre}</td>
-      <td class="col-total"><strong>${cliente.peso_total_kg.toFixed(2)} kg</strong></td>`;
+      <td class="col-total"><strong>${Math.round(cliente.peso_total_kg).toLocaleString("es-MX")} kg</strong></td>
+      <td><button class="btn-may-eliminar" data-codigo="${cliente.codigo}" data-nombre="${cliente.nombre.replace(/"/g,'&quot;')}" title="Quitar de la lista">✕</button></td>`;
     tbody.appendChild(tr);
   }
 
@@ -792,13 +814,29 @@ function renderMayoristasCargado() {
     trTotal.className = 'ext-fila-total';
     trTotal.innerHTML = `
       <td colspan="2"><strong>Total general</strong></td>
-      <td class="col-total"><strong>${pesoTotal.toFixed(2)} kg</strong></td>`;
+      <td class="col-total"><strong>${Math.round(pesoTotal).toLocaleString("es-MX")} kg</strong></td>
+      <td></td>`;
     tbody.appendChild(trTotal);
   }
+
+  tbody.querySelectorAll('.btn-may-eliminar').forEach(btn => {
+    btn.addEventListener('click', () => eliminarFilaMayorista(Number(btn.dataset.codigo), btn.dataset.nombre));
+  });
 
   actualizarDotTabMayoristas();
   _reasignarSortListeners('tabla-mayoristas');
   lucide.createIcons();
+}
+
+async function eliminarFilaMayorista(codigo, nombre) {
+  const ok = await mostrarConfirmMay(nombre);
+  if (!ok) return;
+  if (!state.mayoristas.consolidado) return;
+  state.mayoristas.consolidado = state.mayoristas.consolidado.filter(c => c.codigo !== codigo);
+  if (state.mayoristas.status === 'guardado') state.mayoristas.status = 'cargado';
+  state.hayUnsaved = true;
+  renderMayoristasCargado();
+  actualizarUI();
 }
 
 function actualizarDotTabMayoristas() {

@@ -112,7 +112,7 @@ body {
 .header {
   position: sticky;
   top: 0;
-  z-index: 200;
+  z-index: 820;
   background: var(--header-bg);
   height: var(--header-h);
   display: grid;
@@ -344,7 +344,7 @@ body {
   width: 280px;
   background: var(--azul-oscuro);
   border-left: 1px solid rgba(255,255,255,.08);
-  z-index: 300;
+  z-index: 800;
   transform: translateX(100%);
   transition: transform .28s cubic-bezier(.4,0,.2,1);
   overflow-y: auto;
@@ -443,7 +443,7 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.45);
-  z-index: 250;
+  z-index: 750;
   opacity: 0;
   pointer-events: none;
   transition: opacity .28s;
@@ -492,6 +492,13 @@ body {
   #contenido {
     margin-top: 1.25rem;
     padding: 0 1.25rem 2.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  #contenido {
+    margin-top: 1rem;
+    padding: 0 0.625rem 2rem;
   }
 }
 
@@ -629,4 +636,15 @@ p {
   color: rgba(255,255,255,.18);
   letter-spacing: .05em;
   text-transform: uppercase;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   LEAFLET — Contención de z-index
+   Crea un stacking context propio en cada mapa para que sus
+   panes y controles internos (tile: 200, markers: 600,
+   popup: 700, zoom/OSM controls: 1000) no compitan con la UI.
+   El nav-panel (z-index 800) queda siempre por encima del mapa.
+   ════════════════════════════════════════════════════════════════ */
+.leaflet-container {
+  isolation: isolate;
 }

@@ -1896,3 +1896,219 @@ input:checked + .slider:before { transform: translateX(16px); }
 .btn-auto-asignar:hover:not(:disabled) { background: #6d28d9; }
 .btn-auto-asignar:active:not(:disabled) { transform: scale(.97); }
 .btn-auto-asignar:disabled { opacity: .5; cursor: not-allowed; }
+
+/* ================================================================
+   RESPONSIVE — Móvil Asignación (≤ 768 px)
+   ================================================================ */
+@media (max-width: 768px) {
+
+  /* ── Contenedor principal ── */
+  #asignacion-container { gap: 14px; }
+
+  /* ── VRP Panel ── */
+  .vrp-panel {
+    padding: 16px 14px;
+    margin-bottom: 14px;
+    border-radius: 10px;
+  }
+  .vrp-panel__title { font-size: 0.97rem; gap: 6px; }
+  .vrp-panel__sub   { font-size: 0.79rem; }
+
+  /* ── Status cards: una por fila ── */
+  .vrp-status-cards {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+  .vrp-status-card {
+    padding: 12px 12px;
+    gap: 10px;
+    border-radius: 8px;
+  }
+  .vrp-status-card__icon svg { width: 1.5rem; height: 1.5rem; }
+  .vrp-status-card__val      { font-size: 0.92rem; }
+
+  /* ── Botón Generar VRP: ancho completo ── */
+  .vrp-gen-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .vrp-btn-generar {
+    width: 100%;
+    justify-content: center;
+    font-size: 0.9rem;
+    padding: 11px 20px;
+  }
+  .vrp-gen-hint { text-align: center; font-size: 0.78rem; }
+
+  /* ── Alertas VRP ── */
+  .vrp-alert { font-size: 0.8rem; padding: 10px 12px; }
+
+  /* ── Reporte VRP — header ── */
+  .vrp-reporte__header {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px;
+    margin: 14px 0 10px;
+    padding-top: 14px;
+  }
+  .vrp-reporte__header h3 { font-size: 0.9rem; }
+
+  /* ── Chips de estado ── */
+  .vrp-estado-cards { gap: 6px; margin-bottom: 10px; }
+  .vrp-estado-chip  { padding: 5px 10px; font-size: 0.73rem; }
+
+  /* ── Tabla VRP: scroll horizontal compacto ── */
+  .vrp-tabla-wrap {
+    margin: 8px 0;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    /* Sombra derecha para indicar scroll */
+    background:
+      linear-gradient(to right, #fff 30%, transparent) left center / 20px 100% no-repeat local,
+      linear-gradient(to left,  #fff 30%, transparent) right center / 20px 100% no-repeat local,
+      radial-gradient(farthest-side at 0   50%, rgba(0,0,0,.10), transparent) left center  / 10px 100% no-repeat scroll,
+      radial-gradient(farthest-side at 100% 50%, rgba(0,0,0,.10), transparent) right center / 10px 100% no-repeat scroll;
+  }
+  .vrp-tabla        { font-size: 0.76rem; }
+  .vrp-tabla th     { padding: 7px 8px; font-size: 0.67rem; }
+  .vrp-tabla td     { padding: 6px 8px; }
+  .vrp-estado-badge { padding: 3px 8px; font-size: 0.7rem; }
+  .vrp-estado-badge::before { width: 6px; height: 6px; }
+
+  /* ── Acciones post-generación ── */
+  .vrp-acciones {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 12px;
+  }
+  .vrp-acciones .btn { width: 100%; justify-content: center; }
+
+  /* ── Panel de selección de rutas ── */
+  .sel-panel__header { padding: 12px 14px; gap: 8px; }
+  .sel-panel__body   { padding: 14px 14px 16px; }
+
+  /* ── Zona de asignación ── */
+  #zona-asignacion { padding: 16px 14px; }
+
+  /* ── Toolbar de asignación (complemento al breakpoint 860px) ── */
+  .asig-toolbar     { gap: 8px; margin-bottom: 12px; }
+  .asig-toolbar-right { justify-content: flex-start; gap: 4px; }
+  .btn-icon-label   { padding: 6px 10px; font-size: 0.78rem; }
+
+  /* ── Selector de días: scroll horizontal ── */
+  .dia-selector {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .dia-selector::-webkit-scrollbar { display: none; }
+  .dia-btn {
+    font-size: 0.76rem;
+    padding: 5px 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* ── Indicadores del día: rejilla 2×2 ── */
+  .indicadores-dia {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .indicador-card {
+    min-width: 0;
+    padding: 11px 12px;
+  }
+  .indicador-card .valor   { font-size: 1.25rem; }
+  .indicador-card .label   { font-size: 0.68rem; }
+
+  /* Quinta card (Hora salida) ocupa fila completa */
+  .indicadores-dia > .indicador-card:nth-child(5) {
+    grid-column: 1 / -1;
+  }
+
+  /* ── Grid de rutas: columna única ── */
+  .rutas-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  /* ── Tarjeta de ruta: padding reducido ── */
+  .ruta-card-header { padding: 10px 12px; }
+  .ruta-card-body   { padding: 12px 12px; }
+  .ruta-nombre      { font-size: 0.88rem; }
+
+  /* ── Selector de vehículo ── */
+  .vehiculo-selector {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .vehiculo-selector label { flex: 0 0 100%; }
+  .vehiculo-selector select { width: 100%; }
+
+  /* ── Modal genérico ── */
+  .modal-box {
+    width: calc(100vw - 20px);
+    padding: 20px 16px;
+    max-height: 92vh;
+    border-radius: 10px;
+  }
+  .modal-box--wide { width: calc(100vw - 16px); }
+
+  .modal-footer {
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 16px;
+  }
+  .modal-footer .btn { width: 100%; justify-content: center; }
+
+  /* ── Reacomo grid: columna única ── */
+  .reacomo-grid { grid-template-columns: 1fr; gap: 10px; }
+
+  /* ── Panel de mapa: fullscreen sin centering ── */
+  .panel-mapa {
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100dvh;
+    border-radius: 0;
+    transform: translateY(105%) scale(1) !important;
+  }
+  .panel-mapa.visible {
+    transform: translateY(0) scale(1) !important;
+  }
+  .panel-mapa__header { padding: 12px 14px 10px; }
+  .panel-mapa__body   { flex-direction: column; }
+
+  /* Sidebar como banda horizontal desplazable ── */
+  .panel-mapa__sidebar {
+    width: 100%;
+    height: 130px;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    flex-shrink: 0;
+  }
+  .panel-mapa__paradas {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    padding: 0;
+  }
+  .pm-parada {
+    min-width: 150px;
+    flex-shrink: 0;
+    border-bottom: none;
+    border-right: 1px solid #f1f5f9;
+  }
+  .pm-parada:last-child { border-right: none; }
+}

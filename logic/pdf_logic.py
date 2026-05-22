@@ -58,9 +58,9 @@ C_BORDE    = colors.HexColor("#B0BEC5")
 C_ALERTA   = colors.HexColor("#C0392B")
 C_BLANCO   = colors.white
 # ── Naranja para mayoristas ───────────────────────────────────
-C_MAY_BG   = colors.HexColor("#FFF3E0")   # fondo fila mayorista
-C_MAY_TEXT = colors.HexColor("#E65100")   # texto naranja oscuro
-C_MAY_SUBTOT = colors.HexColor("#FFE0B2") # subtotal cuando hay mayoristas
+C_MAY_BG   = colors.HexColor("#FFF7ED")   # fondo fila mayorista
+C_MAY_TEXT = colors.HexColor("#EA580C")   # texto naranja
+C_MAY_SUBTOT = colors.HexColor("#FFEDD5") # subtotal cuando hay mayoristas
 
 ORDEN_DIA = {"lunes": 1, "martes": 2, "miercoles": 3, "jueves": 4, "viernes": 5}
 ABREV_DIA = {
@@ -157,8 +157,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
             nombre = str(p.get("nombre", "—"))
             if es_may:
-                # Prefijo visual para destacar que es mayorista
-                nombre = f"★ {nombre}"
+                pass  # sin prefijo adicional
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
@@ -168,7 +167,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                 _p(nombre, sz=SZ_DAT,
                    color=C_MAY_TEXT if es_may else colors.black,
                    bold=es_may),
-                _pr(f"{p_kg:,.1f}", sz=SZ_DAT,
+                _pr(f"{int(p_kg):,}", sz=SZ_DAT,
                     color=C_MAY_TEXT if es_may else colors.black),
                 _pc(f"{pct_r:.0f}%", sz=SZ_DAT,
                     color=C_MAY_TEXT if es_may else colors.black),
@@ -201,7 +200,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         data_rows.append([
             "", "", "",
             _p(total_lbl, sz=SZ_TOT, bold=True),
-            _pr(f"{peso_ruta:,.1f}", sz=SZ_TOT, bold=True),
+            _pr(f"{int(peso_ruta):,}", sz=SZ_TOT, bold=True),
             _pc(f"{pct_util:.1f}%", sz=SZ_TOT, bold=True,
                 color=C_ALERTA if sob else C_NAVY),
         ])
