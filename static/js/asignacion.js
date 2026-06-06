@@ -1042,6 +1042,12 @@ function placasOcupadasEnDia(diaKey, excluirRutaId) {
   return ocupadas;
 }
 
+function _capacidadEfectivaTon(cap) {
+  const c = Number(cap);
+  if (!Number.isFinite(c) || c <= 0) return 0;
+  return Math.abs(c - 3.5) < 0.05 ? 4 : c;
+}
+
 /**
  * Puntaje de idoneidad de un vehículo para una carga dada.
  * Usa _utilMin / _utilMax cargados desde la configuración del sistema.
@@ -1051,7 +1057,7 @@ function placasOcupadasEnDia(diaKey, excluirRutaId) {
  *   • Fuera del rango   → 100 + distancia al borde   (siempre peor que cualquier candidato dentro del rango)
  */
 function _scoreVehiculo(pesoTon, vehiculo) {
-  const cap = vehiculo.capacidad_toneladas || 0;
+  const cap = _capacidadEfectivaTon(vehiculo.capacidad_toneladas || 0);
   if (cap <= 0) return Infinity;
   const pct = (pesoTon / cap) * 100;
   if (pct >= _utilMin && pct <= _utilMax) return Math.abs(pct - 100);
@@ -1078,7 +1084,7 @@ function sugerirVehiculo(pesoKg, diaKey, excluirRutaId = null, volumenM3 = 0) {
 
 function calcularPct(pesoKg, vehiculo) {
   if (!vehiculo?.capacidad_toneladas) return 0;
-  return (pesoKg / 1000 / vehiculo.capacidad_toneladas) * 100;
+  return (pesoKg / 1000 / _capacidadEfectivaTon(vehiculo.capacidad_toneladas)) * 100;
 }
 
 /** Devuelve true si el porcentaje está dentro del rango óptimo configurado. */

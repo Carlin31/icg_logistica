@@ -131,6 +131,25 @@ def _parse_hhmm(s: str) -> "int | None":
         return None
 
 
+def _capacidad_efectiva_ton(cap) -> float:
+    """
+    Regla especial: unidades de 3.5 t se consideran con tolerancia
+    hasta 4.0 t para marcar sobrecarga.
+    """
+    try:
+        c = float(cap or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if c <= 0:
+        return 0.0
+    return 4.0 if abs(c - 3.5) < 0.05 else c
+
+
+def _pct_utilizacion(peso_ton: float, cap_ton) -> float:
+    cap_eff = _capacidad_efectiva_ton(cap_ton)
+    return (peso_ton / cap_eff) * 100 if cap_eff > 0 else 0.0
+
+
 def _minutos_a_hhmm(min_total: float) -> str:
     h = int(min_total // 60)
     m = int(round(min_total % 60))
@@ -583,7 +602,7 @@ def _score_vehiculo(peso_ton: float, vehiculo: dict,
       antes que uno fuera, pero aún permite comparar los candidatos fuera del
       rango entre sí (fallback).
     """
-    cap = vehiculo.get("capacidad_toneladas", 0)
+    cap = _capacidad_efectiva_ton(vehiculo.get("capacidad_toneladas", 0))
     if cap <= 0:
         return float("inf")
     pct = (peso_ton / cap) * 100
@@ -613,7 +632,7 @@ def sugerir_vehiculo(peso_kg: float, vehiculos: list,
 def calcular_porcentaje_capacidad(peso_kg: float, vehiculo: "dict | None") -> float:
     if not vehiculo:
         return 0.0
-    cap = vehiculo.get("capacidad_toneladas", 0)
+    cap = _capacidad_efectiva_ton(vehiculo.get("capacidad_toneladas", 0))
     return round((peso_kg / 1000 / cap) * 100, 1) if cap > 0 else 0.0
 
 
@@ -774,7 +793,7 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
             if v.get("placas") not in usados
             and (v.get("capacidad_toneladas") or 0) > 0
             # CAP-2: descartar si superaría util_max (sin tolerancia adicional)
-            and (peso_ton / v["capacidad_toneladas"] * 100) <= util_max
+            and _pct_utilizacion(peso_ton, v.get("capacidad_toneladas")) <= util_max
             # OPE-2: restricción volumétrica con estrategia configurable
             and _es_vol_compatible(v, volumen_m3_ruta, estrategia_vol, factor_vol)
         ]
@@ -785,11 +804,11 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
         # SCO-1/SCO-3: candidatos dentro del rango óptimo → preferir el más cercano al 100 %
         en_rango = [
             v for v in libres
-            if util_min <= (peso_ton / v["capacidad_toneladas"] * 100) <= util_max
+            if util_min <= _pct_utilizacion(peso_ton, v.get("capacidad_toneladas")) <= util_max
         ]
 
         if en_rango:
-            return min(en_rango, key=lambda v: abs((peso_ton / v["capacidad_toneladas"] * 100) - 100))
+            return min(en_rango, key=lambda v: abs(_pct_utilizacion(peso_ton, v.get("capacidad_toneladas")) - 100))
 
         # SCO-2: fallback — ninguno en rango, pero todos ya cumplen pct ≤ util_max
         # (los sobrecargados fueron descartados arriba; aquí solo quedan subutilizados)
@@ -816,7 +835,7 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
             veh     = asignado["vehiculo"]
             placas  = veh.get("placas")
             cap     = veh.get("capacidad_toneladas", 1)
-            pct     = round((peso_ton / cap) * 100, 1)
+            pct     = round(_pct_utilizacion(peso_ton, cap), 1)
             cap_vol = veh.get("volumen_m3") or 0
             pct_vol = round((volumen_m3 / cap_vol) * 100, 1) if cap_vol > 0 else None
 
@@ -1025,7 +1044,7 @@ def _ejecutar_optimizacion_mayoristas(
         veh    = veh_por_placas.get(placas)
         if not veh:
             continue
-        cap_ton = veh.get("capacidad_toneladas", 0)
+        cap_ton = _capacidad_efectiva_ton(veh.get("capacidad_toneladas", 0))
         if cap_ton <= 0:
             continue
 
@@ -1041,7 +1060,7 @@ def _ejecutar_optimizacion_mayoristas(
         # Peso total incluyendo mayoristas actuales
         peso_may_actual = sum(m["peso_kg"] for m in may_actuales)
         peso_total_ton  = (peso_suc_kg + peso_may_actual) / 1000
-        pct_actual      = (peso_total_ton / cap_ton) * 100
+        pct_actual      = _pct_utilizacion(peso_total_ton, cap_ton)
 
         # ── MAY-2 paso 3: ya está en rango ──────────────────────
         if util_min <= pct_actual <= util_max:
@@ -1089,7 +1108,7 @@ def _ejecutar_optimizacion_mayoristas(
 
             for _dist, m in candidatos:
                 peso_test = (peso_suc_kg + sum(x["peso_kg"] for x in may_trabajo) + m["peso_kg"]) / 1000
-                pct_test  = (peso_test / cap_ton) * 100
+                pct_test  = _pct_utilizacion(peso_test, cap_ton)
                 if pct_test > util_max:
                     continue   # No agregar si excedería util_max (CAP-2)
                 may_trabajo.append(m)
@@ -1099,7 +1118,7 @@ def _ejecutar_optimizacion_mayoristas(
 
             # Aplicar mejor combinación
             peso_may_final = sum(m["peso_kg"] for m in mejor_combo)
-            pct_final      = ((peso_suc_kg + peso_may_final) / 1000 / cap_ton) * 100
+            pct_final      = _pct_utilizacion((peso_suc_kg + peso_may_final) / 1000, cap_ton)
 
             for m in mejor_combo:
                 mayoristas_usados[dia].add(m["id_cliente"])
@@ -1127,12 +1146,12 @@ def _ejecutar_optimizacion_mayoristas(
             # Si sin él la ruta caería bajo util_min → es necesario, no quitar
             may_restantes = [x for x in may_restantes if x["id_cliente"] != m["id_cliente"]]
 
-            pct_tras_quita = ((peso_suc_kg + sum(x["peso_kg"] for x in may_restantes)) / 1000 / cap_ton) * 100
+            pct_tras_quita = _pct_utilizacion((peso_suc_kg + sum(x["peso_kg"] for x in may_restantes)) / 1000, cap_ton)
             if pct_tras_quita <= util_max:
                 break   # Ya dentro del rango (o bajo util_min, pero sin sobrecarga)
 
         peso_may_final = sum(m["peso_kg"] for m in may_restantes)
-        pct_final      = ((peso_suc_kg + peso_may_final) / 1000 / cap_ton) * 100
+        pct_final      = _pct_utilizacion((peso_suc_kg + peso_may_final) / 1000, cap_ton)
 
         if pct_final <= util_max:
             # Éxito: sobrecarga resuelta quitando mayoristas
@@ -1162,16 +1181,16 @@ def _ejecutar_optimizacion_mayoristas(
         # Seleccionar el vehículo de menor capacidad que aún ponga la ruta en rango
         vehiculo_alt = None
         for v in sorted(vehiculos_candidatos, key=lambda x: x.get("capacidad_toneladas", 0)):
-            cap_v   = v.get("capacidad_toneladas", 0)
-            pct_v   = (peso_base_ton / cap_v) * 100 if cap_v > 0 else 999.0
+            cap_v   = _capacidad_efectiva_ton(v.get("capacidad_toneladas", 0))
+            pct_v   = _pct_utilizacion(peso_base_ton, cap_v) if cap_v > 0 else 999.0
             if util_min <= pct_v <= util_max:
                 vehiculo_alt = v
                 break
 
         if vehiculo_alt:
             new_placas = vehiculo_alt.get("placas")
-            new_cap    = vehiculo_alt.get("capacidad_toneladas")
-            pct_nuevo  = round((peso_base_ton / new_cap) * 100, 1)
+            new_cap    = _capacidad_efectiva_ton(vehiculo_alt.get("capacidad_toneladas"))
+            pct_nuevo  = round(_pct_utilizacion(peso_base_ton, new_cap), 1)
 
             # Liberar vehículo anterior; asignar el nuevo
             estado_dias[dia]["vehiculos_usados"].discard(placas)
@@ -1285,7 +1304,7 @@ def ejecutar_reacomodamiento(
                 v for v in vehiculos_sorted
                 if v.get("placas") not in usados_dia
                 and (v.get("capacidad_toneladas") or 0) > 0
-                and total_kg <= (v["capacidad_toneladas"] * 1000.0) * max_factor
+                and total_kg <= (_capacidad_efectiva_ton(v["capacidad_toneladas"]) * 1000.0) * max_factor
             ]
 
             if not eligible:
@@ -1314,7 +1333,7 @@ def ejecutar_reacomodamiento(
             # Seleccionar el más pequeño elegible (mejor ajuste sin desperdiciar)
             best_v     = eligible[0]
             placas_new = best_v.get("placas")
-            cap_kg     = best_v.get("capacidad_toneladas", 1) * 1000.0
+            cap_kg     = _capacidad_efectiva_ton(best_v.get("capacidad_toneladas", 1)) * 1000.0
             util_pct   = round((total_kg / cap_kg) * 100, 1)
             within_tol = abs(util_pct / 100.0 - 1.0) <= cap_tolerance
             overloaded = util_pct > max_util_pct

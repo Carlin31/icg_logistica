@@ -13,12 +13,12 @@ from flask import Flask, redirect, url_for, session
 from config import Config
 from db import close_db
 
-from router.menu_router           import menu_bp
-from router.configuracion_router  import configuracion_bp
-from router.extraccion_router     import extraccion_bp
-from router.asignacion_router     import asignacion_bp
-from router.modificacion_router   import modificacion_bp
-from router.pdf_router            import pdf_bp
+from router.menu_router import menu_bp
+from router.configuracion_router import configuracion_bp
+from router.extraccion_router import extraccion_bp
+from router.asignacion_router import asignacion_bp
+from router.modificacion_router import modificacion_bp
+from router.pdf_router import pdf_bp
 
 
 def create_app():

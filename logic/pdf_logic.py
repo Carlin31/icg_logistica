@@ -71,6 +71,13 @@ ABREV_DIA = {
     "viernes":   "VIERNES",
 }
 
+# ── Reglas de auxiliares por ruta ───────────────────────────
+# 1 auxiliar: peso <= 1500 kg o 2-3 sucursales
+# 2 auxiliares: peso > 1500 kg o 5+ sucursales
+AUX_PESO_1_MAX = 1500
+AUX_PESO_2_MIN = 1500
+AUX_SUC_2_MIN = 5
+
 
 def _parse_oid(doc_id: str) -> ObjectId | None:
     try:
@@ -94,6 +101,14 @@ def _p(txt, sz=SZ_DAT, bold=False, color=colors.black, align=TA_LEFT, italic=Fal
 def _pc(t, **kw): return _p(t, align=TA_CENTER, **kw)
 def _pr(t, **kw): return _p(t, align=TA_RIGHT, **kw)
 def _hdr(label):  return _pc(label, sz=SZ_HDR, bold=True, color=C_NAVY)
+
+
+def _auxiliares_para_ruta(peso_kg: float, n_suc: int) -> int:
+    if peso_kg > AUX_PESO_2_MIN or n_suc >= AUX_SUC_2_MIN:
+        return 2
+    if peso_kg <= AUX_PESO_1_MAX or 2 <= n_suc <= 3:
+        return 1
+    return 0
 
 
 # ── Encabezado fijo en canvas ─────────────────────────────────
@@ -148,6 +163,10 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
             key=lambda p: p.get("orden") if p.get("orden") is not None else 9999,
         )
 
+        n_suc = sum(1 for p in paradas if p["_tipo"] == "sucursal")
+        aux_count = _auxiliares_para_ruta(peso_ruta, n_suc)
+        aux_txt = str(aux_count) if aux_count else "—"
+
         row_start = 2 + len(data_rows)
 
         for i, p in enumerate(paradas):
@@ -161,7 +180,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
-                _pc("—",     sz=SZ_DAT)            if i == 0 else "",
+                _pc(aux_txt, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(str(p.get("orden", i + 1)), sz=SZ_DAT,
                     color=C_MAY_TEXT if es_may else colors.black),
                 _p(nombre, sz=SZ_DAT,
@@ -188,7 +207,6 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
             ]
 
         # Etiqueta del totalizador por día
-        n_suc = sum(1 for p in paradas if p["_tipo"] == "sucursal")
         n_may = sum(1 for p in paradas if p["_tipo"] == "mayorista")
 
         lbl_partes = [f"{n_suc} suc."]

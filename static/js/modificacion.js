@@ -19,6 +19,7 @@ let _mapa             = null;
 let _rutaLayer        = null;
 let _markersLayer     = null;
 let _pendientesLayer  = null;
+let _mayoristasLayer  = null;
 let _cancelarBatch    = false;
 let _pendientes             = {};   // { num_tienda: {num_tienda, nombre, latitud, longitud, peso_kg} }
 let _quitarResolve          = null;
@@ -448,6 +449,7 @@ function inicializarMapa() {
   _markersLayer    = L.layerGroup().addTo(_mapa);
   _rutaLayer       = L.layerGroup().addTo(_mapa);
   _pendientesLayer = L.layerGroup().addTo(_mapa);
+  _mayoristasLayer = L.layerGroup().addTo(_mapa);
   _mapa.on("popupopen", () => lucide.createIcons());
 
   // Recalcula el tamaño del mapa al redimensionar ventana (ej. rotar dispositivo)
@@ -463,6 +465,8 @@ function actualizarMapa(ruta) {
   _markersLayer.clearLayers();
   _rutaLayer.clearLayers();
   renderPendientesLayer();   // siempre actualizar marcadores pendientes
+  const mayLibres = _mayoristasNoAsignados();
+  renderMayoristasLibresLayer(mayLibres);
   const tiempos = _tiempos[ruta.id] || {};
   const paradas = _paradasDeRuta(ruta);
   const bounds  = [];
@@ -502,6 +506,12 @@ function actualizarMapa(ruta) {
     if (suc.latitud != null && suc.longitud != null) bounds.push([suc.latitud, suc.longitud]);
   });
 
+  // Incluir mayoristas sin ruta en los límites del mapa
+  mayLibres.forEach(m => {
+    const may = _normalizarMayorista({ ...m, tipo: "mayorista" });
+    if (may?.latitud != null && may?.longitud != null) bounds.push([may.latitud, may.longitud]);
+  });
+
   if (bounds.length > 0) _mapa.fitBounds(bounds, { padding: [40,40], maxZoom: 13 });
 }
 
@@ -526,6 +536,36 @@ function renderPendientesLayer() {
       (peso ? `<br>${peso.toLocaleString("es-MX")} kg` : "") +
       `<br><span style="font-size:0.8em;color:#9a3412">Usa "+ Parada" para reasignarla</span>`
     ).addTo(_pendientesLayer);
+  });
+}
+
+function _mayoristasNoAsignados() {
+  const asignados = new Set();
+  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(String(m.id_cliente))));
+  return (_mayoristasTodos || []).filter(m => !asignados.has(String(m.id_cliente)));
+}
+
+function renderMayoristasLibresLayer(libres = null) {
+  if (!_mayoristasLayer) return;
+  _mayoristasLayer.clearLayers();
+  const lista = libres || _mayoristasNoAsignados();
+  lista.forEach(m => {
+    const may = _normalizarMayorista({ ...m, tipo: "mayorista" });
+    if (!may || may.latitud == null || may.longitud == null) return;
+    const peso = may.peso_kg || 0;
+    L.marker([may.latitud, may.longitud], {
+      icon: L.divIcon({
+        className: "",
+        html: '<div style="width:26px;height:26px;border-radius:50%;background:#fdba74;color:#7c2d12;display:flex;align-items:center;justify-content:center;font-weight:700;border:2px solid #f97316">M</div>',
+        iconSize: [26, 26],
+        iconAnchor: [13, 13],
+      }),
+      zIndexOffset: 500,
+    }).bindPopup(
+      `<b style="color:#ea580c">Sin ruta: ${h(may.nombre || `Cliente ${may.id_cliente}`)}</b>` +
+      (peso ? `<br>${peso.toLocaleString("es-MX")} kg` : "") +
+      `<br><span style="font-size:0.8em;color:#9a3412">Usa "+ Mayorista" para asignarlo</span>`
+    ).addTo(_mayoristasLayer);
   });
 }
 
@@ -695,6 +735,12 @@ const _ABREV_DIA = {
 };
 function _abrevDia(d) { return _ABREV_DIA[d] || capitalizar(d.slice(0, 3)); }
 
+function _capacidadEfectivaTon(cap) {
+  const c = Number(cap);
+  if (!Number.isFinite(c) || c <= 0) return 0;
+  return Math.abs(c - 3.5) < 0.05 ? 4 : c;
+}
+
 function renderSelectorVehiculo(ruta) {
   const zona = document.getElementById("zona-vehiculo");
   if (!zona) return;
@@ -705,8 +751,9 @@ function renderSelectorVehiculo(ruta) {
 
   // Utilización de la ruta con el vehículo actual
   const vehActual    = _vehiculos.find(v => v.placas === placasActual);
-  const pctActual    = vehActual && vehActual.capacidad_ton > 0
-    ? (pesoTon / vehActual.capacidad_ton) * 100 : null;
+  const capActualNom = vehActual ? Number(vehActual.capacidad_ton || 0) : 0;
+  const capActualEff = _capacidadEfectivaTon(capActualNom);
+  const pctActual    = capActualEff > 0 ? (pesoTon / capActualEff) * 100 : null;
 
   // Días activos en esta logística (para denominador del indicador semanal)
   const diasConRutas = [...new Set(_rutas.map(r => r.dia).filter(Boolean))];
@@ -717,8 +764,10 @@ function renderSelectorVehiculo(ruta) {
     const aOcu = !!(a.ocupacion || {})[ruta.dia] && a.placas !== placasActual;
     const bOcu = !!(b.ocupacion || {})[ruta.dia] && b.placas !== placasActual;
     if (aOcu !== bOcu) return aOcu ? 1 : -1;
-    const pA = a.capacidad_ton > 0 ? Math.abs((pesoTon / a.capacidad_ton) * 100 - 100) : 999;
-    const pB = b.capacidad_ton > 0 ? Math.abs((pesoTon / b.capacidad_ton) * 100 - 100) : 999;
+    const pA = _capacidadEfectivaTon(a.capacidad_ton) > 0
+      ? Math.abs((pesoTon / _capacidadEfectivaTon(a.capacidad_ton)) * 100 - 100) : 999;
+    const pB = _capacidadEfectivaTon(b.capacidad_ton) > 0
+      ? Math.abs((pesoTon / _capacidadEfectivaTon(b.capacidad_ton)) * 100 - 100) : 999;
     return pA - pB;
   });
 
@@ -734,8 +783,11 @@ function renderSelectorVehiculo(ruta) {
     const esActual       = v.placas === placasActual;
     const ocu            = v.ocupacion || {};
     const ocupadoEsteDia = !esActual && !!ocu[ruta.dia];
-    const capKg          = (v.capacidad_ton || 0) * 1000;
-    const pctRuta        = capKg > 0 ? (pesoKg / capKg) * 100 : 0;
+    const capNom         = Number(v.capacidad_ton || 0);
+    const capTonEff      = _capacidadEfectivaTon(capNom);
+    const capKgEff       = capTonEff * 1000;
+    const capKgNom       = capNom * 1000;
+    const pctRuta        = capKgEff > 0 ? (pesoKg / capKgEff) * 100 : 0;
     const esMejor        = v.placas === mejorPlacas;
 
     // Color de la barra de utilización para esta ruta
@@ -744,7 +796,7 @@ function renderSelectorVehiculo(ruta) {
                     : pctRuta > 125                     ? "util-sobre"
                     : "util-sub";
 
-    const pctLabel = capKg > 0 ? `${pctRuta.toFixed(0)}%` : "—";
+    const pctLabel = capKgEff > 0 ? `${pctRuta.toFixed(0)}%` : "—";
 
     // Badge de disponibilidad
     let badge = "";
@@ -764,7 +816,8 @@ function renderSelectorVehiculo(ruta) {
                          : "uso-bajo";
     const usoChip = `<span class="veh-uso-chip ${usoChipClass}" title="Usado ${diasUsados} de ${totalDiasSemana} días esta semana">${diasUsados}/${totalDiasSemana}</span>`;
 
-    const tooltip = `${v.abrev || v.descripcion} · ${v.capacidad_ton} ton · ${pctRuta.toFixed(1)}% utilización para esta ruta${v.chofer ? " · " + v.chofer : ""}`;
+    const capLabel = `${capNom} ton`;
+    const tooltip = `${v.abrev || v.descripcion} · ${capLabel} · ${pctRuta.toFixed(1)}% utilización para esta ruta${v.chofer ? " · " + v.chofer : ""}`;
 
     return `
       <div class="veh-opcion${esActual ? " veh-opcion--actual" : ""}${ocupadoEsteDia ? " veh-opcion--ocupado" : ""}${esMejor && !esActual ? " veh-opcion--mejor" : ""}"
@@ -772,7 +825,7 @@ function renderSelectorVehiculo(ruta) {
         <div class="veh-opcion-top">
           <div class="veh-opcion-info">
             <span class="veh-nombre">${h(v.abrev || v.descripcion)}</span>
-            <span class="veh-detalle">${h(v.placas)} · ${v.capacidad_ton} ton${v.chofer ? " · " + h(v.chofer) : ""}</span>
+            <span class="veh-detalle">${h(v.placas)} · ${capLabel}${v.chofer ? " · " + h(v.chofer) : ""}</span>
           </div>
           <div class="veh-opcion-right">${usoChip}${badge}</div>
         </div>
@@ -783,7 +836,7 @@ function renderSelectorVehiculo(ruta) {
           </div>
           <span class="veh-util-label ${utilClass}">${pctLabel}</span>
         </div>
-        <div class="veh-util-sub">${pesoKg.toLocaleString("es-MX")} kg de ${(capKg).toLocaleString("es-MX")} kg cap.</div>
+        <div class="veh-util-sub">${pesoKg.toLocaleString("es-MX")} kg de ${(capKgNom).toLocaleString("es-MX")} kg cap.</div>
       </div>`;
   }).join("");
 
@@ -808,7 +861,7 @@ function renderSelectorVehiculo(ruta) {
           <div class="veh-resumen-bar-fill ${rClass}" style="width:${Math.min(pctActual, 130)}%"></div>
           <div class="veh-resumen-bar-mark"></div>
         </div>
-        <div class="veh-resumen-hint ${rClass}">${rLabel} · ${(vehActual.capacidad_ton * 1000).toLocaleString("es-MX")} kg de capacidad</div>
+        <div class="veh-resumen-hint ${rClass}">${rLabel} · ${(capActualNom * 1000).toLocaleString("es-MX")} kg de capacidad</div>
       </div>`;
   }
 
@@ -914,7 +967,8 @@ function renderIndicadores(ruta) {
     capTon = parseFloat(((pesoKg / 1000) / (ruta.pct_utilizacion / 100)).toFixed(2));
   }
   capTon = capTon || 2.5;
-  const pct      = (pesoKg / 1000 / capTon) * 100;
+  const capTonEff = _capacidadEfectivaTon(capTon);
+  const pct      = capTonEff > 0 ? (pesoKg / 1000 / capTonEff) * 100 : 0;
   const barClass = pct <= 100 ? "verde" : pct <= 120 ? "naranja" : "rojo";
   const horaReg    = t.hora_regreso || ruta.hora_regreso || "—";
   const horaSalida = _horaSalidaDeRuta(ruta);
@@ -964,8 +1018,31 @@ function _actualizarIndicadoresPeso(ruta) {
  */
 function _paradasDeRuta(ruta) {
   const sucs = (ruta.sucursales || []).map(s => ({ ...s, tipo: "sucursal" }));
-  const mays = (ruta.mayoristas  || []).map(m => ({ ...m, tipo: "mayorista" }));
+  const mays = (ruta.mayoristas  || []).map(m => _normalizarMayorista({ ...m, tipo: "mayorista" }));
   return [...sucs, ...mays].sort((a, b) => (a.orden ?? 9999) - (b.orden ?? 9999));
+}
+
+function _normalizarMayorista(may) {
+  if (!may) return may;
+  const numOrNull = (v) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  let lat = numOrNull(may.latitud);
+  let lon = numOrNull(may.longitud);
+  const id = may.id_cliente;
+  let ref = null;
+  if (id != null) {
+    ref = _mayoristasTodos.find(m => Number(m.id_cliente) === Number(id)) || null;
+  }
+  if (lat == null) lat = numOrNull(ref?.latitud);
+  if (lon == null) lon = numOrNull(ref?.longitud);
+  return {
+    ...may,
+    nombre: may.nombre || ref?.nombre,
+    latitud: lat,
+    longitud: lon,
+  };
 }
 
 function renderParadas(ruta) {
@@ -1604,7 +1681,7 @@ function agregarSucursal(ruta, suc) {
   const peso     = _pesos[String(suc.num_tienda)] || 0;
   const paradas  = _paradasDeRuta(ruta);
   const maxOrden = paradas.reduce((m, p) => Math.max(m, p.orden ?? 0), 0);
-  ruta.sucursales.push({
+  paradas.push({
     tipo: "sucursal",
     num_tienda:   suc.num_tienda,
     nombre:       nombreResuelto,
@@ -1614,6 +1691,9 @@ function agregarSucursal(ruta, suc) {
     descarga_min: Math.min(peso * MIN_DESCARGA_POR_KG, MAX_DESCARGA_MIN),
     orden:        maxOrden + 1,
   });
+  paradas.sort((a, b) => (a.orden ?? 9999) - (b.orden ?? 9999));
+  paradas.forEach((p, i) => { p.orden = i + 1; });
+  _sincronizarParadas(ruta, paradas);
   ruta.num_sucursales = ruta.sucursales.length;
   delete _tiempos[ruta.id];
   renderParadas(ruta);
@@ -1639,10 +1719,13 @@ function cerrarModalAgregarMayorista() {
 function renderMayoristasDisponibles(query) {
   const ruta = _rutasFiltradas[_indiceActivo];
   if (!ruta) return;
+  const asignados = new Set();
+  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(String(m.id_cliente))));
   const enRuta = new Set((ruta.mayoristas || []).map(m => String(m.id_cliente)));
   const q = (query || "").toLowerCase().trim();
 
   const disponibles = _mayoristasTodos.filter(m => {
+    if (asignados.has(String(m.id_cliente))) return false;
     if (enRuta.has(String(m.id_cliente))) return false;
     if (!q) return true;
     return (m.nombre || "").toLowerCase().includes(q) || String(m.id_cliente).includes(q);
@@ -1902,6 +1985,7 @@ async function guardarTodo(redirigir = false) {
         capTon = parseFloat(((pesoKg / 1000) / (ruta.pct_utilizacion / 100)).toFixed(2));
       }
       capTon = capTon || 2.5;
+      const capTonEff = _capacidadEfectivaTon(capTon);
       return {
         id:                 ruta.id,
         nombre:             ruta.nombre,
@@ -1912,7 +1996,7 @@ async function guardarTodo(redirigir = false) {
         capacidad_ton:      capTon,
         peso_kg:            pesoKg,
         peso_ton:           parseFloat((pesoKg / 1000).toFixed(3)),
-        pct_utilizacion:    parseFloat(((pesoKg / 1000 / capTon) * 100).toFixed(1)),
+        pct_utilizacion:    parseFloat(((pesoKg / 1000 / capTonEff) * 100).toFixed(1)),
         conduccion_min:     t.traslado_min || 0,
         descarga_min:       t.descarga_min || 0,
         extra_min:          t.extra_min || HORAS_EXTRA_RUTA_MIN,
