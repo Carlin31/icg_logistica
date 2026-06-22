@@ -21,11 +21,23 @@ let _markersLayer     = null;
 let _pendientesLayer  = null;
 let _mayoristasLayer  = null;
 let _cancelarBatch    = false;
+let _altLayer          = null; // Leaflet layer para línea de referencia gris
+let _modoPersonalizado = {};   // rutaId → bool (false=recomendada, true=personalizada)
+let _viaPoints         = {};   // rutaId → [{lat, lon}]  — paso obligatorio
+let _puntosEvitar      = {};   // rutaId → [{lat, lon}]  — zonas a evitar
+let _modoEdicionMapa   = {};   // rutaId → 'obligatorio' | 'evitar'
+let _rutaPersonalizada = {};   // rutaId → {geometry, distancia_km, traslado_min, ...}
+let _viaLayer          = null; // Leaflet layer para via-points y zonas evitar
 let _pendientes             = {};   // { num_tienda: {num_tienda, nombre, latitud, longitud, peso_kg} }
 let _quitarResolve          = null;
-let _crearRuta              = { dia: "", vehiculo: "", sucursales: [], query: "" };
+let _crearRuta              = { dia: "", vehiculo: "", sucursales: [], mayoristas: [], query: "", queryMayoristas: "", verTodasSuc: false, verTodosMay: false };
 let _configDias             = {};          // config_dias from MongoDB (per-day schedule)
-let _mayoristasTodos        = [];          // todos los mayoristas disponibles [{id_cliente, nombre, peso_kg, latitud, longitud}]
+let _mayoristasTodos        = [];          // todos los mayoristas disponibles [{id_cliente, documento, nombre, peso_kg, latitud, longitud}]
+
+/** Clave de unicidad por documento: usa documento si existe, si no id_cliente. */
+function _docKey(m) {
+  return m.documento || String(m.id_cliente ?? "");
+}
 
 const MSG_MOD = {
   recalcular: [
@@ -69,7 +81,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   const activa = await verificarSesionLogistica();
   if (!activa) return;
   await cargarDatos();
+  _ultimaActualizacionFlota = parseInt(localStorage.getItem("icg_flota_actualizada") || "0", 10);
   bindEventos();
+
+  const modo = new URLSearchParams(window.location.search).get("modo") || "";
+  if (modo === "crear-ruta") {
+    setTimeout(() => abrirModalCrearRuta(), 120);
+  }
 });
 
 // Helper: fetch con timeout para evitar bloqueos indefinidos
@@ -209,10 +227,23 @@ function bindEventos() {
   document.getElementById("btn-crear-confirm")?.addEventListener("click", crearRutaManual);
   document.getElementById("buscar-sucursal-crear")?.addEventListener("input", (e) => {
     _crearRuta.query = e.target.value;
+    _crearRuta.verTodasSuc = false;
     renderListaCrearSucursales();
+  });
+  document.getElementById("buscar-mayorista-crear")?.addEventListener("input", (e) => {
+    _crearRuta.queryMayoristas = e.target.value;
+    _crearRuta.verTodosMay = false;
+    renderListaCrearMayoristas();
   });
   document.getElementById("crear-dia")?.addEventListener("change", (e) => {
     _crearRuta.dia = e.target.value;
+    // Si el vehículo seleccionado ya no está disponible en el nuevo día, deseleccionarlo
+    const vehActual = _vehiculos.find(v => v.placas === _crearRuta.vehiculo);
+    if (vehActual && (vehActual.ocupacion || {})[_crearRuta.dia]) {
+      _crearRuta.vehiculo = "";
+    }
+    renderVehiculosCrearRuta();
+    actualizarEstadoCrearRuta();
   });
   document.getElementById("crear-vehiculo")?.addEventListener("change", (e) => {
     _crearRuta.vehiculo = e.target.value;
@@ -280,7 +311,7 @@ async function cargarDatos() {
     _logisticaId    = rutasData.logistica_id || _logisticaId || "";
     _mayoristasTodos = rutasData.mayoristas_disponibles || [];
 
-    if (rutasData.status !== "ok" || _rutas.length === 0) {
+    if (rutasData.status !== "ok") {
       banner.style.display = "none";
       document.getElementById("estado-vacio").style.display = "block";
       document.getElementById("resumen-fuentes").style.display = "none";
@@ -303,7 +334,7 @@ async function cargarDatos() {
       _restaurarConfirmadas(); // sin datos en servidor, usar localStorage
     }
 
-    // Restaurar sucursales pendientes desde MongoDB (fuente de verdad)
+    // Restaurar sucursales pendientes y mayoristas libres desde MongoDB (fuente de verdad)
     _aplicarPendientes(rutasData.sucursales_pendientes || []);
     _actualizarConteoRutas();
     document.getElementById("resumen-fuentes").style.display = "flex";
@@ -318,10 +349,17 @@ async function cargarDatos() {
     document.getElementById("filtro-dias").style.display = "flex";
     lucide.createIcons();
 
-    const primerDia = _rutas.find(r => r.dia === "lunes") ? "lunes"
-                    : (DIAS_ORDEN.find(d => _rutas.some(r => r.dia === d.key))?.key || "__todos__");
-    aplicarFiltroDia(primerDia);
-    console.log('[cargarDatos] finalizado, primer dia aplicado:', primerDia);
+    if (_rutas.length > 0) {
+      const primerDia = _rutas.find(r => r.dia === "lunes") ? "lunes"
+                      : (DIAS_ORDEN.find(d => _rutas.some(r => r.dia === d.key))?.key || "__todos__");
+      aplicarFiltroDia(primerDia);
+      console.log('[cargarDatos] finalizado, primer dia aplicado:', primerDia);
+    } else {
+      document.getElementById("estado-vacio").style.display = "block";
+      document.getElementById("nav-rutas").style.display = "none";
+      document.getElementById("panel-principal").style.display = "none";
+      console.log('[cargarDatos] finalizado sin rutas programadas');
+    }
 
   } catch (err) {
     console.error("[cargarDatos]", err);
@@ -350,10 +388,9 @@ async function calcularOSRMParaRuta(ruta) {
   const statusEl = document.getElementById("osrm-ruta-status");
   statusEl.style.display = "flex";
   try {
+    const body = JSON.stringify({ paradas, hora_salida: _horaSalidaDeRuta(ruta) });
     const res = await fetch("/modificacion/recalcular-tiempos", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paradas, hora_salida: _horaSalidaDeRuta(ruta) }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body,
     });
     if (res.status === 400) { redirigirAlMenu('Sin logística activa.'); return; }
     _tiempos[ruta.id] = res.ok ? await res.json() : { ...tiempoVacio(), origen_tiempo: "error" };
@@ -377,6 +414,262 @@ function rutaTieneOSRM(rutaId) {
   const t = _tiempos[rutaId];
   return t && t.origen_tiempo && t.origen_tiempo !== "pendiente" && t.origen_tiempo !== "error";
 }
+
+// ── Selector de ruta (recomendada / personalizada) ─────────────
+
+function renderSelectorRuta(ruta) {
+  const zona = document.getElementById("zona-alternativas");
+  if (!zona) return;
+  const t = _tiempos[ruta.id] || {};
+  if (!rutaTieneOSRM(ruta.id)) { zona.innerHTML = ""; return; }
+
+  const esP      = !!_modoPersonalizado[ruta.id];
+  const vps      = _viaPoints[ruta.id] || [];
+  const rutaCust = _rutaPersonalizada[ruta.id];
+
+  // Stats ruta recomendada
+  const recKm  = (t.distancia_km || 0).toFixed(1);
+  const recMin = Math.round(t.traslado_min || 0);
+  const recReg = t.hora_regreso || "—";
+
+  // Stats ruta personalizada
+  let custLabel = "";
+  if (rutaCust) {
+    custLabel = `${rutaCust.distancia_km.toFixed(1)} km · ${Math.round(rutaCust.traslado_min)} min conducción · Regreso ${rutaCust.hora_regreso}`;
+  } else if (esP && vps.length > 0) {
+    custLabel = "Calculando…";
+  } else {
+    custLabel = "Haz clic en el mapa para trazar puntos de paso";
+  }
+
+  // Editor (solo visible en modo personalizado)
+  let editorHTML = "";
+  if (esP) {
+    const modo = _modoEdicionMapa[ruta.id] || "obligatorio";
+    const pes  = _puntosEvitar[ruta.id] || [];
+
+    // Botones para cambiar modo de edición
+    const modoToggle = `
+      <div class="pers-modo-toggle">
+        <button class="pers-modo-btn ${modo === "obligatorio" ? "pers-modo-activo-obl" : ""}"
+                onclick="cambiarModoEdicion('${ruta.id}', 'obligatorio')">
+          <i data-lucide="check-circle" style="width:12px;height:12px"></i> Paso obligatorio
+        </button>
+        <button class="pers-modo-btn ${modo === "evitar" ? "pers-modo-activo-evit" : ""}"
+                onclick="cambiarModoEdicion('${ruta.id}', 'evitar')">
+          <i data-lucide="ban" style="width:12px;height:12px"></i> Zonas a evitar
+        </button>
+      </div>`;
+
+    // Panel de paso obligatorio
+    const instruccionObl = vps.length === 0 && modo === "obligatorio"
+      ? `<div class="pers-instruccion pers-instruccion-obl"><i data-lucide="mouse-pointer-click" style="width:13px;height:13px;vertical-align:middle"></i> Haz clic en el mapa para agregar puntos de paso obligatorio</div>`
+      : "";
+    const viaItems = vps.map((vp, i) => `
+      <div class="via-item">
+        <span class="via-numero">${i + 1}</span>
+        <span class="via-coords">${vp.lat.toFixed(5)}, ${vp.lon.toFixed(5)}</span>
+        <button class="via-eliminar" onclick="eliminarViaPoint('${ruta.id}', ${i})" title="Eliminar punto">
+          <i data-lucide="x" style="width:12px;height:12px"></i>
+        </button>
+      </div>`).join("");
+    const limpiarObl = vps.length > 0
+      ? `<button class="btn-limpiar-via" onclick="limpiarViaPoints('${ruta.id}')">
+           <i data-lucide="trash-2" style="width:12px;height:12px"></i> Limpiar paso obligatorio
+         </button>`
+      : "";
+    const panelObl = `
+      <div class="pers-seccion">
+        ${instruccionObl}
+        ${viaItems ? `<div class="via-lista">${viaItems}</div>` : ""}
+        ${limpiarObl}
+      </div>`;
+
+    // Panel de zonas a evitar
+    const instruccionEvit = pes.length === 0 && modo === "evitar"
+      ? `<div class="pers-instruccion pers-instruccion-evit"><i data-lucide="mouse-pointer-click" style="width:13px;height:13px;vertical-align:middle"></i> Haz clic en el mapa para marcar zonas a evitar</div>`
+      : "";
+    const evitItems = pes.map((pe, i) => `
+      <div class="via-item via-item-evitar">
+        <span class="via-numero via-numero-evitar">${i + 1}</span>
+        <span class="via-coords">${pe.lat.toFixed(5)}, ${pe.lon.toFixed(5)}</span>
+        <button class="via-eliminar" onclick="eliminarPuntoEvitar('${ruta.id}', ${i})" title="Eliminar zona">
+          <i data-lucide="x" style="width:12px;height:12px"></i>
+        </button>
+      </div>`).join("");
+    const limpiarEvit = pes.length > 0
+      ? `<button class="btn-limpiar-via btn-limpiar-evitar" onclick="limpiarPuntosEvitar('${ruta.id}')">
+           <i data-lucide="trash-2" style="width:12px;height:12px"></i> Limpiar zonas
+         </button>`
+      : "";
+    const panelEvit = `
+      <div class="pers-seccion">
+        ${instruccionEvit}
+        ${evitItems ? `<div class="via-lista">${evitItems}</div>` : ""}
+        ${limpiarEvit}
+      </div>`;
+
+    editorHTML = `
+      <div class="pers-editor">
+        ${modoToggle}
+        ${modo === "obligatorio" ? panelObl : panelEvit}
+      </div>`;
+  }
+
+  zona.innerHTML = `
+    <div class="selector-ruta-panel">
+      <div class="selector-ruta-titulo">Selección de ruta</div>
+      <div class="selector-ruta-opciones">
+        <div class="selector-ruta-opcion ${!esP ? "opcion-activa opcion-rec" : ""}"
+             onclick="seleccionarModoRuta('${ruta.id}', false)" role="button" tabindex="0">
+          <span class="opcion-radio">${!esP
+            ? `<i data-lucide="circle-check-big" style="width:16px;height:16px;color:#2563eb"></i>`
+            : `<i data-lucide="circle" style="width:16px;height:16px;color:#94a3b8"></i>`}</span>
+          <div class="opcion-info">
+            <div class="opcion-nombre">Ruta recomendada</div>
+            <div class="opcion-stats">${recKm} km · ${recMin} min · Regreso ${recReg}</div>
+          </div>
+        </div>
+        <div class="selector-ruta-opcion ${esP ? "opcion-activa opcion-cust" : ""}"
+             onclick="seleccionarModoRuta('${ruta.id}', true)" role="button" tabindex="0">
+          <span class="opcion-radio">${esP
+            ? `<i data-lucide="circle-check-big" style="width:16px;height:16px;color:#f59e0b"></i>`
+            : `<i data-lucide="circle" style="width:16px;height:16px;color:#94a3b8"></i>`}</span>
+          <div class="opcion-info">
+            <div class="opcion-nombre">Ruta personalizada</div>
+            <div class="opcion-stats ${!rutaCust && esP && !vps.length ? "opcion-stats-hint" : ""}">${custLabel}</div>
+          </div>
+        </div>
+      </div>
+      ${editorHTML}
+    </div>`;
+  lucide.createIcons();
+}
+
+function seleccionarModoRuta(rutaId, esPersonalizada) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  _modoPersonalizado[rutaId] = esPersonalizada;
+  const mapaEl = document.getElementById("mapa");
+  if (mapaEl) mapaEl.classList.toggle("mapa-personalizar", esPersonalizada);
+  renderSelectorRuta(ruta);
+  renderResumenTiempos(ruta);
+  renderIndicadores(ruta);
+  actualizarMapa(ruta);
+  renderNavRutas();
+}
+
+// ── Ruta personalizada: paso obligatorio y zonas a evitar ──────
+
+function cambiarModoEdicion(rutaId, modo) {
+  _modoEdicionMapa[rutaId] = modo;
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (ruta) renderSelectorRuta(ruta);
+}
+
+function eliminarViaPoint(rutaId, idx) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  const vps = _viaPoints[rutaId] || [];
+  vps.splice(idx, 1);
+  _viaPoints[rutaId] = vps;
+  const tieneAlgo = vps.length > 0 || (_puntosEvitar[rutaId] || []).length > 0;
+  if (tieneAlgo) {
+    renderSelectorRuta(ruta);
+    actualizarMapa(ruta);
+    _recalcularPersonalizado(ruta).then(() => {
+      renderSelectorRuta(ruta);
+      renderResumenTiempos(ruta);
+      renderIndicadores(ruta);
+      actualizarMapa(ruta);
+    });
+  } else {
+    _rutaPersonalizada[rutaId] = null;
+    renderSelectorRuta(ruta);
+    renderResumenTiempos(ruta);
+    renderIndicadores(ruta);
+    actualizarMapa(ruta);
+  }
+}
+
+function eliminarPuntoEvitar(rutaId, idx) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  const pes = _puntosEvitar[rutaId] || [];
+  pes.splice(idx, 1);
+  _puntosEvitar[rutaId] = pes;
+  renderSelectorRuta(ruta);
+  actualizarMapa(ruta);
+  _recalcularPersonalizado(ruta).then(() => {
+    renderSelectorRuta(ruta);
+    renderResumenTiempos(ruta);
+    renderIndicadores(ruta);
+    actualizarMapa(ruta);
+  });
+}
+
+function limpiarViaPoints(rutaId) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  _viaPoints[rutaId] = [];
+  if (!(_puntosEvitar[rutaId] || []).length) _rutaPersonalizada[rutaId] = null;
+  renderSelectorRuta(ruta);
+  renderResumenTiempos(ruta);
+  renderIndicadores(ruta);
+  actualizarMapa(ruta);
+}
+
+function limpiarPuntosEvitar(rutaId) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  _puntosEvitar[rutaId] = [];
+  if (!(_viaPoints[rutaId] || []).length) _rutaPersonalizada[rutaId] = null;
+  renderSelectorRuta(ruta);
+  renderResumenTiempos(ruta);
+  renderIndicadores(ruta);
+  actualizarMapa(ruta);
+}
+
+function limpiarPersonalizacion(rutaId) {
+  const ruta = _rutas.find(r => r.id === rutaId);
+  if (!ruta) return;
+  _viaPoints[rutaId]         = [];
+  _puntosEvitar[rutaId]      = [];
+  _rutaPersonalizada[rutaId] = null;
+  renderSelectorRuta(ruta);
+  renderResumenTiempos(ruta);
+  renderIndicadores(ruta);
+  actualizarMapa(ruta);
+}
+
+async function _recalcularPersonalizado(ruta) {
+  const paradas      = _paradasDeRuta(ruta);
+  const via          = _viaPoints[ruta.id] || [];
+  const puntosEvitar = _puntosEvitar[ruta.id] || [];
+  if (!paradas.length || (!via.length && !puntosEvitar.length)) return;
+  const statusEl = document.getElementById("osrm-ruta-status");
+  if (statusEl) statusEl.style.display = "flex";
+  try {
+    const res = await fetch("/modificacion/ruta-personalizada", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({
+        paradas,
+        via_points:     via,
+        puntos_evitar:  puntosEvitar,
+        hora_salida:    _horaSalidaDeRuta(ruta),
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.status === "ok" && data.ruta) {
+        _rutaPersonalizada[ruta.id] = data.ruta;
+      }
+    }
+  } catch { /* silencioso */ }
+  if (statusEl) statusEl.style.display = "none";
+}
+
 
 // ── OSRM: cálculo batch ────────────────────────────────────────
 async function calcularTodasOSRM() {
@@ -447,10 +740,32 @@ function inicializarMapa() {
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>', maxZoom: 18,
   }).addTo(_mapa);
   _markersLayer    = L.layerGroup().addTo(_mapa);
+  _altLayer        = L.layerGroup().addTo(_mapa);
   _rutaLayer       = L.layerGroup().addTo(_mapa);
   _pendientesLayer = L.layerGroup().addTo(_mapa);
   _mayoristasLayer = L.layerGroup().addTo(_mapa);
+  _viaLayer        = L.layerGroup().addTo(_mapa);
   _mapa.on("popupopen", () => lucide.createIcons());
+
+  _mapa.on("click", async (e) => {
+    const ruta = _rutasFiltradas[_indiceActivo];
+    if (!ruta || !_modoPersonalizado[ruta.id]) return;
+    const modo = _modoEdicionMapa[ruta.id] || "obligatorio";
+    if (modo === "evitar") {
+      if (!_puntosEvitar[ruta.id]) _puntosEvitar[ruta.id] = [];
+      _puntosEvitar[ruta.id].push({ lat: e.latlng.lat, lon: e.latlng.lng });
+    } else {
+      if (!_viaPoints[ruta.id]) _viaPoints[ruta.id] = [];
+      _viaPoints[ruta.id].push({ lat: e.latlng.lat, lon: e.latlng.lng });
+    }
+    renderSelectorRuta(ruta);
+    actualizarMapa(ruta);
+    await _recalcularPersonalizado(ruta);
+    renderSelectorRuta(ruta);
+    renderResumenTiempos(ruta);
+    renderIndicadores(ruta);
+    actualizarMapa(ruta);
+  });
 
   // Recalcula el tamaño del mapa al redimensionar ventana (ej. rotar dispositivo)
   let _resizeTimer;
@@ -463,13 +778,57 @@ function inicializarMapa() {
 function actualizarMapa(ruta) {
   if (!_mapa) return;
   _markersLayer.clearLayers();
+  _altLayer.clearLayers();
   _rutaLayer.clearLayers();
-  renderPendientesLayer();   // siempre actualizar marcadores pendientes
+  _viaLayer.clearLayers();
+  renderPendientesLayer();
   const mayLibres = _mayoristasNoAsignados();
   renderMayoristasLibresLayer(mayLibres);
   const tiempos = _tiempos[ruta.id] || {};
   const paradas = _paradasDeRuta(ruta);
   const bounds  = [];
+
+  const esP      = !!_modoPersonalizado[ruta.id];
+  const rutaCust = _rutaPersonalizada[ruta.id];
+
+  if (!esP) {
+    // Modo recomendada: trazar geometría del sistema en azul
+    if (tiempos.geometry && tiempos.geometry.length > 1) {
+      const latlngs = tiempos.geometry.map(c => [c[1], c[0]]);
+      L.polyline(latlngs, { color: "#2563eb", weight: 6, opacity: 0.95, lineJoin: "round" }).addTo(_rutaLayer);
+    }
+  } else {
+    // Modo personalizado: referencia gris + ruta personalizada ámbar
+    if (tiempos.geometry && tiempos.geometry.length > 1) {
+      const refLatlngs = tiempos.geometry.map(c => [c[1], c[0]]);
+      L.polyline(refLatlngs, { color: "#94a3b8", weight: 2, opacity: 0.45, dashArray: "6 5", lineJoin: "round" }).addTo(_altLayer);
+    }
+    if (rutaCust && rutaCust.geometry && rutaCust.geometry.length > 1) {
+      const custLatlngs = rutaCust.geometry.map(c => [c[1], c[0]]);
+      L.polyline(custLatlngs, { color: "#f59e0b", weight: 6, opacity: 0.95, lineJoin: "round" }).addTo(_rutaLayer);
+    }
+    // Marcadores de paso obligatorio
+    (_viaPoints[ruta.id] || []).forEach((vp, i) => {
+      L.marker([vp.lat, vp.lon], {
+        icon: L.divIcon({ className: "", html: `<div class="marker-via">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+        zIndexOffset: 800,
+      }).addTo(_viaLayer);
+    });
+    // Zonas a evitar: círculo rojo + marcador
+    (_puntosEvitar[ruta.id] || []).forEach((pe, i) => {
+      L.circle([pe.lat, pe.lon], {
+        radius: 300, color: "#dc2626", fillColor: "#fee2e2",
+        fillOpacity: 0.35, weight: 2,
+      }).addTo(_viaLayer);
+      L.marker([pe.lat, pe.lon], {
+        icon: L.divIcon({ className: "", html: `<div class="marker-evitar">${i + 1}</div>`, iconSize: [22, 22], iconAnchor: [11, 11] }),
+        zIndexOffset: 810,
+      }).addTo(_viaLayer);
+    });
+  }
+
+  // Color de marcadores según modo
+  const rutaColor = esP ? "#f59e0b" : "#2563eb";
 
   if (tiempos.matriz) {
     const [lat, lon] = tiempos.matriz;
@@ -484,17 +843,15 @@ function actualizarMapa(ruta) {
     bounds.push([p.latitud, p.longitud]);
     const esMay = p.tipo === "mayorista";
     const peso  = esMay ? (p.peso_kg || 0) : (_pesos[String(p.num_tienda)] || p.peso_kg || 0);
-    const color = esMay ? "#f97316" : "#2563eb";
+    const color = esMay ? "#f97316" : rutaColor;
     const html  = `<div class="marker-orden" style="background:${color}">${i + 1}</div>`;
     L.marker([p.latitud, p.longitud], {
       icon: L.divIcon({ className: "", html, iconSize: [28,28], iconAnchor: [14,14] }),
-    }).bindPopup(`<b>${i+1}. ${h(p.nombre)}</b>${peso ? `<br>${peso.toLocaleString("es-MX")} kg` : ""}`).addTo(_markersLayer);
+    }).bindPopup(`<b>${i+1}. ${h(esMay ? _labelMayorista(p) : p.nombre)}</b>${peso ? `<br>${peso.toLocaleString("es-MX")} kg` : ""}`).addTo(_markersLayer);
   });
 
-  if (tiempos.geometry && tiempos.geometry.length > 1) {
-    const latlngs = tiempos.geometry.map(c => [c[1], c[0]]);
-    L.polyline(latlngs, { color: "#2563eb", weight: 4, opacity: 0.85, lineJoin: "round" }).addTo(_rutaLayer);
-  } else if (paradas.length > 0 && tiempos.matriz) {
+  // Fallback línea punteada si aún no hay geometría
+  if (!tiempos.geometry?.length && paradas.length > 0 && tiempos.matriz) {
     const pts = [tiempos.matriz];
     paradas.forEach(p => { if (p.latitud != null && p.longitud != null) pts.push([p.latitud, p.longitud]); });
     pts.push(tiempos.matriz);
@@ -541,8 +898,8 @@ function renderPendientesLayer() {
 
 function _mayoristasNoAsignados() {
   const asignados = new Set();
-  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(String(m.id_cliente))));
-  return (_mayoristasTodos || []).filter(m => !asignados.has(String(m.id_cliente)));
+  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(_docKey(m))));
+  return (_mayoristasTodos || []).filter(m => !asignados.has(_docKey(m)));
 }
 
 function renderMayoristasLibresLayer(libres = null) {
@@ -562,7 +919,7 @@ function renderMayoristasLibresLayer(libres = null) {
       }),
       zIndexOffset: 500,
     }).bindPopup(
-      `<b style="color:#ea580c">Sin ruta: ${h(may.nombre || `Cliente ${may.id_cliente}`)}</b>` +
+      `<b style="color:#ea580c">Sin ruta: ${h(_labelMayorista(may))}</b>` +
       (peso ? `<br>${peso.toLocaleString("es-MX")} kg` : "") +
       `<br><span style="font-size:0.8em;color:#9a3412">Usa "+ Mayorista" para asignarlo</span>`
     ).addTo(_mayoristasLayer);
@@ -660,9 +1017,19 @@ function renderNavRutas() {
   actualizarProgreso();
 }
 
+
 // ── Seleccionar ruta ───────────────────────────────────────────
 async function seleccionarRuta(idx) {
   if (idx < 0 || idx >= _rutasFiltradas.length) return;
+
+  // Desactivar modo personalizado de la ruta anterior al cambiar
+  const rutaAnterior = _rutasFiltradas[_indiceActivo];
+  if (rutaAnterior && _modoPersonalizado[rutaAnterior.id]) {
+    _modoPersonalizado[rutaAnterior.id] = false;
+    const mapaEl = document.getElementById("mapa");
+    if (mapaEl) mapaEl.classList.remove("mapa-personalizar");
+  }
+
   _indiceActivo = idx;
   const ruta = _rutasFiltradas[idx];
 
@@ -719,6 +1086,7 @@ async function seleccionarRuta(idx) {
 
 function renderContenidoRuta(ruta) {
   renderResumenTiempos(ruta);
+  renderSelectorRuta(ruta);
   renderIndicadores(ruta);
   actualizarMapa(ruta);
 }
@@ -738,7 +1106,7 @@ function _abrevDia(d) { return _ABREV_DIA[d] || capitalizar(d.slice(0, 3)); }
 function _capacidadEfectivaTon(cap) {
   const c = Number(cap);
   if (!Number.isFinite(c) || c <= 0) return 0;
-  return Math.abs(c - 3.5) < 0.05 ? 4 : c;
+  return (c >= 3.5 && c <= 4.0) ? 3.9 : c;
 }
 
 function renderSelectorVehiculo(ruta) {
@@ -786,7 +1154,6 @@ function renderSelectorVehiculo(ruta) {
     const capNom         = Number(v.capacidad_ton || 0);
     const capTonEff      = _capacidadEfectivaTon(capNom);
     const capKgEff       = capTonEff * 1000;
-    const capKgNom       = capNom * 1000;
     const pctRuta        = capKgEff > 0 ? (pesoKg / capKgEff) * 100 : 0;
     const esMejor        = v.placas === mejorPlacas;
 
@@ -836,7 +1203,7 @@ function renderSelectorVehiculo(ruta) {
           </div>
           <span class="veh-util-label ${utilClass}">${pctLabel}</span>
         </div>
-        <div class="veh-util-sub">${pesoKg.toLocaleString("es-MX")} kg de ${(capKgNom).toLocaleString("es-MX")} kg cap.</div>
+        <div class="veh-util-sub">${pesoKg.toLocaleString("es-MX")} kg de ${(capKgEff).toLocaleString("es-MX")} kg cap.</div>
       </div>`;
   }).join("");
 
@@ -861,7 +1228,7 @@ function renderSelectorVehiculo(ruta) {
           <div class="veh-resumen-bar-fill ${rClass}" style="width:${Math.min(pctActual, 130)}%"></div>
           <div class="veh-resumen-bar-mark"></div>
         </div>
-        <div class="veh-resumen-hint ${rClass}">${rLabel} · ${(capActualNom * 1000).toLocaleString("es-MX")} kg de capacidad</div>
+        <div class="veh-resumen-hint ${rClass}">${rLabel} · ${(capActualEff * 1000).toLocaleString("es-MX")} kg de capacidad</div>
       </div>`;
   }
 
@@ -909,6 +1276,11 @@ function cambiarVehiculo(ruta, nuevasPlacas) {
   ruta.vehiculo_abrev  = vehiculo.abrev;
   ruta.capacidad_ton   = vehiculo.capacidad_ton;
 
+  // Actualizar el nombre de la ruta para reflejar el nuevo vehículo
+  ruta.nombre = `${vehiculo.abrev || vehiculo.placas} — ${capitalizar(ruta.dia)}`;
+  const tituloEl = document.getElementById("titulo-ruta");
+  if (tituloEl) tituloEl.textContent = ruta.nombre;
+
   // Persistir cambio de vehículo en MongoDB
   fetch("/modificacion/actualizar-vehiculo", {
     method:  "POST",
@@ -942,17 +1314,25 @@ function _recalcularMetricasVehiculo(v) {
 
 // ── Resumen de tiempos ─────────────────────────────────────────
 function renderResumenTiempos(ruta) {
-  const t = _tiempos[ruta.id] || {};
-  const origenClass = t.origen_tiempo === "osrm" ? "osrm" : t.origen_tiempo === "haversine_fallback" ? "haversine" : "pendiente";
-  const origenLabel = t.origen_tiempo === "osrm"
+  const esP  = !!(_modoPersonalizado[ruta.id] && _rutaPersonalizada[ruta.id]);
+  const base = _tiempos[ruta.id] || {};
+  const cust = _rutaPersonalizada[ruta.id] || {};
+  const traslado   = esP ? cust.traslado_min  : base.traslado_min;
+  const descarga   = esP ? cust.descarga_min  : base.descarga_min;
+  const distancia  = esP ? cust.distancia_km  : base.distancia_km;
+  const origen     = esP ? "osrm_personalizada" : base.origen_tiempo;
+  const origenClass = (origen === "osrm" || origen === "osrm_personalizada") ? "osrm" : origen === "haversine_fallback" ? "haversine" : "pendiente";
+  const origenLabel = origen === "osrm_personalizada"
+    ? '<i data-lucide="pencil-ruler" style="width:11px;height:11px"></i> Personalizada'
+    : origen === "osrm"
     ? '<i data-lucide="route" style="width:11px;height:11px"></i> OSRM real'
-    : t.origen_tiempo === "haversine_fallback"
+    : origen === "haversine_fallback"
     ? '<i data-lucide="ruler" style="width:11px;height:11px"></i> Haversine'
     : '<i data-lucide="clock" style="width:11px;height:11px"></i> Pendiente';
   document.getElementById("resumen-tiempos").innerHTML = `
-    <div class="tiempo-celda"><div class="t-label">Conducción</div><div class="t-valor">${formatMin(t.traslado_min)}</div></div>
-    <div class="tiempo-celda"><div class="t-label">Descarga</div><div class="t-valor">${formatMin(t.descarga_min)}</div></div>
-    <div class="tiempo-celda"><div class="t-label">Distancia</div><div class="t-valor">${t.distancia_km ? t.distancia_km + " km" : "…"}</div></div>
+    <div class="tiempo-celda"><div class="t-label">Conducción</div><div class="t-valor">${formatMin(traslado)}</div></div>
+    <div class="tiempo-celda"><div class="t-label">Descarga</div><div class="t-valor">${formatMin(descarga)}</div></div>
+    <div class="tiempo-celda"><div class="t-label">Distancia</div><div class="t-valor">${distancia ? distancia + " km" : "…"}</div></div>
     <div class="tiempo-celda"><div class="t-label">Fuente</div><div class="t-valor"><span class="origen-badge ${origenClass}">${origenLabel}</span></div></div>
   `;
   lucide.createIcons();
@@ -960,7 +1340,9 @@ function renderResumenTiempos(ruta) {
 
 function renderIndicadores(ruta) {
   const zona   = document.getElementById("zona-indicadores");
-  const t      = _tiempos[ruta.id] || {};
+  const base   = _tiempos[ruta.id] || {};
+  const esP    = !!(_modoPersonalizado[ruta.id] && _rutaPersonalizada[ruta.id]);
+  const cust   = _rutaPersonalizada[ruta.id] || {};
   const pesoKg = calcularPesoRuta(ruta);
   let capTon   = ruta.capacidad_ton;
   if (!capTon && ruta.pct_utilizacion > 0 && pesoKg > 0) {
@@ -970,7 +1352,7 @@ function renderIndicadores(ruta) {
   const capTonEff = _capacidadEfectivaTon(capTon);
   const pct      = capTonEff > 0 ? (pesoKg / 1000 / capTonEff) * 100 : 0;
   const barClass = pct <= 100 ? "verde" : pct <= 120 ? "naranja" : "rojo";
-  const horaReg    = t.hora_regreso || ruta.hora_regreso || "—";
+  const horaReg    = esP ? (cust.hora_regreso || "—") : (base.hora_regreso || ruta.hora_regreso || "—");
   const horaSalida = _horaSalidaDeRuta(ruta);
   const horaLimite = _horaLimiteDeRuta(ruta);
   const cumple     = horaReg === "—"
@@ -981,7 +1363,7 @@ function renderIndicadores(ruta) {
     <div class="cap-bar-wrap">
       <div class="cap-bar-label">
         <span>Utilización: ${pct.toFixed(1)}%</span>
-        <span>${(pesoKg / 1000).toFixed(2)} / ${capTon} ton</span>
+        <span>${(pesoKg / 1000).toFixed(2)} / ${capTonEff} ton</span>
       </div>
       <div class="cap-bar"><div class="cap-bar-fill ${barClass}" style="width:${Math.min(pct,100)}%"></div></div>
     </div>
@@ -1012,6 +1394,13 @@ function _actualizarIndicadoresPeso(ruta) {
 
 // ── Lista de paradas (sucursales + mayoristas interleaved) ─────
 
+/** Etiqueta canónica de un mayorista: "DOC | Nombre" o sólo "Nombre". */
+function _labelMayorista(m) {
+  const doc    = m.documento || "";
+  const nombre = m.nombre    || `Cliente ${m.id_cliente}`;
+  return doc ? `${doc} | ${nombre}` : nombre;
+}
+
 /**
  * Devuelve la secuencia combinada y ordenada de sucursales + mayoristas.
  * Cada elemento tiene `tipo`, `orden` y los campos propios.
@@ -1030,10 +1419,13 @@ function _normalizarMayorista(may) {
   };
   let lat = numOrNull(may.latitud);
   let lon = numOrNull(may.longitud);
-  const id = may.id_cliente;
+  const key = _docKey(may);
   let ref = null;
-  if (id != null) {
-    ref = _mayoristasTodos.find(m => Number(m.id_cliente) === Number(id)) || null;
+  if (key) {
+    // Buscar primero por clave de documento (específica), luego por id_cliente (genérica)
+    ref = _mayoristasTodos.find(m => _docKey(m) === key)
+       || _mayoristasTodos.find(m => Number(m.id_cliente) === Number(may.id_cliente))
+       || null;
   }
   if (lat == null) lat = numOrNull(ref?.latitud);
   if (lon == null) lon = numOrNull(ref?.longitud);
@@ -1061,9 +1453,9 @@ function renderParadas(ruta) {
           <span class="suc-grip"><i data-lucide="grip-vertical" style="width:14px;height:14px"></i></span>
           <span class="suc-orden may-orden">${i + 1}</span>
           <div class="suc-info">
-            <div class="suc-nombre">${h(p.nombre || `Cliente ${p.id_cliente}`)}</div>
+            <div class="suc-nombre">${h(_labelMayorista(p))}</div>
             <div class="suc-detalle may-detalle">
-              Mayorista${p.peso_kg > 0 ? ` · ${p.peso_kg.toLocaleString("es-MX")} kg` : ""}
+              Mayoristas${p.peso_kg > 0 ? ` · ${p.peso_kg.toLocaleString("es-MX")} kg` : ""}
               ${p.latitud == null ? ' · <span style="color:#ef4444;font-size:0.65rem">sin coords</span>' : ""}
             </div>
           </div>
@@ -1211,6 +1603,7 @@ function quitarParada(ruta, idx) {
         body:    JSON.stringify({
           ruta_id:    ruta.id,
           id_cliente: p.id_cliente,
+          documento:  p.documento || "",
         }),
       }).catch(err => console.warn("[quitar-mayorista]", err));
     } else if (p.tipo !== "mayorista" && p.num_tienda != null) {
@@ -1245,6 +1638,7 @@ function quitarParada(ruta, idx) {
 
     delete _tiempos[ruta.id];
     renderParadas(ruta);
+    renderMayoristasLibresLayer();
     _actualizarIndicadoresPeso(ruta);
     renderPendientesLayer();
     renderPanelPendientes();
@@ -1303,7 +1697,7 @@ function abrirModalCrearRuta() {
   const diaDefault = _diaActivo !== "__todos__"
     ? _diaActivo
     : (DIAS_ORDEN.find(d => _rutas.some(r => r.dia === d.key))?.key || DIAS_ORDEN[0].key);
-  _crearRuta = { dia: diaDefault, vehiculo: "", sucursales: [], query: "" };
+  _crearRuta = { dia: diaDefault, vehiculo: "", sucursales: [], mayoristas: [], query: "", queryMayoristas: "", verTodasSuc: false, verTodosMay: false };
   renderModalCrearRuta();
   document.getElementById("modal-crear-ruta")?.classList.remove("hidden");
   setTimeout(() => document.getElementById("buscar-sucursal-crear")?.focus(), 100);
@@ -1311,6 +1705,40 @@ function abrirModalCrearRuta() {
 
 function cerrarModalCrearRuta() {
   document.getElementById("modal-crear-ruta")?.classList.add("hidden");
+}
+
+function renderVehiculosCrearRuta() {
+  const vehSel = document.getElementById("crear-vehiculo");
+  if (!vehSel) return;
+
+  const dia = _crearRuta.dia;
+
+  // Separar: disponibles primero, ocupados al final
+  const disponibles = _vehiculos.filter(v => !(v.ocupacion || {})[dia]);
+  const ocupados    = _vehiculos.filter(v =>  (v.ocupacion || {})[dia]);
+
+  const renderOpcion = (v, ocupado) => {
+    const nombre = v.abrev || v.descripcion || v.placas || "";
+    if (ocupado) {
+      const rutaNombre = (v.ocupacion[dia] || {}).ruta_nombre || "otra ruta";
+      return `<option value="${h(v.placas)}" disabled>
+        ${h(nombre)} · ${h(v.placas)} — No disponible (${h(rutaNombre)})
+      </option>`;
+    }
+    return `<option value="${h(v.placas)}">${h(nombre)} · ${h(v.placas)}</option>`;
+  };
+
+  const opciones = [
+    '<option value="">Selecciona vehículo…</option>',
+    ...disponibles.map(v => renderOpcion(v, false)),
+    ...(ocupados.length
+      ? [`<option disabled>── No disponibles el ${dia} ──</option>`,
+         ...ocupados.map(v => renderOpcion(v, true))]
+      : []),
+  ];
+
+  vehSel.innerHTML = opciones.join("");
+  vehSel.value = _crearRuta.vehiculo;
 }
 
 function renderModalCrearRuta() {
@@ -1322,23 +1750,16 @@ function renderModalCrearRuta() {
     diaSel.value = _crearRuta.dia;
   }
 
-  const vehSel = document.getElementById("crear-vehiculo");
-  if (vehSel) {
-    const opciones = [
-      '<option value="">Selecciona vehículo…</option>',
-      ..._vehiculos.map(v => {
-        const nombre = v.abrev || v.descripcion || v.placas || "";
-        return `<option value="${h(v.placas)}">${h(nombre)} · ${h(v.placas)}</option>`;
-      }),
-    ];
-    vehSel.innerHTML = opciones.join("");
-    vehSel.value = _crearRuta.vehiculo;
-  }
+  renderVehiculosCrearRuta();
 
   const buscar = document.getElementById("buscar-sucursal-crear");
   if (buscar) buscar.value = _crearRuta.query || "";
 
+  const buscarMayorista = document.getElementById("buscar-mayorista-crear");
+  if (buscarMayorista) buscarMayorista.value = _crearRuta.queryMayoristas || "";
+
   renderListaCrearSucursales();
+  renderListaCrearMayoristas();
   actualizarEstadoCrearRuta();
 }
 
@@ -1348,6 +1769,10 @@ function renderListaCrearSucursales() {
   const pendientes = Object.values(_pendientes || {});
   const pendSet = new Set(pendientes.map(p => String(p.num_tienda)));
 
+  // Sucursales ya asignadas en cualquier ruta activa
+  const yaAsignadas = new Set();
+  _rutas.forEach(r => (r.sucursales || []).forEach(s => yaAsignadas.add(String(s.num_tienda))));
+
   const filtra = (s) => {
     if (!s) return false;
     const nombre = nombreSucursalLabel(s).toLowerCase();
@@ -1355,42 +1780,49 @@ function renderListaCrearSucursales() {
     return !q || nombre.includes(q) || nt.includes(q);
   };
 
+  const LIMITE_SUC = 5;
+
   const pendientesFil = pendientes.filter(filtra);
   const disponiblesFil = (_sucDisponibles || [])
     .filter(s => !pendSet.has(String(s.num_tienda)))
+    .filter(s => !yaAsignadas.has(String(s.num_tienda)))
     .filter(filtra);
+
+  // Mostrar primeras 5 + las ya seleccionadas aunque caigan fuera del límite
+  const verTodas = _crearRuta.verTodasSuc;
+  const dispVisibles = verTodas
+    ? disponiblesFil
+    : disponiblesFil.filter((s, i) => i < LIMITE_SUC || seleccion.has(String(s.num_tienda)));
+  const ocultas = verTodas ? 0
+    : disponiblesFil.filter((s, i) => i >= LIMITE_SUC && !seleccion.has(String(s.num_tienda))).length;
+
+  const renderItem = s => {
+    const selected = seleccion.has(String(s.num_tienda));
+    return `
+      <div class="disp-item${selected ? " selected" : ""}" data-nt="${s.num_tienda}">
+        <div>
+          <span class="nombre">${h(nombreSucursalLabel(s))}</span>
+          <span class="num">#${h(s.num_tienda)}</span>
+        </div>
+        <span class="sel-check">${selected ? '<i data-lucide="check"></i>' : ""}</span>
+      </div>`;
+  };
 
   let html = "";
   if (pendientesFil.length > 0) {
     html += `<div class="disp-seccion-pend"><span class="disp-seccion-label"><i data-lucide="triangle-alert" style="width:13px;height:13px;vertical-align:middle"></i> Pendientes de asignar</span></div>`;
-    html += pendientesFil.map(s => {
-      const selected = seleccion.has(String(s.num_tienda));
-      return `
-        <div class="disp-item${selected ? " selected" : ""}" data-nt="${s.num_tienda}">
-          <div>
-            <span class="nombre">${h(nombreSucursalLabel(s))}</span>
-            <span class="num">#${h(s.num_tienda)}</span>
-          </div>
-          <span class="sel-check">${selected ? '<i data-lucide="check"></i>' : ""}</span>
-        </div>`;
-    }).join("");
+    html += pendientesFil.map(renderItem).join("");
   }
 
-  if (disponiblesFil.length > 0) {
+  if (dispVisibles.length > 0) {
     if (pendientesFil.length > 0) {
       html += `<div class="disp-seccion-label disp-seccion-sep">Todas las sucursales</div>`;
     }
-    html += disponiblesFil.map(s => {
-      const selected = seleccion.has(String(s.num_tienda));
-      return `
-        <div class="disp-item${selected ? " selected" : ""}" data-nt="${s.num_tienda}">
-          <div>
-            <span class="nombre">${h(nombreSucursalLabel(s))}</span>
-            <span class="num">#${h(s.num_tienda)}</span>
-          </div>
-          <span class="sel-check">${selected ? '<i data-lucide="check"></i>' : ""}</span>
-        </div>`;
-    }).join("");
+    html += dispVisibles.map(renderItem).join("");
+  }
+
+  if (ocultas > 0) {
+    html += `<button class="btn-ver-mas" id="btn-ver-mas-suc">Ver ${ocultas} más…</button>`;
   }
 
   if (!html) {
@@ -1401,6 +1833,12 @@ function renderListaCrearSucursales() {
   if (!lista) return;
   lista.innerHTML = html;
   lucide.createIcons();
+
+  document.getElementById("btn-ver-mas-suc")?.addEventListener("click", () => {
+    _crearRuta.verTodasSuc = true;
+    renderListaCrearSucursales();
+  });
+
   const contador = document.getElementById("crear-contador");
   if (contador) {
     contador.textContent = `${_crearRuta.sucursales.length} seleccionada${_crearRuta.sucursales.length !== 1 ? "s" : ""}`;
@@ -1418,10 +1856,81 @@ function renderListaCrearSucursales() {
   });
 }
 
+function renderListaCrearMayoristas() {
+  const LIMITE_MAY = 5;
+
+  const q = (_crearRuta.queryMayoristas || "").toLowerCase().trim();
+  // _crearRuta.mayoristas guarda _docKey strings, no id_cliente numbers
+  const seleccion = new Set(_crearRuta.mayoristas);
+  const disponibles = _mayoristasNoAsignados().filter(m => {
+    if (!m) return false;
+    const nombre = String(m.nombre || "").toLowerCase();
+    const doc    = String(m.documento || "").toLowerCase();
+    const idCl   = String(m.id_cliente ?? "");
+    return !q || nombre.includes(q) || doc.includes(q) || idCl.includes(q);
+  });
+
+  // Mostrar primeros 5 + los ya seleccionados aunque caigan fuera del límite
+  const verTodos = _crearRuta.verTodosMay;
+  const dispVisibles = verTodos
+    ? disponibles
+    : disponibles.filter((m, i) => i < LIMITE_MAY || seleccion.has(_docKey(m)));
+  const ocultos = verTodos ? 0
+    : disponibles.filter((m, i) => i >= LIMITE_MAY && !seleccion.has(_docKey(m))).length;
+
+  let html = "";
+  if (dispVisibles.length > 0) {
+    html = dispVisibles.map(m => {
+      const dk       = _docKey(m);
+      const idCl     = String(m.id_cliente ?? "");
+      const selected = seleccion.has(dk);
+      const peso     = Number(m.peso_kg || 0).toLocaleString("es-MX");
+      return `
+        <div class="disp-item${selected ? " selected" : ""}" data-doc-key="${h(dk)}">
+          <div>
+            <span class="nombre">${h(_labelMayorista(m))}</span>
+            <span class="num">#${h(idCl)}</span>
+          </div>
+          <span class="disp-pend-tag">${peso} kg${selected ? " · seleccionado" : ""}</span>
+        </div>`;
+    }).join("");
+  }
+
+  if (ocultos > 0) {
+    html += `<button class="btn-ver-mas" id="btn-ver-mas-may">Ver ${ocultos} más…</button>`;
+  }
+
+  const lista = document.getElementById("lista-may-crear");
+  if (!lista) return;
+  lista.innerHTML = html || `<div class="lista-sucursales-vacia">No se encontraron mayoristas con ese criterio.</div>`;
+  lucide.createIcons();
+
+  document.getElementById("btn-ver-mas-may")?.addEventListener("click", () => {
+    _crearRuta.verTodosMay = true;
+    renderListaCrearMayoristas();
+  });
+
+  const contador = document.getElementById("crear-contador-may");
+  if (contador) {
+    contador.textContent = `${_crearRuta.mayoristas.length} seleccionado${_crearRuta.mayoristas.length !== 1 ? "s" : ""}`;
+  }
+
+  lista.querySelectorAll(".disp-item").forEach(item => {
+    item.addEventListener("click", () => {
+      const dk  = item.dataset.docKey;
+      const idx = _crearRuta.mayoristas.indexOf(dk);
+      if (idx >= 0) _crearRuta.mayoristas.splice(idx, 1);
+      else _crearRuta.mayoristas.push(dk);
+      renderListaCrearMayoristas();
+      actualizarEstadoCrearRuta();
+    });
+  });
+}
+
 function actualizarEstadoCrearRuta() {
   const btn = document.getElementById("btn-crear-confirm");
   if (!btn) return;
-  btn.disabled = !_crearRuta.vehiculo || _crearRuta.sucursales.length === 0;
+  btn.disabled = !_crearRuta.vehiculo || (_crearRuta.sucursales.length === 0 && _crearRuta.mayoristas.length === 0);
 }
 
 async function crearRutaManual() {
@@ -1429,8 +1938,8 @@ async function crearRutaManual() {
     mostrarToastMod("Selecciona un vehículo para la ruta.", "warn");
     return;
   }
-  if (_crearRuta.sucursales.length === 0) {
-    mostrarToastMod("Selecciona al menos una sucursal.", "warn");
+  if (_crearRuta.sucursales.length === 0 && _crearRuta.mayoristas.length === 0) {
+    mostrarToastMod("Selecciona al menos una sucursal o un mayorista.", "warn");
     return;
   }
 
@@ -1447,6 +1956,18 @@ async function crearRutaManual() {
       return { num_tienda: nt, nombre: s.nombre || "" };
     });
 
+    const mayoristas = _crearRuta.mayoristas.map(dk => {
+      const m = (_mayoristasTodos || []).find(item => _docKey(item) === dk) || {};
+      return {
+        id_cliente: m.id_cliente ?? null,
+        documento:  m.documento  || "",
+        nombre:     m.nombre     || `Mayorista ${dk}`,
+        peso_kg:    Number(m.peso_kg || 0),
+        latitud:    m.latitud  ?? null,
+        longitud:   m.longitud ?? null,
+      };
+    });
+
     const res = await fetch("/modificacion/crear-ruta", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1454,6 +1975,7 @@ async function crearRutaManual() {
         dia: _crearRuta.dia,
         vehiculo_placas: _crearRuta.vehiculo,
         sucursales,
+        mayoristas,
       }),
     });
     const data = await res.json();
@@ -1720,15 +2242,15 @@ function renderMayoristasDisponibles(query) {
   const ruta = _rutasFiltradas[_indiceActivo];
   if (!ruta) return;
   const asignados = new Set();
-  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(String(m.id_cliente))));
-  const enRuta = new Set((ruta.mayoristas || []).map(m => String(m.id_cliente)));
+  _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(_docKey(m))));
+  const enRuta = new Set((ruta.mayoristas || []).map(m => _docKey(m)));
   const q = (query || "").toLowerCase().trim();
 
   const disponibles = _mayoristasTodos.filter(m => {
-    if (asignados.has(String(m.id_cliente))) return false;
-    if (enRuta.has(String(m.id_cliente))) return false;
+    if (asignados.has(_docKey(m))) return false;
+    if (enRuta.has(_docKey(m))) return false;
     if (!q) return true;
-    return (m.nombre || "").toLowerCase().includes(q) || String(m.id_cliente).includes(q);
+    return (m.nombre || "").toLowerCase().includes(q) || (m.documento || "").toLowerCase().includes(q) || String(m.id_cliente).includes(q);
   }).slice(0, 50);
 
   const listaEl = document.getElementById("lista-disponibles-may");
@@ -1744,9 +2266,9 @@ function renderMayoristasDisponibles(query) {
   listaEl.innerHTML = disponibles.map(m => {
     const peso = (m.peso_kg || 0).toLocaleString("es-MX");
     return `
-      <div class="disp-item" data-id="${m.id_cliente}">
+      <div class="disp-item" data-doc-key="${h(_docKey(m))}">
         <div>
-          <span class="nombre">${h(m.nombre || `Cliente ${m.id_cliente}`)}</span>
+          <span class="nombre">${h(_labelMayorista(m))}</span>
           <span class="num" style="color:#f97316">★ Mayorista</span>
         </div>
         <span style="color:#2563eb;font-size:0.75rem;font-weight:600">${peso} kg · + Agregar</span>
@@ -1756,8 +2278,8 @@ function renderMayoristasDisponibles(query) {
 
   listaEl.querySelectorAll(".disp-item").forEach(item => {
     item.addEventListener("click", () => {
-      const idCl = Number(item.dataset.id);
-      const may  = _mayoristasTodos.find(m => m.id_cliente === idCl);
+      const docKey = item.dataset.docKey;
+      const may    = _mayoristasTodos.find(m => _docKey(m) === docKey);
       if (!may) return;
       agregarMayorista(ruta, may);
       cerrarModalAgregarMayorista();
@@ -1776,6 +2298,7 @@ async function agregarMayorista(ruta, may) {
         ruta_id:          ruta.id,
         dia:              ruta.dia,
         id_cliente:       may.id_cliente,
+        documento:        may.documento || "",
         nombre:           may.nombre,
         latitud:          may.latitud,
         longitud:         may.longitud,
@@ -1796,6 +2319,7 @@ async function agregarMayorista(ruta, may) {
     ruta.mayoristas.push({
       tipo:       "mayorista",
       id_cliente: may.id_cliente,
+      documento:  may.documento || "",
       nombre:     may.nombre,
       latitud:    may.latitud,
       longitud:   may.longitud,
@@ -1814,13 +2338,14 @@ async function agregarMayorista(ruta, may) {
 
     delete _tiempos[ruta.id];
     renderParadas(ruta);
+    renderMayoristasLibresLayer();
     _actualizarIndicadoresPeso(ruta);
     actualizarStatusOSRM();
     renderNavRutas();
     calcularOSRMParaRuta(ruta).then(() => {
       if (_rutasFiltradas[_indiceActivo]?.id === ruta.id) renderContenidoRuta(ruta);
     });
-    mostrarToastMod(`${may.nombre || `Cliente ${may.id_cliente}`} agregado a la ruta`, "ok");
+    mostrarToastMod(`${_labelMayorista(may)} agregado a la ruta`, "ok");
   } catch (err) {
     console.error("[agregarMayorista]", err);
     mostrarToastMod("Error al agregar mayorista", "err");
@@ -1986,6 +2511,14 @@ async function guardarTodo(redirigir = false) {
       }
       capTon = capTon || 2.5;
       const capTonEff = _capacidadEfectivaTon(capTon);
+      const esP     = !!(_modoPersonalizado[ruta.id] && _rutaPersonalizada[ruta.id]);
+      const cust    = _rutaPersonalizada[ruta.id] || {};
+      const geom    = esP ? (cust.geometry || []) : (t.geometry || []);
+      const conducMin = esP ? (cust.traslado_min || 0) : (t.traslado_min || 0);
+      const totalMin  = esP ? (cust.total_min    || 0) : (t.total_min    || 0);
+      const distKm    = esP ? (cust.distancia_km || 0) : (t.distancia_km || 0);
+      const horaReg   = esP ? (cust.hora_regreso || "—") : (t.hora_regreso || ruta.hora_regreso || "—");
+      const descMin   = esP ? (cust.descarga_min || t.descarga_min || 0) : (t.descarga_min || 0);
       return {
         id:                 ruta.id,
         nombre:             ruta.nombre,
@@ -1997,14 +2530,18 @@ async function guardarTodo(redirigir = false) {
         peso_kg:            pesoKg,
         peso_ton:           parseFloat((pesoKg / 1000).toFixed(3)),
         pct_utilizacion:    parseFloat(((pesoKg / 1000 / capTonEff) * 100).toFixed(1)),
-        conduccion_min:     t.traslado_min || 0,
-        descarga_min:       t.descarga_min || 0,
+        conduccion_min:     conducMin,
+        descarga_min:       descMin,
         extra_min:          t.extra_min || HORAS_EXTRA_RUTA_MIN,
-        total_min:          t.total_min || 0,
-        distancia_km:       t.distancia_km || 0,
+        total_min:          totalMin,
+        distancia_km:       distKm,
         hora_salida:        _horaSalidaDeRuta(ruta),
-        hora_regreso:       t.hora_regreso || ruta.hora_regreso || "—",
-        origen_tiempo:      t.origen_tiempo || "desconocido",
+        hora_regreso:       horaReg,
+        origen_tiempo:      esP ? "osrm_personalizada" : (t.origen_tiempo || "desconocido"),
+        geometria_osrm:     geom,
+        es_personalizada:   esP,
+        via_points:         esP ? (_viaPoints[ruta.id] || []) : [],
+        puntos_evitar:      esP ? (_puntosEvitar[ruta.id] || []) : [],
         num_sucursales:     (ruta.sucursales || []).length,
         sucursales: (ruta.sucursales || []).map((s, i) => ({
           num_tienda:   s.num_tienda,
@@ -2020,6 +2557,7 @@ async function guardarTodo(redirigir = false) {
         })),
         mayoristas: (ruta.mayoristas || []).map((m, i) => ({
           id_cliente: m.id_cliente,
+          documento:  m.documento || "",
           nombre:     m.nombre,
           orden:      m.orden ?? i + 1,
           peso_kg:    m.peso_kg || 0,
@@ -2041,14 +2579,27 @@ async function guardarTodo(redirigir = false) {
       // Guardar absolutamente todas las rutas (todos los días) en el historial
       const filasHistorial = [];
       for (const ruta of _rutas) {
+        const veh = ruta.vehiculo_abrev || "";
+        const dia = (ruta.dia || "").toUpperCase();
         for (const suc of (ruta.sucursales || [])) {
           if (!suc.num_tienda) continue;
           filasHistorial.push({
             num_tienda:       suc.num_tienda,
-            vehiculo:         ruta.vehiculo_abrev || "",
-            dia_semana:       (ruta.dia || "").toUpperCase(),
+            vehiculo:         veh,
+            dia_semana:       dia,
             secuencia_visita: suc.orden ?? 1,
             kg_entrega:       Math.round(_pesos[String(suc.num_tienda)] || suc.peso_kg || 0),
+          });
+        }
+        for (const may of (ruta.mayoristas || [])) {
+          if (!may.id_cliente) continue;
+          filasHistorial.push({
+            tipo:             "mayorista",
+            id_cliente:       may.id_cliente,
+            vehiculo:         veh,
+            dia_semana:       dia,
+            secuencia_visita: may.orden ?? 999,
+            kg_entrega:       Math.round(may.peso_kg || 0),
           });
         }
       }
@@ -2160,15 +2711,82 @@ function renderSelectorDia(ruta) {
     </div>
   `;
 
-  document.getElementById("btn-aplicar-dia").addEventListener("click", () => {
-    const nuevoDia = document.getElementById("select-dia-ruta").value;
-    if (nuevoDia === ruta.dia) return;
-    ruta.dia = nuevoDia;
-    ruta._modificado = true;
-    mostrarToastMod(`Día cambiado a ${capitalizar(nuevoDia)}`, "ok");
-    renderRutaActiva();
+  document.getElementById("btn-aplicar-dia").addEventListener("click", async () => {
+    const nuevoDia   = document.getElementById("select-dia-ruta").value;
+    const diaOriginal = ruta.dia;
+    if (nuevoDia === diaOriginal) return;
+
+    const btnAplicar = document.getElementById("btn-aplicar-dia");
+    if (btnAplicar) { btnAplicar.disabled = true; btnAplicar.textContent = "…"; }
+
+    try {
+      const res = await fetch("/modificacion/cambiar-dia", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ ruta_id: ruta.id, dia_actual: diaOriginal, dia_nuevo: nuevoDia }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.status !== "ok") throw new Error(data.mensaje || `Error ${res.status}`);
+
+      // Liberar vehículo en el día original, re-asignar al nuevo día
+      _liberarOcupacionVehiculo(ruta);     // libera usando ruta.dia = diaOriginal
+      ruta.dia = nuevoDia;
+      ruta._modificado = true;
+      _marcarOcupacionVehiculo(ruta);      // marca usando ruta.dia = nuevoDia
+
+      // Actualizar filtro de días (los conteos cambian)
+      renderFiltroDias();
+
+      // Navegar al nuevo día y seleccionar la ruta movida
+      aplicarFiltroDia(nuevoDia);
+      const idxNuevo = _rutasFiltradas.findIndex(r => r.id === ruta.id);
+      if (idxNuevo >= 0) seleccionarRuta(idxNuevo);
+
+      actualizarProgreso();
+      mostrarToastMod(`Ruta movida a ${capitalizar(nuevoDia)}`, "ok");
+    } catch (err) {
+      mostrarToastMod(`Error al cambiar día: ${err.message}`, "error");
+      const sel = document.getElementById("select-dia-ruta");
+      if (sel) sel.value = diaOriginal;
+      if (btnAplicar) { btnAplicar.disabled = false; btnAplicar.textContent = "Aplicar"; }
+    }
   });
 }
+
+// ── Sincronización de flota con Configuración ──────────────────
+let _ultimaActualizacionFlota = 0;
+
+async function refrescarVehiculos() {
+  try {
+    const res = await fetch("/modificacion/vehiculos");
+    if (!res.ok) return;
+    const nuevos = await res.json();
+    const antes = _vehiculos.length;
+    _vehiculos = nuevos;
+    const ruta = _rutasFiltradas[_indiceActivo];
+    if (ruta) renderSelectorVehiculo(ruta);
+    if (nuevos.length !== antes) {
+      mostrarToastMod("Flota actualizada automáticamente", "ok");
+    }
+  } catch (err) {
+    console.warn("[refrescarVehiculos]", err);
+  }
+}
+
+// Cuando Configuración actualiza un vehículo en otra pestaña
+window.addEventListener("storage", (e) => {
+  if (e.key === "icg_flota_actualizada") refrescarVehiculos();
+});
+
+// Cuando el usuario vuelve a esta pestaña después de haber estado en Configuración
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState !== "visible") return;
+  const ts = parseInt(localStorage.getItem("icg_flota_actualizada") || "0", 10);
+  if (ts > _ultimaActualizacionFlota) {
+    _ultimaActualizacionFlota = ts;
+    refrescarVehiculos();
+  }
+});
 
 // ── Toast de notificación ──────────────────────────────────────
 function mostrarToastMod(msg, tipo = "info") {

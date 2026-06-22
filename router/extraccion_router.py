@@ -234,3 +234,65 @@ def guardar_mayoristas():
         return jsonify({'status': 'ok', 'mensaje': 'Datos de mayoristas guardados.'})
     except Exception as e:
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
+
+
+# ── Eliminar fuente y limpiar asignaciones ───────────────────────────────────
+@extraccion_bp.route('/eliminar-fuente', methods=['POST'])
+def eliminar_fuente():
+    """
+    Elimina los datos de una fuente específica de la extracción y borra las
+    asignaciones VRP vigentes para forzar una regeneración limpia.
+
+    Body JSON:  { "fuente": "mayoristas" | "icg" | "bimbo" | "proalmex" }
+
+    Para Mayoristas elimina el campo del documento de extracción.
+    Para Tiendas Lores (icg/bimbo/proalmex) los datos ya quedan vacíos al
+    guardar el consolidado sin esa fuente; aquí solo se limpian asignaciones.
+    En todos los casos borra asignaciones y reportes VRP de la logística activa.
+    """
+    lid = _logistica_id()
+    if not lid:
+        return jsonify({'status': 'error', 'mensaje': 'No hay logística activa.'}), 400
+
+    payload = request.get_json(silent=True)
+    fuente  = (payload or {}).get('fuente', '')
+    if fuente not in {'mayoristas', 'icg', 'bimbo', 'proalmex'}:
+        return jsonify({'status': 'error', 'mensaje': f'Fuente inválida: "{fuente}"'}), 400
+
+    try:
+        from db import get_db
+        from bson import ObjectId
+
+        oid = ObjectId(lid)
+        db  = get_db()
+
+        # Para Mayoristas: eliminar el campo del documento de extracción
+        if fuente == 'mayoristas':
+            db['extraccion'].update_one(
+                {'logistica_id': oid},
+                {'$unset': {'mayoristas': '', 'mayoristas_guardado_en': ''}},
+            )
+
+        # Limpiar asignaciones y reportes VRP para forzar regeneración
+        for coleccion in ('asignaciones', 'vrp_reportes',
+                          'asignaciones_vrp_afinidad_preview', 'vrp_reportes_afinidad'):
+            db[coleccion].delete_one({'logistica_id': oid})
+
+        return jsonify({
+            'status':  'ok',
+            'mensaje': f'Datos de "{fuente}" eliminados. Regenera las rutas VRP para actualizar las asignaciones.',
+        })
+    except Exception as e:
+        return jsonify({'status': 'error', 'mensaje': str(e)}), 500
+
+
+# ── Sucursales para carga manual ─────────────────────────────────────────────
+@extraccion_bp.route('/sucursales', methods=['GET'])
+def obtener_sucursales():
+    """Retorna la lista de sucursales (nombre_base + num_tienda) para la carga manual."""
+    try:
+        from logic.configuracion_logic import listar_sucursales
+        sucursales = listar_sucursales()
+        return jsonify({'status': 'ok', 'sucursales': sucursales})
+    except Exception as e:
+        return jsonify({'status': 'error', 'mensaje': str(e)}), 500

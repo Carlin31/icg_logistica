@@ -1,4 +1,5 @@
 import os
+from datetime import timedelta
 
 
 class Config:
@@ -10,9 +11,19 @@ class Config:
     # En Render nunca se define FLASK_DEBUG, así que queda en False.
     DEBUG = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
 
+    # ── Sesión / cookies ───────────────────────────────────────
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=8)
+    SESSION_COOKIE_HTTPONLY    = True
+    SESSION_COOKIE_SAMESITE    = "Lax"
+    # Secure exige HTTPS; en local (DEBUG=True) se desactiva para no bloquear el desarrollo.
+    SESSION_COOKIE_SECURE      = not DEBUG
+
     # ── MongoDB ────────────────────────────────────────────────
     MONGO_URI     = os.getenv("MONGO_URI",     "mongodb://localhost:27017/")
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "icg")
+
+    # ── Groq (LLM para nombres de rutas) ──────────────────────
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
     @classmethod
     def validar(cls):

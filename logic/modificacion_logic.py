@@ -17,6 +17,7 @@ import math
 import time
 import urllib.request
 import urllib.error
+import concurrent.futures
 from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -61,10 +62,25 @@ def _obtener_config_general() -> dict:
         return {}
 
 
+def _doc_key(m: dict) -> str:
+    """Clave única de un mayorista: documento si existe, si no str(id_cliente)."""
+    return str(m.get("documento") or m.get("id_cliente", ""))
+
+
+def _override_key_matches(m: dict, key) -> bool:
+    """True si el mayorista coincide con la clave de override.
+    Las claves string se comparan contra documento; las int contra id_cliente (legacy).
+    """
+    if isinstance(key, int):
+        return int(m.get("id_cliente", -1)) == key
+    return str(m.get("documento") or m.get("id_cliente", "")) == str(key)
+
+
 def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ruta: dict) -> dict:
     """
     Aplica los overrides manuales al resultado de calcular_distribucion_mayoristas.
-    overrides = { ruta_id: { excluidos: [id_cl,...], incluidos: [id_cl,...] } }
+    overrides = { ruta_id: { excluidos: [doc_str | id_cl_int,...], incluidos: [...] } }
+    Las claves string se comparan por documento; las int (legacy) por id_cliente.
     """
     if not overrides:
         return dist
@@ -75,17 +91,20 @@ def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ru
         + dist.get("sin_asignar", [])
         + dist.get("sin_coords", [])
     )
+    # Índice dual: por documento (str) y por id_cliente (int, legacy)
+    todos_may_doc   = {str(m.get("documento") or ""): m for m in todos if m.get("documento")}
     todos_may_index = {int(m.get("id_cliente", 0)): m for m in todos}
 
     rutas_afectadas: set = set()
 
     for ruta_id, ov in overrides.items():
-        excluidos = {int(x) for x in ov.get("excluidos", [])}
-        incluidos = {int(x) for x in ov.get("incluidos", [])}
+        excluidos = ov.get("excluidos", [])
+        incluidos = ov.get("incluidos", [])
 
         if excluidos:
             antes = mayoristas_por_ruta.get(ruta_id, [])
-            despues = [m for m in antes if int(m.get("id_cliente", 0)) not in excluidos]
+            despues = [m for m in antes
+                       if not any(_override_key_matches(m, k) for k in excluidos)]
             if len(despues) != len(antes):
                 mayoristas_por_ruta[ruta_id] = despues
                 rutas_afectadas.add(ruta_id)
@@ -95,14 +114,16 @@ def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ru
                 if other_rid == ruta_id:
                     continue
                 prev = mayoristas_por_ruta[other_rid]
-                nuevos = [m for m in prev if int(m.get("id_cliente", 0)) not in incluidos]
+                nuevos = [m for m in prev
+                          if not any(_override_key_matches(m, k) for k in incluidos)]
                 if len(nuevos) != len(prev):
                     mayoristas_por_ruta[other_rid] = nuevos
                     rutas_afectadas.add(other_rid)
-            existing_ids = {int(m.get("id_cliente", 0)) for m in mayoristas_por_ruta.get(ruta_id, [])}
-            for id_cl in incluidos:
-                if id_cl not in existing_ids and id_cl in todos_may_index:
-                    mayoristas_por_ruta.setdefault(ruta_id, []).append(dict(todos_may_index[id_cl]))
+            existing_keys = {_doc_key(m) for m in mayoristas_por_ruta.get(ruta_id, [])}
+            for key in incluidos:
+                ref = todos_may_doc.get(str(key)) if isinstance(key, str) else todos_may_index.get(int(key))
+                if ref and _doc_key(ref) not in existing_keys:
+                    mayoristas_por_ruta.setdefault(ruta_id, []).append(dict(ref))
                     rutas_afectadas.add(ruta_id)
 
     paradas_integradas = dict(dist.get("paradas_integradas", {}))
@@ -128,13 +149,11 @@ def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ru
         for p in paradas:
             if p.get("tipo") != "mayorista":
                 continue
-            id_cl = p.get("id_cliente")
-            if id_cl is not None:
-                orden_may[int(id_cl)] = p.get("orden")
+            orden_may[_doc_key(p)] = p.get("orden")
         for m in mays:
-            id_cl = m.get("id_cliente")
-            if id_cl is not None and int(id_cl) in orden_may:
-                m["orden"] = orden_may[int(id_cl)]
+            dk = _doc_key(m)
+            if dk in orden_may:
+                m["orden"] = orden_may[dk]
 
     dist = dict(dist)
     dist["mayoristas_por_ruta"] = mayoristas_por_ruta
@@ -187,6 +206,204 @@ def consultar_osrm_con_reintentos(coords: list) -> dict:
             ultimo_error = str(e)
 
     return {"error": ultimo_error or "Agotados reintentos", "origen": "osrm_error"}
+
+
+def _osrm_llamada_simple(coords: list) -> dict | None:
+    """
+    Una llamada OSRM directa (sin alternativas) para los waypoints dados.
+    Retorna {distancia_km, traslado_min, geometry} o None si falla.
+    """
+    import json as _json
+    if len(coords) < 2:
+        return None
+    waypoints = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
+    url = f"{OSRM_BASE_URL}/{waypoints}?overview=full&geometries=geojson"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "ICG-RouteModification/1.0",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        if data.get("code") != "Ok" or not data.get("routes"):
+            return None
+        ruta = data["routes"][0]
+        return {
+            "distancia_km": round(ruta.get("distance", 0) / 1000, 2),
+            "traslado_min": round(ruta.get("duration", 0) / 60, 1),
+            "geometry":     ruta.get("geometry", {}).get("coordinates", []),
+        }
+    except Exception:
+        return None
+
+
+def _osrm_llamada_alternativas(coords: list) -> list:
+    """
+    Llamada OSRM con alternatives=2: devuelve hasta 3 rutas que el propio
+    algoritmo de OSRM garantiza que usan segmentos de calle distintos.
+    Retorna lista de dicts (puede estar vacía si OSRM no encuentra alternativas).
+    """
+    import json as _json
+    if len(coords) < 2:
+        return []
+    waypoints = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
+    url = f"{OSRM_BASE_URL}/{waypoints}?overview=full&geometries=geojson&alternatives=2"
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "ICG-RouteModification/1.0",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as resp:
+            data = _json.loads(resp.read().decode("utf-8"))
+        if data.get("code") != "Ok" or not data.get("routes"):
+            return []
+        return [{
+            "distancia_km": round(r.get("distance", 0) / 1000, 2),
+            "traslado_min": round(r.get("duration", 0) / 60, 1),
+            "geometry":     r.get("geometry", {}).get("coordinates", []),
+        } for r in data["routes"]]
+    except Exception:
+        return []
+
+
+def _geom_muestra(geom: list, n: int = 5) -> list:
+    """Extrae n puntos (lat, lon) distribuidos uniformemente en una geometría GeoJSON."""
+    if not geom or n < 2:
+        return []
+    total = len(geom)
+    indices = [int(i * (total - 1) / (n - 1)) for i in range(n)]
+    return [(geom[i][1], geom[i][0]) for i in indices]
+
+
+def _divergencia_geom(geom_a: list, geom_b: list) -> float:
+    """
+    Distancia mínima (km) entre puntos homólogos de dos geometrías.
+    Un valor bajo indica rutas muy similares; uno alto, rutas que divergen.
+    """
+    ma = _geom_muestra(geom_a, 5)
+    mb = _geom_muestra(geom_b, 5)
+    if not ma or not mb:
+        return 0.0
+    return min(_haversine_km(a[0], a[1], b[0], b[1]) for a, b in zip(ma, mb))
+
+
+def _insertar_via(coords: list, lado: int, offset_deg: float) -> list:
+    """
+    Inserta un via-point perpendicular al eje principal del recorrido
+    en el segmento más largo, a `offset_deg` grados del eje.
+    lado=+1 derecha, lado=-1 izquierda.
+    """
+    if len(coords) < 2:
+        return coords
+    dir_lat = coords[-1][0] - coords[0][0]
+    dir_lon = coords[-1][1] - coords[0][1]
+    length  = math.sqrt(dir_lat ** 2 + dir_lon ** 2)
+    if length > 1e-6:
+        ux = (-dir_lon / length) * offset_deg * lado
+        uy = ( dir_lat / length) * offset_deg * lado
+    else:
+        ux = offset_deg * lado
+        uy = 0.0
+    best_i = max(
+        range(len(coords) - 1),
+        key=lambda i: _haversine_km(
+            coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1]
+        ),
+    )
+    mid_lat = (coords[best_i][0] + coords[best_i + 1][0]) / 2 + ux
+    mid_lon = (coords[best_i][1] + coords[best_i + 1][1]) / 2 + uy
+    return coords[: best_i + 1] + [(mid_lat, mid_lon)] + coords[best_i + 1 :]
+
+
+def consultar_osrm_alternativas(coords: list, velocidad_kmh: float = 35.0) -> list:
+    """
+    Genera 3 rutas genuinamente distintas con enfoque de dos fases:
+
+    Fase 1 — OSRM alternatives=2
+        Una llamada donde el algoritmo interno de OSRM penaliza segmentos
+        compartidos y devuelve hasta 3 rutas con maxima divergencia posible.
+        Si devuelve 3 rutas, se usan directamente sin procesar mas.
+
+    Fase 2 — Multi-busqueda con validacion geometrica
+        Si faltan rutas, lanza hasta 8 candidatos en paralelo con via-points
+        a 4 distancias distintas (0.15 a 0.60 grados) en ambos lados del eje.
+        Cada candidato que OSRM acepta es evaluado por su divergencia real
+        respecto a las rutas ya confirmadas (distancia entre puntos homologos).
+        Se selecciona greedily el candidato con mayor separacion minima.
+
+    Fase 3 — Fallback haversine
+        Solo si la red vial no ofrece ninguna alternativa real.
+    """
+    if len(coords) < 2:
+        return []
+
+    fb           = _fallback_haversine(coords, velocidad_kmh)
+    geom_directa = [[lon, lat] for lat, lon in coords]
+
+    # ── Fase 1: OSRM nativo ──────────────────────────────────────────────
+    nativas = _osrm_llamada_alternativas(coords)
+    if len(nativas) >= 3:
+        return nativas[:3]
+
+    confirmadas: list[dict] = list(nativas)
+
+    # ── Fase 2: multi-busqueda cuando faltan rutas ───────────────────────
+    faltan = 3 - len(confirmadas)
+    if faltan > 0:
+        lats = [c[0] for c in coords]
+        lons = [c[1] for c in coords]
+        span = max(max(lats) - min(lats), max(lons) - min(lons))
+
+        offsets = [
+            max(0.12, span * 0.35),
+            max(0.22, span * 0.60),
+            max(0.35, span * 0.90),
+            max(0.50, span * 1.20),
+        ]
+        candidatos_coords = [
+            _insertar_via(coords, lado, off)
+            for off in offsets
+            for lado in (+1, -1)
+        ]
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            futuros    = [ex.submit(_osrm_llamada_simple, vc) for vc in candidatos_coords]
+            candidatos = [f.result() for f in futuros]
+
+        candidatos = [c for c in candidatos if c and c.get("geometry")]
+
+        _UMBRAL_KM = 0.8
+        while len(confirmadas) < 3 and candidatos:
+            mejor_idx   = -1
+            mejor_score = -1.0
+            for i, cand in enumerate(candidatos):
+                if not confirmadas:
+                    score = 999.0
+                else:
+                    score = min(
+                        _divergencia_geom(cand["geometry"], conf["geometry"])
+                        for conf in confirmadas
+                    )
+                if score > mejor_score:
+                    mejor_score = score
+                    mejor_idx   = i
+            if mejor_idx == -1 or mejor_score < _UMBRAL_KM:
+                break
+            confirmadas.append(candidatos.pop(mejor_idx))
+
+    # ── Fase 3: fallback ─────────────────────────────────────────────────
+    base_d = confirmadas[0]["distancia_km"] if confirmadas else fb["distancia_km"]
+    base_t = confirmadas[0]["traslado_min"] if confirmadas else fb["traslado_min"]
+    factores = [(1.0, 1.0), (1.12, 1.15), (1.25, 1.28)]
+    while len(confirmadas) < 3:
+        fd, ft = factores[len(confirmadas)]
+        confirmadas.append({
+            "distancia_km": round(base_d * fd, 2),
+            "traslado_min": round(base_t * ft, 1),
+            "geometry":     geom_directa,
+        })
+
+    return confirmadas[:3]
 
 
 def _haversine_km(lat1, lon1, lat2, lon2):
@@ -330,7 +547,7 @@ def obtener_vehiculos() -> list:
     """Devuelve la flota activa de vehículos (sin datos de ocupación)."""
     try:
         db   = get_db()
-        docs = list(db["vehiculos"].find({"activo": True}))
+        docs = list(db["vehiculos"].find({"activo": {"$ne": False}}))
         return [_vehiculo_serializar(v) for v in docs]
     except Exception as e:
         print(f"[obtener_vehiculos modificacion] Error: {e}")
@@ -354,7 +571,7 @@ def obtener_disponibilidad_vehiculos(logistica_id: str) -> list:
     # ── 1. Flota activa indexada por placas ───────────────────
     vehiculos: dict = {}
     try:
-        for v in db["vehiculos"].find({"activo": True}):
+        for v in db["vehiculos"].find({"activo": {"$ne": False}}):
             placas = v.get("placas", "")
             if placas:
                 vd = _vehiculo_serializar(v)
@@ -434,10 +651,15 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     # ── 1. Leer documento de asignación ───────────────────────
     doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
     if not doc_asig:
+        dist_vacia = calcular_distribucion_mayoristas(logistica_id)
         return {
-            "status":  "error",
-            "mensaje": "No se encontró asignación guardada para esta logística. "
-                       "Completa y guarda la sección de Asignación primero.",
+            "status":                "ok",
+            "logistica_id":          str(logistica_id),
+            "total_rutas":           0,
+            "rutas":                 [],
+            "mayoristas_disponibles": dist_vacia.get("todos_mayoristas", []),
+            "sucursales_pendientes": [],
+            "rutas_confirmadas":     [],
         }
 
     # detalle_por_dia = { dia: { ruta_id: { ... } } }  ← dict anidado, NO lista
@@ -548,16 +770,26 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     dist = calcular_distribucion_mayoristas(
         logistica_id,
         [
-            {"_id": rid, "sucursales": sucs}
+            {"_id": rid, "sucursales": sucs, "cap_ton": meta_por_ruta.get(rid, {}).get("cap_ton")}
             for rid, sucs in sucursales_por_ruta.items()
         ],
     )
     overrides = doc_asig.get("mayoristas_overrides", {})
-    if overrides:
-        dist = _aplicar_overrides_mayoristas(dist, overrides, sucursales_por_ruta)
-    mayoristas_por_ruta: dict = dist.get("mayoristas_por_ruta", {})
     orden_sucursales: dict = dist.get("orden_sucursales", {})
     mayoristas_disponibles: list = dist.get("todos_mayoristas", [])
+
+    todos_may_index: dict = {}   # int(id_cliente) → m  (legacy)
+    todos_may_doc:   dict = {}   # str(documento)   → m  (primary)
+    for m in (dist.get("todos_mayoristas", []) + dist.get("sin_coords", []) + dist.get("sin_asignar", [])):
+        try:
+            id_cl = int(m.get("id_cliente", 0))
+        except (TypeError, ValueError):
+            continue
+        if id_cl:
+            todos_may_index[id_cl] = dict(m)
+        doc = str(m.get("documento") or "")
+        if doc:
+            todos_may_doc[doc] = dict(m)
 
     # ── 4. Construir lista de rutas desde detalle_por_dia ─────
     rutas_normalizadas: list = []
@@ -573,7 +805,50 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             if orden is not None:
                 s["orden"] = orden
 
-        mayoristas_norm = mayoristas_por_ruta.get(ruta_id, [])
+        det_ruta = None
+        for dia, rutas_del_dia in detalle_por_dia.items():
+            if isinstance(rutas_del_dia, dict) and ruta_id in rutas_del_dia:
+                det_ruta = rutas_del_dia.get(ruta_id) or {}
+                break
+
+        mayoristas_norm = []
+        ruta_ov = overrides.get(ruta_id, {}) if isinstance(overrides, dict) else {}
+        claves_incluidas = list(ruta_ov.get("incluidos", []) or [])
+        if claves_incluidas or ruta_ov.get("excluidos"):
+            vistos: set = set()
+            for clave in claves_incluidas:
+                # Clave puede ser str(documento) o int(id_cliente) legacy
+                if isinstance(clave, str):
+                    may = todos_may_doc.get(clave)
+                else:
+                    try:
+                        may = todos_may_index.get(int(clave))
+                    except (TypeError, ValueError):
+                        may = None
+                if may:
+                    dk = _doc_key(may)
+                    if dk not in vistos:
+                        vistos.add(dk)
+                        mayoristas_norm.append(dict(may))
+        elif det_ruta and isinstance(det_ruta.get("mayoristas"), list):
+            mayoristas_norm = [dict(m) for m in det_ruta.get("mayoristas", []) if isinstance(m, dict)]
+        else:
+            # Rutas generadas por VRP histórico/afinidad no guardan "mayoristas" en
+            # detalle_por_dia (historico_logic.py solo persiste sucursales). Usar la
+            # distribución calculada (histórico de mayoristas → proximidad geográfica)
+            # para que se muestren con la secuencia correcta.
+            mayoristas_norm = [dict(m) for m in dist.get("mayoristas_por_ruta", {}).get(ruta_id, [])]
+
+        # Aplicar orden entrelazado calculado geográficamente desde mayoristas_por_ruta
+        may_orden_map = {
+            _doc_key(m): m.get("orden")
+            for m in dist.get("mayoristas_por_ruta", {}).get(ruta_id, [])
+            if m.get("orden") is not None
+        }
+        for m in mayoristas_norm:
+            dk = _doc_key(m)
+            if dk in may_orden_map:
+                m["orden"] = may_orden_map[dk]
 
         meta = meta_por_ruta.get(ruta_id, {})
         placas       = meta.get("placas", "")
@@ -723,6 +998,207 @@ def calcular_tiempos_subruta(paradas: list, pesos: dict, hora_salida: str = "08:
     }
 
 
+def calcular_alternativas_subruta(paradas: list, pesos: dict, hora_salida: str = "08:00") -> list:
+    """
+    Devuelve siempre exactamente 3 alternativas de ruta con tiempos calculados.
+    Cada elemento: {distancia_km, traslado_min, descarga_min, total_min, hora_regreso, geometry, origen}.
+    Ruta 0 = directa (recomendada), Ruta 1 = vía norte, Ruta 2 = vía sur.
+    """
+    cfg          = _obtener_config_general()
+    matriz_lat   = MATRIZ_LAT_DEFAULT
+    matriz_lon   = MATRIZ_LON_DEFAULT
+    min_descarga = float(cfg.get("min_descarga_por_kg") or MIN_DESCARGA_POR_KG)
+    velocidad    = float(cfg.get("velocidad_kmh") or 35.0)
+
+    coords = [(matriz_lat, matriz_lon)]
+    for p in paradas:
+        lat = p.get("latitud")
+        lon = p.get("longitud")
+        if lat is not None and lon is not None:
+            coords.append((float(lat), float(lon)))
+
+    if len(coords) < 2:
+        return []
+
+    coords.append((matriz_lat, matriz_lon))
+
+    def _peso_descarga(p: dict) -> float:
+        if p.get("tipo") == "mayorista" or (p.get("id_cliente") is not None and p.get("num_tienda") is None):
+            return float(p.get("peso_kg") or 0)
+        return float(pesos.get(str(p.get("num_tienda", "")), p.get("peso_kg") or 0) or 0)
+
+    descarga = sum(
+        min(_peso_descarga(p) * min_descarga, MAX_DESCARGA_POR_SUCURSAL)
+        for p in paradas
+    )
+
+    try:
+        h_s, m_s = hora_salida.split(":")
+        hora_salida_min = int(h_s) * 60 + int(m_s)
+    except Exception:
+        hora_salida_min = 8 * 60
+
+    def _hora_regreso(traslado_min):
+        total = traslado_min + descarga + HORAS_EXTRA_RUTA_MIN
+        reg   = hora_salida_min + total
+        h_r   = int(reg // 60)
+        m_r   = int(round(reg % 60))
+        if m_r >= 60:
+            h_r += 1; m_r -= 60
+        return f"{h_r:02d}:{m_r:02d}", round(total, 1)
+
+    # Siempre devuelve exactamente 3 rutas (paralelas + fallback)
+    alternativas = consultar_osrm_alternativas(coords, velocidad)
+
+    resultado = []
+    for alt in alternativas:
+        hr, total = _hora_regreso(alt["traslado_min"])
+        resultado.append({
+            "distancia_km": alt["distancia_km"],
+            "traslado_min": round(alt["traslado_min"], 1),
+            "descarga_min": round(descarga, 1),
+            "total_min":    total,
+            "hora_regreso": hr,
+            "geometry":     alt["geometry"],
+            "origen":       "osrm",
+        })
+
+    return resultado
+
+
+def _posicion_via_optima(waypoints: list, via: tuple) -> int:
+    """Devuelve el índice tras el cual insertar un via-point minimizando el desvío total."""
+    via_lat, via_lon = via
+    best_i    = 0
+    best_cost = float("inf")
+    for i in range(len(waypoints) - 1):
+        a, b  = waypoints[i], waypoints[i + 1]
+        costo = (_haversine_km(a[0], a[1], via_lat, via_lon)
+                 + _haversine_km(via_lat, via_lon, b[0], b[1]))
+        if costo < best_cost:
+            best_cost = costo
+            best_i    = i
+    return best_i
+
+
+def calcular_ruta_personalizada(
+    paradas: list,
+    via_points: list,
+    pesos: dict,
+    hora_salida: str = "08:00",
+    puntos_evitar: list | None = None,
+) -> dict:
+    """
+    Calcula una ruta OSRM con via-points (paso obligatorio) y zonas a evitar.
+
+    via_points    → puntos que la ruta DEBE recorrer; se insertan en su posición óptima.
+    puntos_evitar → zonas que la ruta debe evitar; si el trayecto base pasa dentro
+                    de 300 m de una zona, se intenta desviar añadiendo un waypoint
+                    perpendicular que aleja la ruta de esa área.
+    """
+    cfg          = _obtener_config_general()
+    matriz_lat   = MATRIZ_LAT_DEFAULT
+    matriz_lon   = MATRIZ_LON_DEFAULT
+    min_descarga = float(cfg.get("min_descarga_por_kg") or MIN_DESCARGA_POR_KG)
+    velocidad    = float(cfg.get("velocidad_kmh") or 35.0)
+    puntos_evitar = puntos_evitar or []
+
+    # Construir secuencia base: matriz → paradas → matriz
+    coords_base: list = [(matriz_lat, matriz_lon)]
+    for p in paradas:
+        lat = p.get("latitud")
+        lon = p.get("longitud")
+        if lat is not None and lon is not None:
+            coords_base.append((float(lat), float(lon)))
+
+    if len(coords_base) < 2:
+        return {}
+
+    coords_base.append((matriz_lat, matriz_lon))
+
+    # Insertar via-points en su posición óptima (paso obligatorio)
+    coords: list = list(coords_base)
+    for vp in via_points:
+        lat = vp.get("lat")
+        lon = vp.get("lon")
+        if lat is None or lon is None:
+            continue
+        idx    = _posicion_via_optima(coords, (float(lat), float(lon)))
+        coords = coords[: idx + 1] + [(float(lat), float(lon))] + coords[idx + 1 :]
+
+    # Intentar desviar si algún segmento pasa por una zona a evitar
+    RADIO_EVITAR_KM = 0.3  # 300 m
+    for pe in puntos_evitar:
+        pe_lat = pe.get("lat")
+        pe_lon = pe.get("lon")
+        if pe_lat is None or pe_lon is None:
+            continue
+        pe_lat, pe_lon = float(pe_lat), float(pe_lon)
+        # Buscar el segmento más cercano a la zona a evitar
+        seg_idx = None
+        seg_dist = float("inf")
+        for i in range(len(coords) - 1):
+            a, b = coords[i], coords[i + 1]
+            mid_lat = (a[0] + b[0]) / 2
+            mid_lon = (a[1] + b[1]) / 2
+            d = _haversine_km(mid_lat, mid_lon, pe_lat, pe_lon)
+            if d < seg_dist:
+                seg_dist = d
+                seg_idx  = i
+        if seg_dist > RADIO_EVITAR_KM or seg_idx is None:
+            continue
+        # Calcular waypoint de desvío: mover perpendicularmente 0.5 km desde la zona
+        a, b   = coords[seg_idx], coords[seg_idx + 1]
+        dx     = b[0] - a[0]
+        dy     = b[1] - a[1]
+        length = math.sqrt(dx * dx + dy * dy) or 1e-9
+        # perpendicular unitario
+        perp_lat = -dy / length
+        perp_lon =  dx / length
+        # desplazar 0.5 km en grados (aprox. 1/111 por km en latitud)
+        offset = 0.005
+        desvio_lat = pe_lat + perp_lat * offset
+        desvio_lon = pe_lon + perp_lon * offset
+        coords = coords[: seg_idx + 1] + [(desvio_lat, desvio_lon)] + coords[seg_idx + 1 :]
+
+    # Calcular descarga acumulada
+    def _peso_p(p):
+        if p.get("tipo") == "mayorista" or (p.get("id_cliente") is not None and p.get("num_tienda") is None):
+            return float(p.get("peso_kg") or 0)
+        return float(pesos.get(str(p.get("num_tienda", "")), p.get("peso_kg") or 0) or 0)
+
+    descarga = sum(
+        min(_peso_p(p) * min_descarga, MAX_DESCARGA_POR_SUCURSAL)
+        for p in paradas
+    )
+
+    try:
+        h_s, m_s = hora_salida.split(":")
+        hora_salida_min = int(h_s) * 60 + int(m_s)
+    except Exception:
+        hora_salida_min = 8 * 60
+
+    # Llamada OSRM con la secuencia completa
+    resultado = _osrm_llamada_simple(coords) or _fallback_haversine(coords_base, velocidad)
+
+    traslado = resultado.get("traslado_min", 0.0)
+    total    = traslado + descarga + HORAS_EXTRA_RUTA_MIN
+    reg      = hora_salida_min + total
+    h_r, m_r = int(reg // 60), int(round(reg % 60))
+    if m_r >= 60:
+        h_r += 1; m_r -= 60
+
+    return {
+        "distancia_km": resultado.get("distancia_km", 0),
+        "traslado_min": round(traslado, 1),
+        "descarga_min": round(descarga, 1),
+        "total_min":    round(total, 1),
+        "hora_regreso": f"{h_r:02d}:{m_r:02d}",
+        "geometry":     resultado.get("geometry", []),
+        "origen":       "osrm_personalizada",
+    }
+
+
 def calcular_tiempos_lote(rutas: list, pesos: dict, delay: float = 1.2) -> dict:
     """Calcula tiempos OSRM para múltiples rutas con delay entre llamadas."""
     resultados = {}
@@ -767,6 +1243,7 @@ def crear_ruta_manual(
     dia: str,
     vehiculo_placas: str,
     sucursales: list,
+    mayoristas: list | None = None,
     nombre_ruta: str | None = None,
 ) -> dict:
     oid = _parse_oid(logistica_id)
@@ -781,18 +1258,18 @@ def crear_ruta_manual(
     if not placas:
         return {"status": "error", "mensaje": "Se requiere vehículo."}
 
-    if not isinstance(sucursales, list) or not sucursales:
-        return {"status": "error", "mensaje": "Se requiere al menos una sucursal."}
+    sucursales = sucursales if isinstance(sucursales, list) else []
+    may_list_raw = mayoristas if isinstance(mayoristas, list) else []
+
+    if not sucursales and not may_list_raw:
+        return {"status": "error", "mensaje": "Se requiere al menos una sucursal o un mayorista."}
 
     db = get_db()
     doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
     if not doc_asig:
-        return {
-            "status": "error",
-            "mensaje": "No se encontró asignación guardada para esta logística.",
-        }
+        doc_asig = {"logistica_id": oid, "detalle_por_dia": {}, "sucursales_pendientes": [], "rutas_confirmadas": []}
 
-    veh = db["vehiculos"].find_one({"placas": placas, "activo": True})
+    veh = db["vehiculos"].find_one({"placas": placas, "activo": {"$ne": False}})
     if not veh:
         return {"status": "error", "mensaje": "Vehículo no encontrado o inactivo."}
 
@@ -822,9 +1299,6 @@ def crear_ruta_manual(
             "nombre": nombre or f"Sucursal {nt_int}",
         })
 
-    if not suc_norm:
-        return {"status": "error", "mensaje": "No se pudieron validar las sucursales."}
-
     ruta_id = f"manual_{ObjectId()}"
     abrev = veh.get("abreviatura") or veh.get("descripcion") or placas
     cap_ton = float(veh.get("capacidad_toneladas") or 0)
@@ -845,8 +1319,35 @@ def crear_ruta_manual(
             "descarga_min": round(min(peso_kg * min_descarga, MAX_DESCARGA_POR_SUCURSAL), 1),
         })
 
+    may_det = []
+    may_list = may_list_raw
+    seen_may: set = set()
+    for i, m in enumerate(may_list, start=1):
+        if not isinstance(m, dict):
+            continue
+        id_cl = m.get("id_cliente")
+        try:
+            id_cl_int = int(id_cl)
+        except (TypeError, ValueError):
+            continue
+        dk = _doc_key(m)  # deduplicate per document, not per client
+        if dk in seen_may:
+            continue
+        seen_may.add(dk)
+        peso_may = float(m.get("peso_kg") or 0)
+        peso_total_kg += peso_may
+        may_det.append({
+            "id_cliente": id_cl_int,
+            "documento":  m.get("documento") or "",
+            "nombre":     m.get("nombre") or f"Mayorista {id_cl_int}",
+            "orden":      len(suc_det) + i,
+            "peso_kg":    peso_may,
+            "latitud":    m.get("latitud"),
+            "longitud":   m.get("longitud"),
+        })
+
     pct = round((peso_total_kg / 1000 / cap_ton) * 100, 1) if cap_ton > 0 else 0
-    nombre_ruta = (nombre_ruta or "").strip() or f"{abrev} — {dia_key.capitalize()} (manual)"
+    nombre_ruta = (nombre_ruta or "").strip() or f"{abrev} — {dia_key.capitalize()}"
 
     detalle_por_dia = doc_asig.get("detalle_por_dia", {})
     if dia_key not in detalle_por_dia:
@@ -863,6 +1364,7 @@ def crear_ruta_manual(
         "hora_regreso_estimada":  "",
         "cumple_horario":         True,
         "sucursales":             suc_det,
+        "mayoristas":             may_det,
     }
 
     pendientes = [
@@ -876,6 +1378,7 @@ def crear_ruta_manual(
             "detalle_por_dia": detalle_por_dia,
             "sucursales_pendientes": pendientes,
         }},
+        upsert=True,
     )
 
     coords_map = _obtener_coordenadas_sucursales()
@@ -922,7 +1425,7 @@ def crear_ruta_manual(
         "num_sucursales":        len(suc_ui),
         "sucursales_con_coords": con_coords,
         "sucursales":            suc_ui,
-        "mayoristas":            [],
+        "mayoristas":            may_det,
     }
 
     return {
@@ -1024,6 +1527,52 @@ def actualizar_vehiculo_en_asignacion(
                 f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_abreviatura": vehiculo_abreviatura or "",
                 f"detalle_por_dia.{dia}.{ruta_id}.capacidad_ton":        capacidad_ton,
             }},
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
+def cambiar_dia_ruta(
+    logistica_id: str,
+    ruta_id: str,
+    dia_actual: str,
+    dia_nuevo: str,
+) -> dict:
+    """
+    Mueve una ruta de un día a otro dentro de asignaciones.detalle_por_dia.
+    El vehículo asignado queda disponible en el día original y ocupado en el nuevo.
+    """
+    oid = _parse_oid(logistica_id)
+    if not oid:
+        return {"status": "error", "mensaje": "logistica_id inválido"}
+
+    dia_actual_k = (dia_actual or "").strip().lower()
+    dia_nuevo_k  = (dia_nuevo  or "").strip().lower()
+
+    if dia_actual_k not in ORDEN_DIAS or dia_nuevo_k not in ORDEN_DIAS:
+        return {"status": "error", "mensaje": "Día inválido"}
+
+    if dia_actual_k == dia_nuevo_k:
+        return {"status": "ok"}
+
+    try:
+        db  = get_db()
+        doc = db["asignaciones"].find_one({"logistica_id": oid})
+        if not doc:
+            return {"status": "error", "mensaje": "No se encontró la asignación"}
+
+        detalle  = doc.get("detalle_por_dia", {})
+        ruta_det = detalle.get(dia_actual_k, {}).get(ruta_id)
+        if ruta_det is None:
+            return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia_actual_k}"}
+
+        db["asignaciones"].update_one(
+            {"logistica_id": oid},
+            {
+                "$set":   {f"detalle_por_dia.{dia_nuevo_k}.{ruta_id}": ruta_det},
+                "$unset": {f"detalle_por_dia.{dia_actual_k}.{ruta_id}": ""},
+            },
         )
         return {"status": "ok"}
     except Exception as e:
@@ -1171,10 +1720,12 @@ def quitar_mayorista_de_ruta(
     logistica_id: str,
     ruta_id: str,
     id_cliente: int,
+    documento: str = "",
 ) -> dict:
     """
-    Persiste el retiro de un mayorista de una ruta añadiéndolo a
+    Persiste el retiro de un documento de mayorista de una ruta en
     asignaciones.mayoristas_overrides[ruta_id].excluidos.
+    La clave almacenada es `documento` (str) si está presente; si no, `id_cliente` (int, legacy).
     """
     oid = _parse_oid(logistica_id)
     if not oid:
@@ -1187,11 +1738,12 @@ def quitar_mayorista_de_ruta(
 
         overrides = doc.get("mayoristas_overrides", {})
         ruta_ov = overrides.get(ruta_id, {"excluidos": [], "incluidos": []})
-        id_cl = int(id_cliente)
+        # Clave primaria: documento (str) o id_cliente (int) como fallback
+        clave = documento if documento else int(id_cliente)
 
-        if id_cl not in ruta_ov.get("excluidos", []):
-            ruta_ov.setdefault("excluidos", []).append(id_cl)
-        ruta_ov["incluidos"] = [x for x in ruta_ov.get("incluidos", []) if x != id_cl]
+        if clave not in ruta_ov.get("excluidos", []):
+            ruta_ov.setdefault("excluidos", []).append(clave)
+        ruta_ov["incluidos"] = [x for x in ruta_ov.get("incluidos", []) if x != clave]
         overrides[ruta_id] = ruta_ov
 
         db["asignaciones"].update_one(
@@ -1213,9 +1765,11 @@ def agregar_mayorista_a_ruta(
     longitud,
     peso_kg: float,
     peso_ruta_actual: float,
+    documento: str = "",
 ) -> dict:
     """
-    Persiste la incorporación de un mayorista a una ruta mediante override.
+    Persiste la incorporación de un documento de mayorista a una ruta mediante override.
+    La clave almacenada es `documento` (str) si está presente; si no, `id_cliente` (int, legacy).
     Si el nuevo peso total supera la capacidad del vehículo, busca el vehículo
     más pequeño disponible y lo asigna automáticamente.
     """
@@ -1233,19 +1787,20 @@ def agregar_mayorista_a_ruta(
         if ruta_det is None:
             return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia}"}
 
-        id_cl = int(id_cliente)
+        # Clave primaria: documento (str) o id_cliente (int) como fallback
+        clave = documento if documento else int(id_cliente)
         overrides = doc.get("mayoristas_overrides", {})
 
-        # Limpiar este mayorista de cualquier override previo en OTRAS rutas
+        # Limpiar este documento de cualquier override previo en OTRAS rutas
         for rid, ov in overrides.items():
             if rid != ruta_id:
-                ov["incluidos"] = [x for x in ov.get("incluidos", []) if x != id_cl]
+                ov["incluidos"] = [x for x in ov.get("incluidos", []) if x != clave]
 
         # En esta ruta: quitar de excluidos y añadir a incluidos
         ruta_ov = overrides.setdefault(ruta_id, {"excluidos": [], "incluidos": []})
-        ruta_ov["excluidos"] = [x for x in ruta_ov.get("excluidos", []) if x != id_cl]
-        if id_cl not in ruta_ov.get("incluidos", []):
-            ruta_ov.setdefault("incluidos", []).append(id_cl)
+        ruta_ov["excluidos"] = [x for x in ruta_ov.get("excluidos", []) if x != clave]
+        if clave not in ruta_ov.get("incluidos", []):
+            ruta_ov.setdefault("incluidos", []).append(clave)
 
         # Verificar capacidad y buscar vehículo alternativo si hace falta
         nuevo_peso_kg = float(peso_ruta_actual) + float(peso_kg)
@@ -1261,7 +1816,7 @@ def agregar_mayorista_a_ruta(
             }
             candidatos = sorted(
                 [
-                    v for v in db["vehiculos"].find({"activo": True})
+                    v for v in db["vehiculos"].find({"activo": {"$ne": False}})
                     if float(v.get("capacidad_toneladas") or 0) * 1000 >= nuevo_peso_kg
                     and (v.get("placas") or "") not in placas_en_dia
                     and v.get("placas") != ruta_det.get("vehiculo_placas")

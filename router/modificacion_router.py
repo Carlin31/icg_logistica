@@ -6,12 +6,15 @@ Pasa logistica_id a todas las funciones de lógica.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, Response
 from logic.historico_logic import exportar_csv_rutas, guardar_en_historico
 from logic.modificacion_logic import (
+    MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT,
     obtener_rutas_para_modificar,
     obtener_sucursales_disponibles,
     obtener_pesos,
     obtener_vehiculos,
     obtener_disponibilidad_vehiculos,
     calcular_tiempos_subruta,
+    calcular_alternativas_subruta,
+    calcular_ruta_personalizada,
     calcular_tiempos_lote,
     guardar_modificacion,
     obtener_modificacion_previa,
@@ -23,6 +26,7 @@ from logic.modificacion_logic import (
     eliminar_ruta_manual,
     quitar_mayorista_de_ruta,
     agregar_mayorista_a_ruta,
+    cambiar_dia_ruta,
 )
 
 modificacion_bp = Blueprint("modificacion", __name__)
@@ -171,6 +175,56 @@ def post_recalcular():
         return jsonify({"status": "error", "mensaje": str(e)}), 500
 
 
+@modificacion_bp.route("/alternativas-ruta", methods=["POST"])
+def post_alternativas_ruta():
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+
+    paradas = datos.get("paradas") or datos.get("sucursales")
+    if not isinstance(paradas, list):
+        return jsonify({"status": "error", "mensaje": "Se esperaba { paradas: [...] }"}), 400
+
+    hora_salida = datos.get("hora_salida") or "08:00"
+    pesos = obtener_pesos(lid)
+    try:
+        alternativas = calcular_alternativas_subruta(paradas, pesos, hora_salida)
+        return jsonify({
+            "status": "ok",
+            "alternativas": alternativas,
+            "matriz": [MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT],
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/ruta-personalizada", methods=["POST"])
+def post_ruta_personalizada():
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+
+    paradas        = datos.get("paradas") or datos.get("sucursales")
+    via_points     = datos.get("via_points") or []
+    puntos_evitar  = datos.get("puntos_evitar") or []
+    if not isinstance(paradas, list):
+        return jsonify({"status": "error", "mensaje": "Se esperaba { paradas: [...] }"}), 400
+
+    hora_salida = datos.get("hora_salida") or "08:00"
+    pesos = obtener_pesos(lid)
+    try:
+        ruta = calcular_ruta_personalizada(paradas, via_points, pesos, hora_salida, puntos_evitar)
+        return jsonify({"status": "ok", "ruta": ruta})
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
 @modificacion_bp.route("/calcular-lote", methods=["POST"])
 def post_calcular_lote():
     lid, err = _requiere_logistica()
@@ -252,10 +306,11 @@ def post_crear_ruta():
     dia = datos.get("dia", "")
     vehiculo_placas = datos.get("vehiculo_placas", "")
     sucursales = datos.get("sucursales", [])
+    mayoristas = datos.get("mayoristas", [])
     nombre = datos.get("nombre_ruta") or datos.get("nombre")
 
     try:
-        resultado = crear_ruta_manual(lid, dia, vehiculo_placas, sucursales, nombre)
+        resultado = crear_ruta_manual(lid, dia, vehiculo_placas, sucursales, mayoristas, nombre)
         code = 200 if resultado.get("status") == "ok" else 400
         return jsonify(resultado), code
     except Exception as e:
@@ -279,6 +334,31 @@ def post_eliminar_ruta():
     dia = datos.get("dia", "")
     try:
         resultado = eliminar_ruta_manual(lid, ruta_id, dia)
+        code = 200 if resultado.get("status") == "ok" else 400
+        return jsonify(resultado), code
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/cambiar-dia", methods=["POST"])
+def post_cambiar_dia():
+    """
+    Mueve una ruta de un día a otro en asignaciones.detalle_por_dia.
+    Body: { ruta_id, dia_actual, dia_nuevo }
+    """
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+    try:
+        resultado = cambiar_dia_ruta(
+            lid,
+            datos.get("ruta_id", ""),
+            datos.get("dia_actual", ""),
+            datos.get("dia_nuevo", ""),
+        )
         code = 200 if resultado.get("status") == "ok" else 400
         return jsonify(resultado), code
     except Exception as e:
@@ -357,10 +437,11 @@ def post_quitar_mayorista():
         return err2
     ruta_id    = datos.get("ruta_id", "")
     id_cliente = datos.get("id_cliente")
+    documento  = datos.get("documento", "")
     if not ruta_id or id_cliente is None:
         return jsonify({"status": "error", "mensaje": "Se requiere ruta_id e id_cliente"}), 400
     try:
-        resultado = quitar_mayorista_de_ruta(lid, ruta_id, int(id_cliente))
+        resultado = quitar_mayorista_de_ruta(lid, ruta_id, int(id_cliente), documento=str(documento))
         code = 200 if resultado.get("status") == "ok" else 500
         return jsonify(resultado), code
     except Exception as e:
@@ -395,6 +476,7 @@ def post_agregar_mayorista():
             longitud         = datos.get("longitud"),
             peso_kg          = float(datos.get("peso_kg") or 0),
             peso_ruta_actual = float(datos.get("peso_ruta_actual") or 0),
+            documento        = str(datos.get("documento") or ""),
         )
         code = 200 if resultado.get("status") == "ok" else 500
         return jsonify(resultado), code

@@ -83,6 +83,12 @@
             <span class="perfil-badge-nombre">{{ perfil_nombre }}</span>
         </a>
         {% endif %}
+        {% if usuario_nombre %}
+        <a href="{{ url_for('auth.logout') }}" class="usuario-badge" title="Cerrar sesión ({{ usuario_nombre }})">
+            <span class="usuario-badge-nombre">{{ usuario_nombre }}</span>
+            <span class="usuario-badge-salir">Salir</span>
+        </a>
+        {% endif %}
         <button
             class="btn-nav-toggle"
             id="btn-nav-toggle"

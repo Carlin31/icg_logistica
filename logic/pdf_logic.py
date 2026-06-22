@@ -8,6 +8,7 @@ filtrada por logistica_id proveniente de la sesión Flask.
 No se leen archivos JSON.
 """
 import os
+import re
 from datetime import datetime
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -22,7 +23,8 @@ from reportlab.platypus import (
 )
 
 from db import get_db
-from logic.mayoristas_logic import calcular_distribucion_mayoristas
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
+from logic.groq_logic import generar_nombre_poblacion
 
 # ── Directorio temporal para el PDF generado ─────────────────
 # Se usa /tmp para compatibilidad con entornos de producción (Render, etc.)
@@ -129,9 +131,139 @@ def _draw_header(nombre_log, expedido):
     return draw
 
 
+# ── Helpers para agrupación de mayoristas en PDF ─────────────────────────────
+
+def _leer_poblaciones(db, id_clientes: list) -> dict:
+    """Returns {id_cliente_int: poblacion_str_upper} from clientes_mayoristas."""
+    if not id_clientes:
+        return {}
+    resultado: dict = {}
+    try:
+        for doc in db["clientes_mayoristas"].find(
+            {"id_cliente": {"$in": id_clientes}},
+            {"id_cliente": 1, "poblacion": 1},
+        ):
+            id_cl = int(doc.get("id_cliente") or 0)
+            pob   = str(doc.get("poblacion") or "").strip().upper()
+            resultado[id_cl] = pob
+    except Exception as e:
+        print(f"[_leer_poblaciones] {e}")
+    return resultado
+
+
+def _formatear_docs_agrupados(docs: list) -> str:
+    """
+    Compresses a list of document codes into short form.
+    ['BB2872', 'BB2873', 'BB2874'] -> 'BB2872/73/74'
+    (first doc full, subsequent docs = last 2 digits of their numeric part)
+    """
+    if not docs:
+        return ""
+    if len(docs) == 1:
+        return docs[0]
+
+    first  = docs[0]
+    prefix = re.match(r'^([A-Za-z]+)', first)
+    pfx    = prefix.group(1).upper() if prefix else ""
+
+    parts = [first]
+    for doc in docs[1:]:
+        if pfx and doc.upper().startswith(pfx):
+            num_part = doc[len(pfx):]
+            digits   = re.sub(r'\D', '', num_part)
+            parts.append(digits[-2:] if len(digits) >= 2 else (digits or doc))
+        else:
+            parts.append(doc)
+    return "/".join(parts)
+
+
+def _abreviar_nombre(nombre: str) -> str:
+    """Returns up to 3 words of a mayorista name, max 25 chars."""
+    palabras = str(nombre or "").upper().split()
+    abrev = " ".join(palabras[:3])
+    return abrev[:25]
+
+
+def _agrupar_may_por_poblacion(paradas: list, pob_map: dict) -> list:
+    """
+    Merges consecutive mayorista paradas that share the same poblacion into a
+    single synthetic entry. Paradas with unknown poblacion get a Groq-inferred
+    name appended. Returns a new paradas list ready for PDF row generation.
+
+    Format:
+      1 doc, known pob       : 'BB2872_AYOZINTEPEC'
+      N docs, mismo cliente  : 'BB2872/73/74_CTES. NOMBRE_DESTINATARIO'
+      N docs, distinto cte.  : 'BB2872/73/74_CTES. AYOZINTEPEC'
+      unknown pob            : Groq fallback, or raw doc string
+
+    Si varios documentos agrupados pertenecen al mismo numero de cliente,
+    se muestra el nombre del destinatario en lugar de la poblacion (el
+    cliente es mas especifico que la ciudad para identificar el pedido).
+    """
+    result: list = []
+    i = 0
+    while i < len(paradas):
+        p = paradas[i]
+        if p["_tipo"] != "mayorista":
+            result.append(p)
+            i += 1
+            continue
+
+        id_cl = int(p.get("id_cliente") or 0)
+        pob   = pob_map.get(id_cl, "")
+
+        # Accumulate consecutive mayoristas with the same non-empty poblacion
+        group = [p]
+        j = i + 1
+        while j < len(paradas) and paradas[j]["_tipo"] == "mayorista":
+            next_id  = int(paradas[j].get("id_cliente") or 0)
+            next_pob = pob_map.get(next_id, "")
+            if pob and next_pob == pob:
+                group.append(paradas[j])
+                j += 1
+            else:
+                break
+
+        docs    = [str(m.get("documento") or m.get("nombre", "-")) for m in group]
+        doc_str = _formatear_docs_agrupados(docs)
+
+        if len(group) == 1:
+            # Single document: show abbreviated recipient name
+            abrev = _abreviar_nombre(p.get("nombre", ""))
+            nombre_display = f"{doc_str}_{abrev}" if abrev else doc_str
+            entry = dict(p)
+            entry["_display_nombre"] = nombre_display
+            result.append(entry)
+        else:
+            # Multiple consecutive docs from the same poblacion
+            ids_grupo     = {int(m.get("id_cliente") or 0) for m in group}
+            mismo_cliente = len(ids_grupo) == 1
+
+            if mismo_cliente:
+                # Mismos documentos de un solo cliente: usar el nombre del
+                # destinatario en vez de la poblacion (mas especifico)
+                nombre_dest    = _abreviar_nombre(group[0].get("nombre", ""))
+                nombre_display = f"{doc_str}_CTES. {nombre_dest}" if nombre_dest else doc_str
+            elif pob:
+                nombre_display = f"{doc_str}_CTES. {pob}"
+            else:
+                nombres_may  = [str(m.get("nombre", "")) for m in group if m.get("nombre")]
+                pob_inferida = generar_nombre_poblacion(nombres_may) if nombres_may else ""
+                nombre_display = f"{doc_str}_CTES. {pob_inferida}" if pob_inferida else doc_str
+            result.append({
+                "_tipo":           "mayorista",
+                "orden":           group[0].get("orden"),
+                "peso_kg":         sum(float(m.get("peso_kg") or 0) for m in group),
+                "_display_nombre": nombre_display,
+            })
+        i = j
+
+    return result
+
+
 # ── Tabla de un vehículo ──────────────────────────────────────
 def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
-                    veh_chofer: str = "", veh_ton: float = 0.0) -> list:
+                    veh_chofer: str = "", veh_ton: float = 0.0, db=None) -> list:
     rutas_ord = sorted(rutas, key=lambda r: ORDEN_DIA.get(r.get("dia", "").lower(), 99))
 
     conductor = veh_chofer or veh_placas
@@ -155,13 +287,41 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         pct_util  = float(ruta.get("pct_utilizacion", 0))
         es_sub    = ruta.get("tipo", "") == "subruta"
 
-        # Combinar sucursales + mayoristas en secuencia unificada por orden
+        # Combinar sucursales + mayoristas en secuencia unificada
         sucs = [dict(p, _tipo="sucursal")  for p in ruta.get("sucursales", [])]
         mays = [dict(p, _tipo="mayorista") for p in ruta.get("mayoristas",  [])]
-        paradas = sorted(
-            sucs + mays,
-            key=lambda p: p.get("orden") if p.get("orden") is not None else 9999,
-        )
+
+        sucs_ord = sorted(sucs, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+        mays_ord = sorted(mays, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+
+        # Detectar si el orden guardado ya entrelaza mayoristas con sucursales.
+        # Si todos los mayoristas tienen orden > max(suc.orden), los datos son
+        # antiguos (guardados antes de la corrección geográfica): se reordena
+        # por proximidad. De lo contrario se respeta el orden guardado.
+        if sucs_ord and mays_ord:
+            max_suc = max(s.get("orden") or 0 for s in sucs_ord)
+            min_may = min(m.get("orden") or 9999 for m in mays_ord)
+            if min_may > max_suc:
+                # Datos desactualizados: insertar mayoristas por proximidad geográfica
+                paradas = list(sucs_ord)
+                for m in mays_ord:
+                    pos = _insertar_pos_proxima(paradas, m)
+                    paradas.insert(pos, m)
+                for i, p in enumerate(paradas, 1):
+                    p["orden"] = i
+            else:
+                # Orden ya entrelazado: respetar el orden guardado
+                paradas = sorted(sucs + mays, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+        else:
+            paradas = sorted(sucs + mays, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+
+        # Agrupar mayoristas consecutivos de la misma poblacion (BB2872/73/74_CTES. AYOZINTEPEC)
+        if db is not None and any(p["_tipo"] == "mayorista" for p in paradas):
+            may_ids = list({int(p.get("id_cliente") or 0)
+                            for p in paradas
+                            if p["_tipo"] == "mayorista" and p.get("id_cliente")})
+            pob_map = _leer_poblaciones(db, may_ids)
+            paradas = _agrupar_may_por_poblacion(paradas, pob_map)
 
         n_suc = sum(1 for p in paradas if p["_tipo"] == "sucursal")
         aux_count = _auxiliares_para_ruta(peso_ruta, n_suc)
@@ -174,9 +334,10 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
             p_kg   = float(p.get("peso_kg", 0))
             pct_r  = (p_kg / peso_ruta * 100) if peso_ruta else 0
 
-            nombre = str(p.get("nombre", "—"))
             if es_may:
-                pass  # sin prefijo adicional
+                nombre = str(p.get("_display_nombre") or p.get("documento") or p.get("nombre", "-"))
+            else:
+                nombre = str(p.get("nombre", "-"))
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
@@ -291,6 +452,7 @@ def _mayoristas_por_ruta_db(db) -> dict:
                 mays.append({
                     "tipo":       "mayorista",
                     "id_cliente": id_cl,
+                    "documento":  p.get("documento", ""),
                     "nombre":     p.get("nombre_base") or p.get("nombre", ""),
                     "peso_kg":    float(p.get("peso_kg", 0)),
                     "orden":      p.get("orden"),
@@ -368,13 +530,19 @@ def _rutas_desde_asignaciones(db, oid) -> list:
                 "mayoristas":       [],
             })
 
-            rutas_base.append({"_id": ruta_id, "sucursales": suc_list})
+            rutas_base.append({
+                "_id":        ruta_id,
+                "sucursales": suc_list,
+                "cap_ton":    info.get("capacidad_ton"),
+            })
 
     if rutas_base:
         dist = calcular_distribucion_mayoristas(str(oid), rutas_base)
         may_por_ruta = dist.get("mayoristas_por_ruta", {})
+        orden_suc_dist = dist.get("orden_sucursales", {})
         for r in rutas:
-            may_list = may_por_ruta.get(r.get("id", ""), [])
+            rid = r.get("id", "")
+            may_list = may_por_ruta.get(rid, [])
             r["mayoristas"] = may_list
             if may_list:
                 peso_may = sum(float(m.get("peso_kg") or 0) for m in may_list)
@@ -382,6 +550,12 @@ def _rutas_desde_asignaciones(db, oid) -> list:
                 cap_ton = float(r.get("capacidad_ton") or 0)
                 if cap_ton > 0:
                     r["pct_utilizacion"] = round((r["peso_kg"] / 1000 / cap_ton) * 100, 1)
+            # Actualizar orden de sucursales al entrelazado calculado geográficamente
+            suc_ord_map = orden_suc_dist.get(rid, {})
+            for s in r.get("sucursales", []):
+                nt = str(s.get("num_tienda", ""))
+                if nt in suc_ord_map:
+                    s["orden"] = suc_ord_map[nt]
     return rutas
 
 
@@ -402,7 +576,7 @@ def _filtrar_mayoristas_con_pedidos(rutas: list) -> None:
 
 def _pesos_mayoristas(db, oid: ObjectId) -> dict:
     """
-    Lee `extraccion.mayoristas` y devuelve {id_cliente_int: peso_kg}.
+    Lee `extraccion.mayoristas` y devuelve {documento_str: peso_kg}.
     Se usa para enriquecer los mayoristas cuyo peso_kg llegó como 0 desde
     `distribucion_mayoristas` (que no almacena pesos individuales).
     """
@@ -411,11 +585,12 @@ def _pesos_mayoristas(db, oid: ObjectId) -> dict:
         ext = db["extraccion"].find_one({"logistica_id": oid})
         if ext:
             for m in ext.get("mayoristas", []):
-                id_cl = m.get("codigo") or m.get("id_cliente")
-                try:
-                    resultado[int(id_cl)] = float(m.get("peso_total_kg", 0) or 0)
-                except (TypeError, ValueError):
-                    pass
+                doc = str(m.get("documento") or m.get("codigo") or m.get("id_cliente") or "")
+                if doc:
+                    try:
+                        resultado[doc] = float(m.get("peso_total_kg", 0) or 0)
+                    except (TypeError, ValueError):
+                        pass
     except Exception as e:
         print(f"[_pesos_mayoristas] {e}")
     return resultado
@@ -464,11 +639,8 @@ def generar_pdf(datos_sesion: dict) -> str:
         for ruta in rutas:
             for m in ruta.get("mayoristas", []):
                 if not m.get("peso_kg"):
-                    id_cl = m.get("id_cliente")
-                    try:
-                        m["peso_kg"] = pesos_may.get(int(id_cl), 0.0)
-                    except (TypeError, ValueError):
-                        pass
+                    doc = str(m.get("documento") or m.get("id_cliente") or "")
+                    m["peso_kg"] = pesos_may.get(doc, 0.0)
 
     _filtrar_mayoristas_con_pedidos(rutas)
 
@@ -540,7 +712,7 @@ def generar_pdf(datos_sesion: dict) -> str:
     elements = []
     for veh in sorted(grupos, key=lambda v: v or ""):
         info = grupos[veh]
-        elements.extend(_tabla_vehiculo(veh, info["placas"], info["rutas"], info["chofer"], info["ton"]))
+        elements.extend(_tabla_vehiculo(veh, info["placas"], info["rutas"], info["chofer"], info["ton"], db))
 
     doc_pdf.build(elements)
     return filepath

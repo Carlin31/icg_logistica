@@ -29,24 +29,32 @@
  */
 const state = {
   perfiles: {
-    icg:      { nombre: null, datos: null, volumen: null, status: 'vacio' },
-    proalmex: { nombre: null, datos: null, volumen: null, status: 'vacio' },
-    bimbo:    { nombre: null, datos: null, volumen: null, status: 'vacio' },
+    icg:      { nombre: null, datos: null, volumen: null, status: 'vacio', advertencias: null },
+    proalmex: { nombre: null, datos: null, volumen: null, status: 'vacio', advertencias: null },
+    bimbo:    { nombre: null, datos: null, volumen: null, status: 'vacio', advertencias: null },
   },
   consolidadoPeso:    null,
   consolidadoVolumen: null,
   // Clientes Mayoristas (estado independiente)
   mayoristas: {
-    nombre:      null,
-    consolidado: null,   // [{ codigo, nombre, peso_total_kg }]
-    status:      'vacio',
+    nombre:       null,
+    consolidado:  null,   // [{ codigo, nombre, peso_total_kg }]
+    status:       'vacio',
+    advertencias: null,
   },
   tabActiva:    'consolidado',
   subtabActiva: 'peso',
   hayUnsaved:   false,
+  fuentesEliminadas: new Set(),   // fuentes eliminadas pendientes de persistir
 };
 
 const PERFILES = ['icg', 'proalmex', 'bimbo'];
+
+// Mapeo perfil → claves del campo `advertencias` devuelto por el backend
+const ADV_KEYS = {
+  icg:      { total: 'total_claves_icg',      faltantes: 'claves_no_encontradas_icg' },
+  proalmex: { total: 'total_claves_proalmex', faltantes: 'claves_no_encontradas_proalmex' },
+};
 
 // ── Mensajes contextuales del loader ─────────────────────────────────────────
 const MSG_EXT = {
@@ -113,6 +121,33 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('ext-confirm-ok').addEventListener('click', () => {
     document.getElementById('ext-confirm-overlay').classList.add('hidden');
     if (_extConfirmResolve) { _extConfirmResolve(true); _extConfirmResolve = null; }
+  });
+
+  // Confirm genérico (captura manual)
+  document.getElementById('ext-confirm-gen-cancel').addEventListener('click', () => {
+    document.getElementById('ext-confirm-gen-overlay').classList.add('hidden');
+    if (_genConfirmResolve) { _genConfirmResolve(false); _genConfirmResolve = null; }
+  });
+  document.getElementById('ext-confirm-gen-ok').addEventListener('click', () => {
+    document.getElementById('ext-confirm-gen-overlay').classList.add('hidden');
+    if (_genConfirmResolve) { _genConfirmResolve(true); _genConfirmResolve = null; }
+  });
+
+  // Modal agregar manualmente
+  document.getElementById('modal-manual-close').addEventListener('click',   cerrarModalManual);
+  document.getElementById('modal-manual-cancel').addEventListener('click',  cerrarModalManual);
+  document.getElementById('modal-manual-guardar').addEventListener('click', guardarManual);
+  document.getElementById('modal-manual').addEventListener('click', e => {
+    if (e.target === e.currentTarget) cerrarModalManual();
+  });
+  document.getElementById('modal-manual-buscar').addEventListener('input', e => {
+    renderFilasManual(e.target.value);
+  });
+  // Resaltar fila cuando el input tiene valor > 0
+  document.getElementById('body-manual').addEventListener('input', e => {
+    if (!e.target.classList.contains('manual-kg-input')) return;
+    const kg = parseFloat(e.target.value) || 0;
+    e.target.classList.toggle('manual-kg-input--con-valor', kg > 0);
   });
 
   verificarLogisticaActiva().then(activa => {
@@ -202,7 +237,16 @@ function inicializarTabs() {
   });
 }
 
-function cambiarTab(tab) {
+async function cambiarTab(tab) {
+  if (_manualModalAbierto) {
+    const ok = await mostrarConfirmGen(
+      'Salir de la captura manual',
+      '¿Está seguro de que desea salir de la pestaña? Los cambios no guardados se perderán.',
+      'Salir'
+    );
+    if (!ok) return;
+    _cerrarModalForzado();
+  }
   state.tabActiva = tab;
   document.querySelectorAll('.ext-tab').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab)
@@ -266,10 +310,12 @@ async function procesarArchivo(perfil, archivo) {
     const tieneVol  = data.desglose_volumen?.[perfil] && Object.keys(data.desglose_volumen[perfil]).length > 0;
 
     if (res.ok && data.status === 'ok' && (tienePeso || tieneVol)) {
-      state.perfiles[perfil].nombre  = archivo.name;
-      state.perfiles[perfil].datos   = tienePeso ? data.desglose[perfil]         : null;
-      state.perfiles[perfil].volumen = tieneVol  ? data.desglose_volumen[perfil] : null;
-      state.perfiles[perfil].status  = 'cargado';
+      state.perfiles[perfil].nombre       = archivo.name;
+      state.perfiles[perfil].datos        = tienePeso ? data.desglose[perfil]         : null;
+      state.perfiles[perfil].volumen      = tieneVol  ? data.desglose_volumen[perfil] : null;
+      state.perfiles[perfil].status       = 'cargado';
+      state.perfiles[perfil].advertencias = data.advertencias || null;
+      state.fuentesEliminadas.delete(perfil);  // cancela eliminación si el usuario recargó
       state.hayUnsaved = true;
 
       renderPerfilCargado(perfil);
@@ -294,11 +340,18 @@ async function procesarArchivo(perfil, archivo) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function renderPerfilCargado(perfil) {
-  const { nombre, datos, volumen, status } = state.perfiles[perfil];
+  const { nombre, datos, volumen, status, advertencias } = state.perfiles[perfil];
 
   document.getElementById(`upload-${perfil}`).style.display  = 'none';
   document.getElementById(`loaded-${perfil}`).style.display  = 'block';
   document.getElementById(`filename-${perfil}`).textContent  = nombre || '';
+
+  const advCfg = ADV_KEYS[perfil];
+  renderAdvertenciaBanner(
+    perfil,
+    advCfg && advertencias ? (advertencias[advCfg.total] || 0) : 0,
+    advCfg && advertencias ? advertencias[advCfg.faltantes]    : []
+  );
 
   const statusEl = document.getElementById(`status-${perfil}`);
   statusEl.className = `ext-perfil-status ${status === 'guardado' ? 'status-guardado' : 'status-cargado'}`;
@@ -361,13 +414,15 @@ window.eliminarPerfil = function (perfil) {
   const nombre = perfil.toUpperCase();
   if (!confirm(`¿Eliminar los datos de ${nombre}?\nEsta acción se aplicará al guardar.`)) return;
 
-  state.perfiles[perfil] = { nombre: null, datos: null, volumen: null, status: 'vacio' };
+  state.perfiles[perfil] = { nombre: null, datos: null, volumen: null, status: 'vacio', advertencias: null };
+  state.fuentesEliminadas.add(perfil);
   state.hayUnsaved = true;
 
   document.getElementById(`loaded-${perfil}`).style.display = 'none';
   document.getElementById(`upload-${perfil}`).style.display  = 'block';
   document.getElementById(`body-${perfil}`).innerHTML = '';
   document.getElementById(`file_${perfil}`).value     = '';
+  renderAdvertenciaBanner(perfil, 0, []);
 
   actualizarDotTab(perfil);
   recalcularConsolidados();
@@ -559,8 +614,9 @@ window.guardarDatos = async function () {
   const hayPeso       = state.consolidadoPeso    && Object.keys(state.consolidadoPeso).length    > 0;
   const hayVol        = state.consolidadoVolumen && Object.keys(state.consolidadoVolumen).length > 0;
   const hayMayoristas = state.mayoristas.consolidado !== null;
+  const hayEliminadas = state.fuentesEliminadas.size > 0;
 
-  if (!hayPeso && !hayVol && !hayMayoristas) {
+  if (!hayPeso && !hayVol && !hayMayoristas && !hayEliminadas) {
     mostrarToast('No hay datos para guardar.', 'error');
     return;
   }
@@ -572,6 +628,26 @@ window.guardarDatos = async function () {
   Loader.show('Guardando Datos', MSG_EXT.guardar);
 
   try {
+    // ── Eliminar fuentes removidas de MongoDB y limpiar asignaciones ──────
+    if (hayEliminadas) {
+      for (const fuente of state.fuentesEliminadas) {
+        try {
+          const resDel = await fetch('/extraccion/eliminar-fuente', {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify({ fuente }),
+          });
+          const dtDel = await resDel.json();
+          if (!resDel.ok || dtDel.status !== 'ok') {
+            console.warn(`[eliminar-fuente] ${fuente}:`, dtDel.mensaje || 'error desconocido');
+          }
+        } catch (errDel) {
+          console.warn(`[eliminar-fuente] ${fuente}:`, errDel);
+        }
+      }
+      state.fuentesEliminadas.clear();
+    }
+
     // ── Guardar Tiendas Lores ──────────────────────────────────────────────
     if (hayPeso || hayVol) {
       const payload = {
@@ -633,7 +709,12 @@ window.guardarDatos = async function () {
 
     state.hayUnsaved = false;
     actualizarUnsavedIndicator();
-    mostrarToast('Datos guardados correctamente', 'ok');
+    mostrarToast(
+      (hayPeso || hayVol || hayMayoristas)
+        ? 'Datos guardados correctamente'
+        : 'Fuentes eliminadas. Regenera las rutas VRP para actualizar las asignaciones.',
+      'ok'
+    );
 
   } catch (err) {
     console.error(err);
@@ -759,9 +840,11 @@ async function procesarArchivoMayoristas(archivo) {
     const data = await res.json();
 
     if (res.ok && data.status === 'ok' && Array.isArray(data.consolidado) && data.consolidado.length > 0) {
-      state.mayoristas.nombre      = archivo.name;
-      state.mayoristas.consolidado = data.consolidado;
-      state.mayoristas.status      = 'cargado';
+      state.mayoristas.nombre       = archivo.name;
+      state.mayoristas.consolidado  = data.consolidado;
+      state.mayoristas.status       = 'cargado';
+      state.mayoristas.advertencias = data.advertencias || null;
+      state.fuentesEliminadas.delete('mayoristas');  // cancela eliminación si el usuario recargó
       state.hayUnsaved = true;
 
       renderMayoristasCargado();
@@ -781,11 +864,17 @@ async function procesarArchivoMayoristas(archivo) {
 }
 
 function renderMayoristasCargado() {
-  const { nombre, consolidado, status } = state.mayoristas;
+  const { nombre, consolidado, status, advertencias } = state.mayoristas;
 
   document.getElementById('upload-mayoristas').style.display  = 'none';
   document.getElementById('loaded-mayoristas').style.display  = 'block';
   document.getElementById('filename-mayoristas').textContent  = nombre || '';
+
+  renderAdvertenciaBanner(
+    'mayoristas',
+    advertencias ? (advertencias.total_codigos_mayoristas || 0) : 0,
+    advertencias ? advertencias.codigos_no_encontrados        : []
+  );
 
   const statusEl = document.getElementById('status-mayoristas');
   statusEl.className = `ext-perfil-status ${status === 'guardado' ? 'status-guardado' : 'status-cargado'}`;
@@ -799,12 +888,14 @@ function renderMayoristasCargado() {
   let pesoTotal = 0;
   for (const cliente of (consolidado || [])) {
     pesoTotal += cliente.peso_total_kg;
+    const doc = cliente.documento || String(cliente.codigo);
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td><strong>${doc}</strong></td>
       <td>${cliente.codigo}</td>
       <td>${cliente.nombre}</td>
       <td class="col-total"><strong>${Math.round(cliente.peso_total_kg).toLocaleString("es-MX")} kg</strong></td>
-      <td><button class="btn-may-eliminar" data-codigo="${cliente.codigo}" data-nombre="${cliente.nombre.replace(/"/g,'&quot;')}" title="Quitar de la lista">✕</button></td>`;
+      <td><button class="btn-may-eliminar" data-doc="${doc}" data-nombre="${cliente.nombre.replace(/"/g,'&quot;')}" title="Quitar de la lista">✕</button></td>`;
     tbody.appendChild(tr);
   }
 
@@ -813,14 +904,14 @@ function renderMayoristasCargado() {
     const trTotal = document.createElement('tr');
     trTotal.className = 'ext-fila-total';
     trTotal.innerHTML = `
-      <td colspan="2"><strong>Total general</strong></td>
+      <td colspan="3"><strong>Total general</strong></td>
       <td class="col-total"><strong>${Math.round(pesoTotal).toLocaleString("es-MX")} kg</strong></td>
       <td></td>`;
     tbody.appendChild(trTotal);
   }
 
   tbody.querySelectorAll('.btn-may-eliminar').forEach(btn => {
-    btn.addEventListener('click', () => eliminarFilaMayorista(Number(btn.dataset.codigo), btn.dataset.nombre));
+    btn.addEventListener('click', () => eliminarFilaMayorista(btn.dataset.doc, btn.dataset.nombre));
   });
 
   actualizarDotTabMayoristas();
@@ -828,11 +919,13 @@ function renderMayoristasCargado() {
   lucide.createIcons();
 }
 
-async function eliminarFilaMayorista(codigo, nombre) {
-  const ok = await mostrarConfirmMay(nombre);
+async function eliminarFilaMayorista(documento, nombre) {
+  const ok = await mostrarConfirmMay(documento || nombre);
   if (!ok) return;
   if (!state.mayoristas.consolidado) return;
-  state.mayoristas.consolidado = state.mayoristas.consolidado.filter(c => c.codigo !== codigo);
+  state.mayoristas.consolidado = state.mayoristas.consolidado.filter(
+    c => (c.documento || String(c.codigo)) !== documento
+  );
   if (state.mayoristas.status === 'guardado') state.mayoristas.status = 'cargado';
   state.hayUnsaved = true;
   renderMayoristasCargado();
@@ -857,13 +950,15 @@ window.recargarMayoristas = function () {
 window.eliminarMayoristas = function () {
   if (!confirm('¿Eliminar los datos de Mayoristas?\nEsta acción se aplicará al guardar.')) return;
 
-  state.mayoristas = { nombre: null, consolidado: null, status: 'vacio' };
+  state.mayoristas = { nombre: null, consolidado: null, status: 'vacio', advertencias: null };
+  state.fuentesEliminadas.add('mayoristas');
   state.hayUnsaved = true;
 
   document.getElementById('loaded-mayoristas').style.display = 'none';
   document.getElementById('upload-mayoristas').style.display  = 'block';
   document.getElementById('body-mayoristas').innerHTML        = '';
   document.getElementById('file_mayoristas').value            = '';
+  renderAdvertenciaBanner('mayoristas', 0, []);
 
   actualizarDotTabMayoristas();
   actualizarUI();
@@ -874,8 +969,181 @@ window.eliminarMayoristas = function () {
 // TOAST
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ══════════════════════════════════════════════════════════════════════════════
+// AGREGAR MANUALMENTE
+// ══════════════════════════════════════════════════════════════════════════════
+
+let _manualPerfilActivo  = null;
+let _sucursalesCache     = null;
+let _manualKgMap         = {};  // { nombre_base → kg } — persiste entre cambios de filtro
+let _manualModalAbierto  = false;
+let _genConfirmResolve   = null;
+
+function _onBeforeUnload(e) {
+  e.preventDefault();
+  e.returnValue = '';
+}
+
+function mostrarConfirmGen(titulo, mensaje, textoOk = 'Confirmar') {
+  document.getElementById('ext-confirm-gen-titulo').textContent = titulo;
+  document.getElementById('ext-confirm-gen-msg').textContent   = mensaje;
+  document.getElementById('ext-confirm-gen-ok').textContent    = textoOk;
+  document.getElementById('ext-confirm-gen-overlay').classList.remove('hidden');
+  return new Promise(resolve => { _genConfirmResolve = resolve; });
+}
+
+function _cerrarModalForzado() {
+  document.getElementById('modal-manual').classList.add('hidden');
+  _manualModalAbierto = false;
+  _manualPerfilActivo = null;
+  window.removeEventListener('beforeunload', _onBeforeUnload);
+  document.querySelector('.ext-tabs-bar')?.classList.remove('ext-tabs-bar--bloqueado');
+}
+
+// Vuelca los valores actuales del DOM al mapa antes de re-renderizar
+function _syncKgDesdeDOM() {
+  document.querySelectorAll('#body-manual .manual-kg-input').forEach(inp => {
+    const nombre = decodeURIComponent(inp.dataset.nombre);
+    _manualKgMap[nombre] = Math.round(parseFloat(inp.value) || 0);
+  });
+}
+
+window.abrirModalManual = async function (perfil) {
+  _manualPerfilActivo = perfil;
+  const label = { icg: 'ICG', proalmex: 'Proalmex', bimbo: 'Bimbo' }[perfil] || perfil.toUpperCase();
+
+  // Inicializar el mapa con datos ya existentes en el estado (para re-edición)
+  const existente = state.perfiles[perfil]?.datos || {};
+  _manualKgMap = Object.fromEntries(
+    Object.entries(existente).map(([nom, info]) => [nom, info.kg || 0])
+  );
+
+  document.getElementById('modal-manual-titulo').textContent = `Agregar manualmente — ${label}`;
+  document.getElementById('modal-manual-buscar').value       = '';
+  document.getElementById('body-manual').innerHTML =
+    '<tr><td colspan="3" class="manual-loading">Cargando sucursales…</td></tr>';
+  document.getElementById('modal-manual').classList.remove('hidden');
+  _manualModalAbierto = true;
+  window.addEventListener('beforeunload', _onBeforeUnload);
+  document.querySelector('.ext-tabs-bar')?.classList.add('ext-tabs-bar--bloqueado');
+
+  if (!_sucursalesCache) {
+    try {
+      const res  = await fetch('/extraccion/sucursales');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (!Array.isArray(data.sucursales)) throw new Error('Respuesta inesperada del servidor');
+      _sucursalesCache = data.sucursales;
+      console.info(`[manual] ${_sucursalesCache.length} sucursales cargadas`);
+    } catch (err) {
+      console.error('[sucursalesCache]', err);
+      _sucursalesCache = null;  // null → reintentará la próxima vez
+      document.getElementById('body-manual').innerHTML =
+        `<tr><td colspan="3" class="manual-loading" style="color:#dc2626">
+          Error al cargar sucursales: ${err.message}
+         </td></tr>`;
+      return;
+    }
+  }
+
+  renderFilasManual('');
+  lucide.createIcons();
+};
+
+function renderFilasManual(query) {
+  if (!Array.isArray(_sucursalesCache)) return;
+  _syncKgDesdeDOM();
+
+  const q     = query.toLowerCase().trim();
+  const tbody = document.getElementById('body-manual');
+  tbody.innerHTML = '';
+
+  const lista = q
+    ? _sucursalesCache.filter(s => (s.nombre_base || '').toLowerCase().includes(q))
+    : _sucursalesCache;
+
+  if (!lista.length) {
+    tbody.innerHTML = '<tr><td colspan="3" class="manual-loading">Sin resultados</td></tr>';
+    return;
+  }
+
+  for (const suc of lista) {
+    const nombre   = suc.nombre_base || '';
+    const idSuc    = suc.num_tienda  ?? 'N/A';
+    const kgActual = _manualKgMap[nombre] ?? 0;
+    const tr = document.createElement('tr');
+    const inputClass = `manual-kg-input${kgActual > 0 ? ' manual-kg-input--con-valor' : ''}`;
+    tr.innerHTML = `
+      <td class="manual-id-cell">${idSuc}</td>
+      <td>${nombre}</td>
+      <td>
+        <div class="manual-kg-wrap">
+          <input type="number" class="${inputClass}"
+                 min="0" step="1" value="${kgActual || ''}"
+                 placeholder="0"
+                 data-nombre="${encodeURIComponent(nombre)}"
+                 data-id-suc="${idSuc}">
+          <span class="manual-kg-unit">kg</span>
+        </div>
+      </td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function cerrarModalManual() {
+  const ok = await mostrarConfirmGen(
+    'Salir de la captura manual',
+    '¿Está seguro de que desea salir de la pestaña? Los cambios no guardados se perderán.',
+    'Salir'
+  );
+  if (!ok) return;
+  _cerrarModalForzado();
+}
+
+async function guardarManual() {
+  if (!_manualPerfilActivo || !Array.isArray(_sucursalesCache)) return;
+  _syncKgDesdeDOM();
+
+  const perfil = _manualPerfilActivo;
+  const datos  = {};
+
+  for (const [nombre, kg] of Object.entries(_manualKgMap)) {
+    if (kg <= 0) continue;
+    const suc   = _sucursalesCache.find(s => s.nombre_base === nombre);
+    const idRaw = suc?.num_tienda ?? 'N/A';
+    datos[nombre] = {
+      id_sucursal: isNaN(Number(idRaw)) ? idRaw : Number(idRaw),
+      kg,
+    };
+  }
+
+  if (Object.keys(datos).length === 0) {
+    mostrarToast('Ingresa al menos un peso mayor a 0.', 'error');
+    return;
+  }
+
+  const ok = await mostrarConfirmGen(
+    'Guardar datos manuales',
+    '¿Está seguro de que desea guardar los cambios realizados?',
+    'Guardar'
+  );
+  if (!ok) return;
+
+  state.perfiles[perfil].datos   = datos;
+  state.perfiles[perfil].volumen = null;
+  state.perfiles[perfil].nombre  = '(manual)';
+  state.perfiles[perfil].status  = 'cargado';
+  state.hayUnsaved = true;
+
+  _cerrarModalForzado();
+  renderPerfilCargado(perfil);
+  recalcularConsolidados();
+  actualizarUI();
+  mostrarToast(`${perfil.toUpperCase()} cargado manualmente`, 'ok');
+}
+
 function mostrarToast(msg, tipo = 'info') {
-  const colores = { ok: '#16a34a', error: '#dc2626', info: '#0056b3' };
+  const colores = { ok: '#16a34a', error: '#dc2626', info: '#0056b3', warn: '#d97706' };
 
   let toast = document.querySelector('.ext-toast');
   if (!toast) {
@@ -889,5 +1157,40 @@ function mostrarToast(msg, tipo = 'info') {
   toast.textContent      = msg;
 
   clearTimeout(toast._timer);
-  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, 3500);
+  // Las advertencias con listas de claves/códigos necesitan más tiempo de lectura.
+  const duracion = tipo === 'warn' ? 9000 : 3500;
+  toast._timer = setTimeout(() => { toast.style.opacity = '0'; }, duracion);
+}
+
+/**
+ * Pinta de forma persistente en la interfaz (no como notificación) el banner
+ * "encontrados/total productos procesados" del perfil indicado, y si hay
+ * elementos sin localizar agrega "Códigos o claves SAE no encontrados: …".
+ * perfil debe corresponder a un banner existente en el HTML (#advertencia-<perfil>).
+ */
+function renderAdvertenciaBanner(perfil, total, faltantes) {
+  const banner    = document.getElementById(`advertencia-${perfil}`);
+  const resumenEl = document.getElementById(`advertencia-${perfil}-resumen`);
+  const listaEl   = document.getElementById(`advertencia-${perfil}-lista`);
+  if (!banner || !resumenEl || !listaEl) return;
+
+  if (!total) {
+    banner.style.display = 'none';
+    return;
+  }
+
+  faltantes = faltantes || [];
+  const encontrados     = total - faltantes.length;
+  const tieneFaltantes  = faltantes.length > 0;
+
+  banner.style.display = 'flex';
+  banner.classList.toggle('ext-advertencia-banner--ok', !tieneFaltantes);
+  resumenEl.textContent = `${encontrados}/${total} productos procesados`;
+  listaEl.textContent   = tieneFaltantes
+    ? `Códigos o claves SAE no encontrados: ${faltantes.join(', ')}`
+    : '';
+
+  const icon = banner.querySelector('[data-lucide]');
+  if (icon) icon.setAttribute('data-lucide', tieneFaltantes ? 'alert-triangle' : 'check-circle-2');
+  lucide.createIcons();
 }

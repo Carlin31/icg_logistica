@@ -14,6 +14,8 @@ from logic.historico_logic import (
 from logic.configuracion_logic import (
     obtener_configuracion, guardar_configuracion,
     listar_productos,  obtener_producto,  agregar_producto,  editar_producto,  eliminar_producto,
+    listar_productos_proalmex, obtener_producto_proalmex, agregar_producto_proalmex,
+    editar_producto_proalmex, eliminar_producto_proalmex,
     listar_sucursales, obtener_sucursal, agregar_sucursal, editar_sucursal, eliminar_sucursal,
     listar_vehiculos,  obtener_vehiculo,  agregar_vehiculo,  editar_vehiculo,  eliminar_vehiculo,
     toggle_activo_vehiculo,
@@ -94,6 +96,43 @@ def put_producto(producto_id):
 @configuracion_bp.route("/productos/<producto_id>", methods=["DELETE"])
 def delete_producto(producto_id):
     return _respuesta(eliminar_producto(producto_id))
+
+
+@configuracion_bp.route("/productos-proalmex", methods=["GET"])
+def get_productos_proalmex():
+    return jsonify(listar_productos_proalmex(
+        request.args.get("nombre", ""),
+        request.args.get("fecha",  ""),
+    ))
+
+
+@configuracion_bp.route("/productos-proalmex/<producto_id>", methods=["GET"])
+def get_producto_proalmex(producto_id):
+    doc = obtener_producto_proalmex(producto_id)
+    return jsonify(doc) if doc else (jsonify({"error": "No encontrado"}), 404)
+
+
+@configuracion_bp.route("/productos-proalmex", methods=["POST"])
+def post_producto_proalmex():
+    datos, err = _json_o_400()
+    if err:
+        return err
+    resultado = agregar_producto_proalmex(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@configuracion_bp.route("/productos-proalmex/<producto_id>", methods=["PUT"])
+def put_producto_proalmex(producto_id):
+    datos, err = _json_o_400()
+    if err:
+        return err
+    return _respuesta(editar_producto_proalmex(producto_id, datos))
+
+
+@configuracion_bp.route("/productos-proalmex/<producto_id>", methods=["DELETE"])
+def delete_producto_proalmex(producto_id):
+    return _respuesta(eliminar_producto_proalmex(producto_id))
 
 
 # ── Sucursales ─────────────────────────────────────────────────

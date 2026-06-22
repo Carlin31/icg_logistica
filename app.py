@@ -9,16 +9,20 @@ _env_path = Path(__file__).parent / ".env"
 if _env_path.exists():
     load_dotenv(_env_path)
 
-from flask import Flask, redirect, url_for, session
+from flask import Flask, redirect, url_for, session, request, jsonify
 from config import Config
 from db import close_db
 
+from router.auth_router import auth_bp
 from router.menu_router import menu_bp
 from router.configuracion_router import configuracion_bp
 from router.extraccion_router import extraccion_bp
 from router.asignacion_router import asignacion_bp
 from router.modificacion_router import modificacion_bp
 from router.pdf_router import pdf_bp
+
+# Endpoints accesibles sin sesión iniciada.
+_ENDPOINTS_PUBLICOS = {"auth.login", "auth.logout", "static"}
 
 
 def create_app():
@@ -29,12 +33,31 @@ def create_app():
     Config.validar()
 
     # ── Blueprints ─────────────────────────────────────────────────────────
+    app.register_blueprint(auth_bp,           url_prefix="/auth")
     app.register_blueprint(menu_bp,           url_prefix="/")
     app.register_blueprint(configuracion_bp,  url_prefix="/configuracion")
     app.register_blueprint(extraccion_bp,     url_prefix="/extraccion")
     app.register_blueprint(asignacion_bp,     url_prefix="/asignacion")
     app.register_blueprint(modificacion_bp,   url_prefix="/modificacion")
     app.register_blueprint(pdf_bp,            url_prefix="/pdf")
+
+    # ── Autenticación: exige sesión de usuario para todo el sistema ────────
+    @app.before_request
+    def _requerir_login():
+        endpoint = request.endpoint
+        if endpoint is None or endpoint in _ENDPOINTS_PUBLICOS:
+            return None
+        if session.get("usuario_id"):
+            return None
+        # Peticiones AJAX/API: responder 401 JSON en vez de redirigir
+        # (un redirect rompería un fetch() que espera JSON).
+        accept = request.headers.get("Accept", "")
+        es_api = request.is_json or request.method != "GET" or (
+            "application/json" in accept and "text/html" not in accept
+        )
+        if es_api:
+            return jsonify({"status": "error", "mensaje": "Sesión no iniciada o expirada"}), 401
+        return redirect(url_for("auth.login", next=request.path))
 
     # ── Context processor: perfil activo disponible en todos los templates ───
     @app.context_processor
@@ -46,6 +69,7 @@ def create_app():
             "perfil_activo":  bool(lid),
             "perfil_slug":    slug,
             "perfil_nombre":  nombre,
+            "usuario_nombre": session.get("usuario_nombre", ""),
         }
 
     # ── Cierre de conexión MongoDB al final de cada contexto ───────────────

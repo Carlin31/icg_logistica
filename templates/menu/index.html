@@ -59,6 +59,12 @@
 
   <!-- ── Derecha: Botón de navegación ─────────────────────────── -->
   <div class="header-actions">
+    {% if session.get('usuario_nombre') %}
+    <a href="{{ url_for('auth.logout') }}" class="usuario-badge" title="Cerrar sesión ({{ session.get('usuario_nombre') }})">
+        <span class="usuario-badge-nombre">{{ session.get('usuario_nombre') }}</span>
+        <span class="usuario-badge-salir">Salir</span>
+    </a>
+    {% endif %}
     <button
       class="btn-nav-toggle"
       id="btn-nav-toggle"

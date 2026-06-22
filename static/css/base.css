@@ -3,6 +3,9 @@
    Estilos base del sistema — Reset, layout y header compartido
    ================================================================ */
 
+/* ── Zoom global de la aplicación ─────────────────────────────── */
+body { zoom: 0.8; }
+
 /* ── Tokens de diseño compartidos ──────────────────────────────── */
 :root {
   /* ── Paleta de marca (header y fondos profundos) ── */
@@ -330,6 +333,37 @@ body {
 }
 @media (max-width: 640px) {
   .perfil-badge { display: none; }
+}
+
+.usuario-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: .4rem;
+  padding: .3rem .65rem;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 20px;
+  text-decoration: none;
+  transition: background .15s, border-color .15s;
+}
+.usuario-badge:hover {
+  background: rgba(255,255,255,.16);
+  border-color: rgba(255,255,255,.3);
+}
+.usuario-badge-nombre {
+  font-size: .72rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.88);
+  white-space: nowrap;
+}
+.usuario-badge-salir {
+  font-size: .66rem;
+  font-weight: 600;
+  color: #fca5a5;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .usuario-badge-nombre { display: none; }
 }
 
 /* ════════════════════════════════════════════════════════════════

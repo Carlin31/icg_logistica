@@ -731,6 +731,93 @@ input:checked + .slider:before { transform: translateX(16px); }
   margin-top: 2px;
 }
 
+/* ── Filtro por día — sección lista ── */
+.hist-filtro-dia {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+.hist-filtro-dia-btn {
+  background: var(--blanco);
+  border: 1.5px solid var(--gris-borde);
+  color: var(--gris-texto);
+  border-radius: var(--radio-full);
+  padding: 4px 13px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .13s, border-color .13s, color .13s;
+  white-space: nowrap;
+}
+.hist-filtro-dia-btn:hover {
+  border-color: var(--azul);
+  color: var(--azul);
+  background: var(--azul-bg);
+}
+.hist-filtro-dia-btn.active {
+  background: var(--azul);
+  border-color: var(--azul);
+  color: var(--blanco);
+}
+
+/* ── Filtro por día — sidebar del mapa ── */
+.hist-dia-filtros {
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--gris-borde);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  background: var(--gris-bg-alt);
+  flex-shrink: 0;
+}
+.hist-dia-filtros.hidden { display: none; }
+.hist-dia-btn {
+  background: var(--blanco);
+  border: 1.5px solid var(--gris-borde);
+  color: var(--gris-texto);
+  border-radius: var(--radio-full);
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background .13s, border-color .13s, color .13s;
+  white-space: nowrap;
+}
+.hist-dia-btn:hover {
+  border-color: var(--azul);
+  color: var(--azul);
+  background: var(--azul-bg);
+}
+.hist-dia-btn.active {
+  background: var(--azul);
+  border-color: var(--azul);
+  color: var(--blanco);
+}
+
+/* ── hist-item oculto por filtro ── */
+.hist-item.filtro-oculto { display: none; }
+
+/* ── Chips de días dentro del hist-item ── */
+.hist-item-dias {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.hist-dia-chip {
+  display: inline-block;
+  background: var(--azul-bg);
+  border: 1px solid var(--azul-borde);
+  color: var(--azul-dark);
+  border-radius: var(--radio-full);
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
 /* ── Campo calculado automáticamente ── */
 .config-field-readonly {
   background: var(--gris-bg);

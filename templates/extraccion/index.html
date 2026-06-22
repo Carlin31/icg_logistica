@@ -156,6 +156,10 @@
       <label class="ext-btn-upload" for="file_icg">Seleccionar archivo ICG</label>
       <input type="file" id="file_icg" accept=".xlsx,.xls" style="display:none;">
       <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+      <div class="ext-upload-sep"><span>o</span></div>
+      <button type="button" class="ext-btn-manual" onclick="abrirModalManual('icg')">
+        <i data-lucide="pencil-line"></i> Agregar manualmente
+      </button>
     </div>
 
     <div class="ext-perfil-loaded" id="loaded-icg" style="display:none;">
@@ -174,6 +178,15 @@
           </button>
         </div>
       </div>
+
+      <div class="ext-advertencia-banner" id="advertencia-icg" style="display:none;">
+        <i data-lucide="alert-triangle"></i>
+        <div class="ext-advertencia-texto">
+          <strong id="advertencia-icg-resumen"></strong>
+          <span id="advertencia-icg-lista"></span>
+        </div>
+      </div>
+
       <div class="table-responsive">
         <table class="ext-tabla ext-tabla--perfil" id="tabla-icg">
           <thead>
@@ -202,6 +215,10 @@
       <label class="ext-btn-upload" for="file_proalmex">Seleccionar archivo Proalmex</label>
       <input type="file" id="file_proalmex" accept=".xlsx,.xls" style="display:none;">
       <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+      <div class="ext-upload-sep"><span>o</span></div>
+      <button type="button" class="ext-btn-manual" onclick="abrirModalManual('proalmex')">
+        <i data-lucide="pencil-line"></i> Agregar manualmente
+      </button>
     </div>
 
     <div class="ext-perfil-loaded" id="loaded-proalmex" style="display:none;">
@@ -220,6 +237,15 @@
           </button>
         </div>
       </div>
+
+      <div class="ext-advertencia-banner" id="advertencia-proalmex" style="display:none;">
+        <i data-lucide="alert-triangle"></i>
+        <div class="ext-advertencia-texto">
+          <strong id="advertencia-proalmex-resumen"></strong>
+          <span id="advertencia-proalmex-lista"></span>
+        </div>
+      </div>
+
       <div class="table-responsive">
         <table class="ext-tabla ext-tabla--perfil" id="tabla-proalmex">
           <thead>
@@ -248,6 +274,10 @@
       <label class="ext-btn-upload" for="file_bimbo">Seleccionar archivo Bimbo</label>
       <input type="file" id="file_bimbo" accept=".xlsx,.xls" style="display:none;">
       <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
+      <div class="ext-upload-sep"><span>o</span></div>
+      <button type="button" class="ext-btn-manual" onclick="abrirModalManual('bimbo')">
+        <i data-lucide="pencil-line"></i> Agregar manualmente
+      </button>
     </div>
 
     <div class="ext-perfil-loaded" id="loaded-bimbo" style="display:none;">
@@ -298,7 +328,7 @@
       <input type="file" id="file_mayoristas" accept=".xlsx,.xls" style="display:none;">
       <p class="ext-upload-zone__formats">Formatos aceptados: .xlsx · .xls</p>
       <p class="ext-upload-zone__hint">
-        El archivo debe contener las columnas <strong>Cliente</strong> y <strong>Peso total</strong>.
+        El archivo debe contener las columnas <strong>Documento</strong>, <strong>Cliente</strong> y <strong>Peso total</strong>.
       </p>
     </div>
 
@@ -324,13 +354,22 @@
         Peso total consolidado por cliente mayorista. Haz clic en los encabezados para ordenar.
       </p>
 
+      <div class="ext-advertencia-banner" id="advertencia-mayoristas" style="display:none;">
+        <i data-lucide="alert-triangle"></i>
+        <div class="ext-advertencia-texto">
+          <strong id="advertencia-mayoristas-resumen"></strong>
+          <span id="advertencia-mayoristas-lista"></span>
+        </div>
+      </div>
+
       <div class="table-responsive">
         <table class="ext-tabla ext-tabla--mayoristas" id="tabla-mayoristas">
           <thead>
             <tr>
-              <th class="sortable" data-col="0">Código <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
-              <th class="sortable" data-col="1">Cliente <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
-              <th class="sortable col-total" data-col="2">Peso total (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable" data-col="0">Documento <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable" data-col="1">Código <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable" data-col="2">Cliente <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
+              <th class="sortable col-total" data-col="3">Peso total (kg) <i data-lucide="chevrons-up-down" class="sort-icon"></i></th>
               <th></th>
             </tr>
           </thead>
@@ -373,6 +412,43 @@
 
 </div><!-- /#extraccion-container -->
 
+<!-- Modal: Agregar manualmente -->
+<div id="modal-manual" class="ext-modal-overlay hidden">
+  <div class="ext-modal-box">
+    <div class="ext-modal-header">
+      <div>
+        <h3 id="modal-manual-titulo">Agregar manualmente</h3>
+        <p class="ext-modal-subtitulo">Captura el peso por sucursal. Los valores en 0 se omiten.</p>
+      </div>
+      <button class="ext-modal-close" id="modal-manual-close">&times;</button>
+    </div>
+    <div class="ext-modal-search">
+      <input type="text" id="modal-manual-buscar" class="ext-modal-input-buscar"
+             placeholder="Buscar sucursal…" autocomplete="off">
+    </div>
+    <div class="ext-modal-body">
+      <div class="table-responsive">
+        <table class="ext-tabla ext-tabla--manual" id="tabla-manual">
+          <thead>
+            <tr>
+              <th style="width:70px">ID</th>
+              <th>Sucursal</th>
+              <th style="width:150px">Peso (kg)</th>
+            </tr>
+          </thead>
+          <tbody id="body-manual"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="ext-modal-footer">
+      <button class="ext-btn-secondary" id="modal-manual-cancel">Cancelar</button>
+      <button class="ext-btn-confirmar" id="modal-manual-guardar">
+        <i data-lucide="save"></i> Guardar
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Confirm overlay: quitar mayorista de la lista -->
 <div id="ext-confirm-overlay" class="ext-confirm-overlay hidden">
   <div class="ext-confirm-box">
@@ -382,6 +458,21 @@
     <div class="ext-confirm-footer">
       <button id="ext-confirm-cancel" class="ext-btn-secondary">Cancelar</button>
       <button id="ext-confirm-ok"     class="ext-btn-eliminar">Quitar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm overlay genérico: captura manual -->
+<div id="ext-confirm-gen-overlay" class="ext-confirm-overlay hidden">
+  <div class="ext-confirm-box">
+    <div class="ext-confirm-icon ext-confirm-icon--warn">
+      <i data-lucide="alert-triangle"></i>
+    </div>
+    <h3 id="ext-confirm-gen-titulo"></h3>
+    <p  id="ext-confirm-gen-msg"></p>
+    <div class="ext-confirm-footer">
+      <button id="ext-confirm-gen-cancel" class="ext-btn-secondary">Cancelar</button>
+      <button id="ext-confirm-gen-ok"     class="ext-btn-confirmar"></button>
     </div>
   </div>
 </div>

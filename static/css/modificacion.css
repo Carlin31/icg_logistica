@@ -4,15 +4,15 @@
 .mod-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
+  align-items: center;
   flex-wrap: wrap;
-  gap: 16px;
-  margin-bottom: 16px;
+  gap: 8px;
+  margin-bottom: 6px;
 }
-.mod-header h1 { margin: 0; font-size: 1.35rem; }
+.mod-header h1 { margin: 0 0 1px; font-size: 1.2rem; line-height: 1.2; }
 .mod-subtitulo {
-  margin: 4px 0 0;
-  font-size: 0.82rem;
+  margin: 0;
+  font-size: 0.78rem;
   color: var(--texto-sub, #6b7280);
 }
 .mod-header-right {
@@ -138,11 +138,12 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 18px;
+  padding: 7px 14px;
   background: #eff6ff;
   border-bottom: 1px solid #bfdbfe;
   font-size: 0.78rem;
   color: #1e40af;
+  flex-shrink: 0;
 }
 .spinner-sm {
   width: 14px; height: 14px;
@@ -248,21 +249,29 @@
 /* ── Navegador de rutas ──────────────────────────────────── */
 .nav-rutas {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 16px;
-  padding-bottom: 16px;
+  gap: 7px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
   border-bottom: 1px solid var(--borde, #e2e8f0);
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+  -webkit-overflow-scrolling: touch;
 }
+.nav-rutas::-webkit-scrollbar { height: 3px; }
+.nav-rutas::-webkit-scrollbar-track { background: transparent; }
+.nav-rutas::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
 .nav-ruta-btn {
   position: relative;
   border: 2px solid var(--borde, #e2e8f0);
   border-radius: 8px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   background: #fff;
   cursor: pointer;
   transition: all 0.15s ease;
-  min-width: 120px;
+  min-width: 110px;
+  flex-shrink: 0;
   text-align: left;
 }
 .nav-ruta-btn:hover { border-color: #93c5fd; background: #f8fafc; }
@@ -312,8 +321,8 @@
 /* ── Panel principal ─────────────────────────────────────── */
 .panel-principal {
   display: grid;
-  grid-template-columns: clamp(260px, 35%, 340px) 1fr;
-  gap: 16px;
+  grid-template-columns: clamp(240px, 27%, 300px) 1fr;
+  gap: 14px;
   align-items: start;
 }
 
@@ -325,20 +334,33 @@
   border: 1px solid var(--borde, #e2e8f0);
   display: flex;
   flex-direction: column;
-  /* Sticky: se ancla justo bajo el header y ocupa todo el espacio restante
-     del viewport, invariante al zoom del navegador. */
   position: sticky;
   top: var(--header-h);
   height: calc(100vh - var(--header-h));
   height: calc(100dvh - var(--header-h));
   overflow: hidden;
 }
+
+/* Área scrollable central: ocupa todo el espacio entre header y botones */
+.panel-izq-scroll {
+  flex: 1 1 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+.panel-izq-scroll::-webkit-scrollbar { width: 4px; }
+.panel-izq-scroll::-webkit-scrollbar-track { background: transparent; }
+.panel-izq-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+.panel-izq-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 .panel-izq-header {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px 12px;
+  gap: 5px;
+  padding: 7px 14px 6px;
   border-bottom: 1px solid var(--borde, #e2e8f0);
+  flex-shrink: 0;
 }
 .panel-izq-actions {
   display: flex;
@@ -354,7 +376,7 @@
 .meta-item { display: inline-flex; align-items: center; gap: 4px; }
 
 /* ── Tipo badge ──────────────────────────────────────────── */
-.tipo-badge-wrap { padding: 6px 18px; border-bottom: 1px solid var(--borde, #e2e8f0); }
+.tipo-badge-wrap { padding: 4px 14px; border-bottom: 1px solid var(--borde, #e2e8f0); flex-shrink: 0; }
 .tipo-badge {
   display: inline-flex; align-items: center; gap: 5px;
   font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
@@ -369,8 +391,9 @@
   display: grid; grid-template-columns: repeat(4, 1fr);
   gap: 1px; background: var(--borde, #e2e8f0);
   border-bottom: 1px solid var(--borde, #e2e8f0);
+  flex-shrink: 0;
 }
-.tiempo-celda { background: #fff; padding: 10px 8px; text-align: center; }
+.tiempo-celda { background: #fff; padding: 5px 6px; text-align: center; }
 .tiempo-celda .t-label {
   font-size: 0.65rem; text-transform: uppercase;
   letter-spacing: 0.04em; color: var(--texto-sub, #94a3b8); margin-bottom: 3px;
@@ -379,7 +402,7 @@
 
 /* ── Indicadores ─────────────────────────────────────────── */
 #zona-indicadores { flex-shrink: 0; }
-.cap-bar-wrap { padding: 10px 18px; border-bottom: 1px solid var(--borde, #e2e8f0); }
+.cap-bar-wrap { padding: 5px 14px; border-bottom: 1px solid var(--borde, #e2e8f0); }
 .cap-bar-label {
   display: flex; justify-content: space-between;
   font-size: 0.7rem; color: var(--texto-sub, #64748b); margin-bottom: 4px;
@@ -391,13 +414,132 @@
 .cap-bar-fill.rojo    { background: var(--rojo); }
 
 .hora-regreso {
-  padding: 8px 18px; font-size: 0.8rem;
+  padding: 4px 14px; font-size: 0.78rem;
   border-bottom: 1px solid var(--borde, #e2e8f0);
   display: flex; align-items: center; gap: 8px;
 }
 .badge-hora { font-weight: 700; padding: 2px 8px; border-radius: 4px; font-size: 0.78rem; }
 .badge-hora.ok    { background: #dcfce7; color: #166534; }
 .badge-hora.tarde { background: #fee2e2; color: #991b1b; }
+
+/* ── Zona alternativas (contenedor scrollable) ───────────── */
+#zona-alternativas {
+  padding: 0 14px;
+}
+
+/* ── Selector de ruta (recomendada / personalizada) ─────── */
+.selector-ruta-panel { margin: 7px 0 5px; }
+.selector-ruta-titulo {
+  font-size: 0.68rem; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px;
+}
+.selector-ruta-opciones { display: flex; flex-direction: column; gap: 4px; }
+.selector-ruta-opcion {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 6px 9px; border-radius: 7px;
+  border: 2px solid #e2e8f0; cursor: pointer;
+  background: #f8fafc; transition: background 0.15s, border-color 0.15s;
+  user-select: none;
+}
+.selector-ruta-opcion:hover { background: #f1f5f9; border-color: #cbd5e1; }
+.selector-ruta-opcion.opcion-activa.opcion-rec { background: #eff6ff; border-color: #2563eb; }
+.selector-ruta-opcion.opcion-activa.opcion-cust { background: #fefce8; border-color: #f59e0b; }
+.opcion-radio { flex-shrink: 0; margin-top: 1px; }
+.opcion-info { flex: 1; min-width: 0; }
+.opcion-nombre { font-size: 0.8rem; font-weight: 600; color: #1e293b; }
+.opcion-stats { font-size: 0.72rem; color: #64748b; margin-top: 2px; }
+.opcion-stats-hint { font-style: italic; color: #94a3b8; }
+
+/* ── Editor personalización de ruta ─────────────────────── */
+.pers-editor { margin-top: 6px; display: flex; flex-direction: column; gap: 6px; }
+.pers-seccion { display: flex; flex-direction: column; gap: 4px; }
+
+/* Toggle modo edición */
+.pers-modo-toggle {
+  display: flex; gap: 4px;
+}
+.pers-modo-btn {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 8px; border-radius: 6px; border: 1.5px solid #e2e8f0;
+  background: #f8fafc; color: #64748b; font-size: 0.71rem; font-weight: 600;
+  cursor: pointer; transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.pers-modo-btn:hover { background: #f1f5f9; border-color: #cbd5e1; }
+.pers-modo-activo-obl {
+  background: #f0fdf4; border-color: #16a34a; color: #15803d;
+}
+.pers-modo-activo-evit {
+  background: #fff1f2; border-color: #dc2626; color: #dc2626;
+}
+
+/* Instrucciones contextuales */
+.pers-instruccion {
+  font-size: 0.73rem; color: #64748b; padding: 6px 8px;
+  border-radius: 6px;
+}
+.pers-instruccion-obl {
+  background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d;
+}
+.pers-instruccion-evit {
+  background: #fff1f2; border: 1px solid #fecaca; color: #dc2626;
+}
+
+/* Lista de puntos */
+.via-lista { display: flex; flex-direction: column; gap: 4px; }
+.via-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 10px; border-radius: 6px;
+  background: #fff7ed; border: 1px solid #fed7aa; font-size: 0.72rem;
+}
+.via-item-evitar { background: #fff1f2; border-color: #fecaca; }
+.via-numero {
+  width: 18px; height: 18px; border-radius: 50%; background: #16a34a;
+  color: #fff; font-size: 0.65rem; font-weight: 700;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.via-numero-evitar { background: #dc2626; }
+.via-coords { flex: 1; color: #64748b; font-family: monospace; }
+.via-eliminar {
+  background: none; border: none; cursor: pointer; color: #94a3b8; padding: 2px;
+  display: flex; align-items: center;
+}
+.via-eliminar:hover { color: #ef4444; }
+.btn-limpiar-via {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 6px; border: 1px solid #bbf7d0;
+  background: #f0fdf4; color: #15803d; font-size: 0.71rem; font-weight: 600;
+  cursor: pointer;
+}
+.btn-limpiar-via:hover { background: #dcfce7; }
+.btn-limpiar-evitar {
+  border-color: #fecaca; background: #fff1f2; color: #dc2626;
+}
+.btn-limpiar-evitar:hover { background: #fee2e2; }
+.pers-stats {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 0.73rem; color: #92400e; padding: 5px 10px;
+  background: #fffbeb; border-radius: 6px; border: 1px solid #fde68a;
+}
+
+/* Marcadores en mapa */
+.marker-via {
+  width: 22px; height: 22px; border-radius: 4px;
+  background: #16a34a; color: #fff;
+  font-size: 0.65rem; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #15803d; box-shadow: 0 1px 4px rgba(0,0,0,0.25);
+}
+.marker-evitar {
+  width: 22px; height: 22px; border-radius: 50%;
+  background: #dc2626; color: #fff;
+  font-size: 0.65rem; font-weight: 800;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px solid #991b1b; box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+}
+
+/* Cursor crosshair cuando modo personalizado está activo */
+.mapa-personalizar { cursor: crosshair !important; }
+.mapa-personalizar .leaflet-interactive { cursor: crosshair !important; }
 
 /* ── Origen del tiempo (OSRM badge) ─────────────────────── */
 .origen-badge {
@@ -411,12 +553,14 @@
 .origen-badge.pendiente  { background: #f1f5f9; color: #64748b; }
 
 /* ── Lista de sucursales ─────────────────────────────────── */
-.lista-sucursales { flex: 1; overflow-y: auto; padding: 8px; }
+.lista-sucursales {
+  padding: 6px 8px;
+}
 .suc-item {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px; margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 9px; margin-bottom: 2px;
   background: #f8fafc; border: 1px solid transparent;
-  border-radius: 8px; cursor: grab;
+  border-radius: 7px; cursor: grab;
   transition: all 0.15s ease; user-select: none;
 }
 .suc-item:hover { background: #eff6ff; border-color: #bfdbfe; }
@@ -450,7 +594,7 @@
 
 /* ── Acciones de ruta ────────────────────────────────────── */
 .acciones-ruta {
-  display: flex; gap: 8px; padding: 12px 16px;
+  display: flex; gap: 7px; padding: 7px 12px;
   border-top: 1px solid var(--borde, #e2e8f0);
   background: #fafbfc; border-radius: 0 0 10px 10px;
   flex-shrink: 0;
@@ -628,13 +772,10 @@
 ══════════════════════════════════════════════════════════════ */
 .zona-vehiculo {
   border-bottom: 1px solid var(--borde, #e2e8f0);
-  flex-shrink: 1;
-  min-height: 0;
-  overflow-y: auto;
 }
 
 .vehiculo-selector {
-  padding: 10px 16px;
+  padding: 6px 14px;
 }
 
 .vehiculo-selector-label {
@@ -646,7 +787,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: #64748b;
-  margin-bottom: 8px;
+  margin-bottom: 5px;
 }
 .vehiculo-selector-label svg { width: 13px; height: 13px; color: #94a3b8; }
 .veh-actual-nombre {
@@ -666,8 +807,8 @@
 
 /* ── Resumen de utilización actual ───────────────────────────── */
 .veh-resumen-util {
-  margin: 0 0 10px;
-  padding: 10px 12px;
+  margin: 0 0 4px;
+  padding: 5px 10px;
   background: var(--fondo-alt, #f8fafc);
   border: none;
   border-left: 3px solid #22c55e;
@@ -677,18 +818,18 @@
 .veh-resumen-util::before {
   content: "Utilización actual";
   display: block;
-  font-size: 0.65rem;
+  font-size: 0.63rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: #94a3b8;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 .veh-resumen-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 5px;
+  margin-bottom: 3px;
 }
 .veh-resumen-carga {
   font-size: 0.72rem;
@@ -708,11 +849,11 @@
 
 .veh-resumen-bar-track {
   position: relative;
-  height: 6px;
+  height: 5px;
   background: #e2e8f0;
   border-radius: 3px;
   overflow: visible;
-  margin-bottom: 4px;
+  margin-bottom: 3px;
 }
 .veh-resumen-bar-fill {
   height: 100%;
@@ -752,10 +893,12 @@
 .veh-lista {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  max-height: 120px;
+  gap: 4px;
+  max-height: 180px;
   overflow-y: auto;
-  padding: 0 16px 10px;
+  padding: 0 14px 6px;
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
 }
 .veh-lista::-webkit-scrollbar { width: 4px; }
 .veh-lista::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
@@ -763,10 +906,10 @@
 .veh-opcion {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 8px 10px;
+  gap: 3px;
+  padding: 6px 8px;
   border: 1.5px solid var(--borde, #e2e8f0);
-  border-radius: 8px;
+  border-radius: 7px;
   cursor: pointer;
   background: #fff;
   transition: border-color 0.15s, background 0.15s;
@@ -1058,6 +1201,24 @@
   color: #ea580c;
   white-space: nowrap;
 }
+.btn-ver-mas {
+  display: block;
+  width: 100%;
+  margin-top: 4px;
+  padding: 7px 0;
+  background: none;
+  border: 1px dashed #cbd5e1;
+  border-radius: 6px;
+  color: #2563eb;
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.btn-ver-mas:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
 
 /* ── Botón "Exportar CSV" ── */
 .btn-mod-export {
@@ -1085,8 +1246,9 @@
 
 /* ── Selector de día ── */
 .zona-cambio-dia {
-  padding: 0 18px 10px;
+  padding: 0 14px 5px;
   border-bottom: 1px solid var(--borde, #e2e8f0);
+  flex-shrink: 0;
 }
 .mod-dia-row {
   display: flex;
@@ -1222,12 +1384,12 @@
   .mod-header {
     flex-direction: column;
     align-items: stretch;
-    gap: 10px;
+    gap: 8px;
   }
   .mod-header-right {
     display: grid;
     grid-template-columns: 1fr 1fr;
-    gap: 8px;
+    gap: 7px;
     width: 100%;
   }
   .progreso-badge {
@@ -1244,7 +1406,7 @@
   /* ── Layout: columna única, mapa debajo ── */
   .panel-principal {
     grid-template-columns: 1fr !important;
-    gap: 14px;
+    gap: 12px;
   }
 
   /* Panel izquierdo: deja de ser sticky, altura automática */
@@ -1258,21 +1420,28 @@
   /* La lista de paradas recibe su propia altura máxima con scroll */
   .lista-sucursales {
     flex: none;
-    max-height: 45vh;
+    min-height: 60px;
+    max-height: 42vh;
     overflow-y: auto;
+  }
+
+  /* zona-alternativas en tablet: sin max-height, fluye naturalmente */
+  #zona-alternativas {
+    max-height: none;
+    overflow-y: visible;
   }
 
   /* Panel mapa: estático, altura generosa */
   .panel-der {
     position: static;
-    height: 62vh;
-    min-height: 380px;
-    max-height: 640px;
+    height: 60vh;
+    min-height: 360px;
+    max-height: 620px;
   }
   .mapa {
     width: 100%;
     height: 100%;
-    min-height: 380px;
+    min-height: 360px;
   }
 
   /* Resumen de tiempos: 2 columnas en tablet */
@@ -1307,51 +1476,41 @@
   .filtro-dias::-webkit-scrollbar { display: none; }
   .filtro-dia-btn { flex-shrink: 0; font-size: 0.74rem; padding: 5px 12px; }
 
-  /* ── Navegador de rutas: scroll horizontal ── */
-  .nav-rutas {
-    overflow-x: auto;
-    flex-wrap: nowrap;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: none;
-    padding-bottom: 12px;
-    gap: 6px;
-  }
-  .nav-rutas::-webkit-scrollbar { display: none; }
+  /* ── Navegador de rutas: ya tiene scroll horizontal en todas las pantallas ── */
   .nav-ruta-btn {
-    flex-shrink: 0;
     min-width: 100px;
     max-width: 140px;
-    padding: 8px 10px;
+    padding: 7px 9px;
   }
   .nav-ruta-nombre { font-size: 0.73rem; }
   .nav-ruta-dia, .nav-ruta-info { font-size: 0.62rem; }
 
   /* ── Panel izquierdo ── */
-  .panel-izq-header { padding: 12px 14px 10px; gap: 8px; }
-  .panel-izq-actions { gap: 6px; }
-  .panel-izq-actions .btn { font-size: 0.72rem; padding: 5px 9px; }
-  .titulo-ruta { font-size: 0.95rem; }
+  .panel-izq-header { padding: 9px 12px 8px; gap: 6px; }
+  .panel-izq-actions { gap: 5px; }
+  .panel-izq-actions .btn { font-size: 0.7rem; padding: 4px 8px; }
+  .titulo-ruta { font-size: 0.92rem; }
 
-  /* Lista de paradas más compacta */
-  .lista-sucursales { max-height: 38vh; }
-  .suc-item { padding: 8px 10px; gap: 8px; }
-  .suc-nombre { font-size: 0.78rem; }
+  /* Lista de paradas: fluye dentro del scroll del panel */
+  .lista-sucursales { padding: 4px 6px; }
+  .suc-item { padding: 7px 9px; gap: 7px; }
+  .suc-nombre { font-size: 0.76rem; }
 
   /* Acciones de ruta */
-  .acciones-ruta { padding: 10px 12px; gap: 8px; }
+  .acciones-ruta { padding: 9px 11px; gap: 7px; }
   .acciones-ruta .btn { flex: 1; justify-content: center; white-space: nowrap; }
 
   /* Zona vehículo / listas internas */
-  .vehiculo-selector { padding: 8px 12px; }
-  .veh-lista { padding: 0 12px 8px; }
+  .vehiculo-selector { padding: 7px 11px; }
+  .veh-lista { padding: 0 11px 7px; }
 
   /* ── Mapa: altura ajustada para móvil ── */
   .panel-der {
-    height: 55vh;
-    min-height: 320px;
-    max-height: 500px;
+    height: 52vh;
+    min-height: 300px;
+    max-height: 480px;
   }
-  .mapa { min-height: 320px; }
+  .mapa { min-height: 300px; }
 
   /* ── Resumen de tiempos: 2×2 ── */
   .resumen-tiempos { grid-template-columns: repeat(2, 1fr); }

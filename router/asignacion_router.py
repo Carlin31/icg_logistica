@@ -3,7 +3,7 @@ router/asignacion_router.py
 Blueprint Flask para la Sección 3 — Asignación de Rutas.
 """
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
-from logic.historico_logic import generar_rutas_vrp, obtener_reporte_vrp, resumen_historial, sugerir_vehiculos_optimos
+from logic.historico_logic import generar_rutas_vrp_afinidad, obtener_reporte_vrp, resumen_historial, sugerir_vehiculos_optimos
 from logic.asignacion_logic import (
     asignar_rutas,
     obtener_rutas,
@@ -20,7 +20,6 @@ from logic.asignacion_logic import (
     generar_asignacion_optimizada,
     obtener_mayoristas_por_ruta,
     obtener_geometria_ruta,
-    obtener_config_reacomodamiento,
     ejecutar_reacomodamiento,
 )
 
@@ -255,12 +254,29 @@ def get_geometria_ruta(ruta_id: str):
         return jsonify({"error": str(e)}), 500
 
 
-# ── Config de reacomodamiento ─────────────────────────────────
-@asignacion_bp.route("/config-reacomodamiento", methods=["GET"])
-def get_config_reacomodamiento():
-    """Devuelve los parámetros actuales de la Fase 3."""
+# ── Generar nombre de ruta con LLM ────────────────────────────
+@asignacion_bp.route("/generar-nombre-ruta", methods=["POST"])
+def post_generar_nombre_ruta():
+    """
+    Genera un nombre de ruta inteligente usando Groq + reglas locales.
+
+    Body JSON:
+        paradas           : list de {tipo, documento, orden}
+        nombres_sucursales: list[str]
+
+    Respuesta:
+        {"nombre": "BB2822/35_ROYAN_3 VALLES"}
+    """
+    from logic.groq_logic import generar_nombre_ruta
+    datos, err = _json_o_400()
+    if err:
+        return err
     try:
-        return jsonify(obtener_config_reacomodamiento())
+        nombre = generar_nombre_ruta(
+            paradas=datos.get("paradas", []),
+            nombres_sucursales=datos.get("nombres_sucursales", []),
+        )
+        return jsonify({"nombre": nombre})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -297,7 +313,6 @@ def post_reacomodamiento():
 
     try:
         from logic.asignacion_logic import (
-            _leer_config_reacomodamiento,
             _leer_config_volumen,
             DIAS_ORDEN,
         )
@@ -312,15 +327,9 @@ def post_reacomodamiento():
         util_max     = float(datos.get("util_max", 100))
 
         estrategia_vol, factor_vol, _ = _leer_config_volumen()
-        cfg_r = _leer_config_reacomodamiento()
 
-        # Aplicar parámetros VRP enviados desde el cliente
-        client_cfg = datos.get("reacomo_cfg") or {}
-        try:
-            if "cap_tolerance" in client_cfg:
-                cfg_r["cap_tolerance"] = float(client_cfg["cap_tolerance"])
-        except (ValueError, TypeError):
-            pass
+        # CAP-4: sin tolerancia configurable. ejecutar_reacomodamiento() aplica
+        # el tope fijo de 3.9 t para vehículos de 3.5-4 t y 100% para el resto.
 
         # Reconstruir estado_dias desde las asignaciones
         estado_dias = {}
@@ -346,7 +355,6 @@ def post_reacomodamiento():
             util_max       = util_max,
             estrategia_vol = estrategia_vol,
             factor_vol     = factor_vol,
-            cfg_r          = cfg_r,
         )
 
         return jsonify({
@@ -380,7 +388,7 @@ def post_generar_vrp_historico():
     if err:
         return err
     try:
-        resultado = generar_rutas_vrp(lid)
+        resultado = generar_rutas_vrp_afinidad(lid)
         code      = 200 if resultado.get("status") == "ok" else 422
         return jsonify(resultado), code
     except Exception as e:

@@ -66,7 +66,6 @@ let _utilMin = 80;    // %
 let _utilMax = 120;   // %
 
 // Estado del reacomodamiento (Fase 3)
-let _reacomoConfig  = null;   // configuración cargada del backend
 let _reacomoDetalle = {};     // { ruta_id: { utilization_pct, within_tolerance, ... } }
 
 // Estado de selección
@@ -84,7 +83,6 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   await cargarConfigDias();
   await cargarConfigUtilizacion();    // ← carga _utilMin / _utilMax
-  await cargarConfigReacomodamiento(); // ← carga _reacomoConfig
   await cargarDatosIniciales();
   renderPanelSeleccion();
   bindEventosPanelSeleccion();
@@ -1016,6 +1014,47 @@ function rutasDeDia(diaKey) {
   return activas.filter(r => r.dia_programado === diaKey);
 }
 
+async function generarNombreRuta(rutaId, btnEl) {
+  const ruta = _rutas.find(r => String(r._id) === rutaId);
+  if (!ruta) return;
+
+  const mayRuta = _mayoristas[rutaId] || [];
+  const paradas = [
+    ...(ruta.sucursales || []).map(s => ({
+      tipo: "sucursal",
+      documento: null,
+      orden: s.orden ?? 9999,
+    })),
+    ...mayRuta.map(m => ({
+      tipo: "mayorista",
+      documento: m.documento || String(m.id_cliente),
+      orden: m.orden ?? 9999,
+    })),
+  ];
+  const nombresSucursales = (ruta.sucursales || []).map(s => s.nombre).filter(Boolean);
+
+  if (btnEl) { btnEl.disabled = true; btnEl.innerHTML = '<i data-lucide="loader"></i>'; lucide.createIcons(); }
+
+  try {
+    const res = await fetch("/asignacion/generar-nombre-ruta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paradas, nombres_sucursales: nombresSucursales }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (data.nombre) {
+      ruta.nombre = data.nombre;
+      renderGrid();
+      mostrarToast(`Nombre generado: ${data.nombre}`, "ok");
+    }
+  } catch (e) {
+    mostrarToast("Error al generar nombre de ruta", "error");
+  } finally {
+    if (btnEl) { btnEl.disabled = false; btnEl.innerHTML = '<i data-lucide="wand-sparkles"></i>'; lucide.createIcons(); }
+  }
+}
+
 function calcularPesoRuta(ruta) {
   const pesoSuc = (ruta.sucursales || []).reduce((acc, s) =>
     acc + (_pesos[String(s.num_tienda)] || 0), 0);
@@ -1045,7 +1084,7 @@ function placasOcupadasEnDia(diaKey, excluirRutaId) {
 function _capacidadEfectivaTon(cap) {
   const c = Number(cap);
   if (!Number.isFinite(c) || c <= 0) return 0;
-  return Math.abs(c - 3.5) < 0.05 ? 4 : c;
+  return (c >= 3.5 && c <= 4.0) ? 3.9 : c;
 }
 
 /**
@@ -1134,6 +1173,10 @@ function bindCardEventosTodos(grid, rutas) {
 
   grid.querySelectorAll(".toggle-sucursales").forEach(btn => {
     btn.addEventListener("click", () => toggleSucursales(btn));
+  });
+
+  grid.querySelectorAll(".btn-gen-nombre").forEach(btn => {
+    btn.addEventListener("click", () => generarNombreRuta(btn.dataset.rutaid, btn));
   });
 
   grid.querySelectorAll(".btn-mapa").forEach(btn => {
@@ -1290,10 +1333,12 @@ function renderTarjetaRuta(ruta, cfgDia, diaRuta, orden) {
       </div>`;
     } else {
       const m = p.data;
+      const _nombre = m.nombre || `Cliente ${m.id_cliente}`;
+      const docLabel = m.documento ? `${m.documento} | ${_nombre}` : _nombre;
       return `
     <div class="mayorista-item">
       <div class="mayorista-orden">${m.orden ?? "M"}</div>
-      <div class="mayorista-nombre">${h(m.nombre || `Cliente ${m.id_cliente}`)}</div>
+      <div class="mayorista-nombre">${h(docLabel)}</div>
       <div class="mayorista-peso">${m.peso_kg > 0 ? `${m.peso_kg.toLocaleString("es-MX")} kg` : "—"}</div>
     </div>`;
     }
@@ -1325,6 +1370,7 @@ function renderTarjetaRuta(ruta, cfgDia, diaRuta, orden) {
           <i data-lucide="map-pin"></i> ${h(ruta.nombre)}
         </span>
         <div style="display:flex;gap:6px;align-items:center;">
+          ${mayRuta.length > 0 ? `<button class="btn-gen-nombre btn btn-sm btn-secondary" data-rutaid="${h(ruta._id)}" title="Generar nombre de ruta con IA"><i data-lucide="wand-sparkles"></i></button>` : ""}
           <button class="btn-mapa" data-rutaid="${h(ruta._id)}" title="Ver recorrido en mapa"><i data-lucide="map"></i> Mapa</button>
           <button class="btn-recalcular btn btn-sm btn-secondary" data-rutaid="${h(ruta._id)}" title="Recalcular tiempos"><i data-lucide="rotate-cw"></i></button>
           <button class="btn-reprogramar btn btn-sm btn-secondary" data-rutaid="${h(ruta._id)}" title="Mover al siguiente día"><i data-lucide="arrow-right"></i> Sig.</button>
@@ -1345,7 +1391,7 @@ function renderTarjetaRuta(ruta, cfgDia, diaRuta, orden) {
         <div class="capacidad-bar-wrap">
           <div class="capacidad-bar-label">
             <span>Utilización del vehículo</span>
-            <span>${pct.toFixed(1)}%${vehiculoAsig ? ` de ${vehiculoAsig.capacidad_toneladas} ton` : ""}</span>
+            <span>${pct.toFixed(1)}%${vehiculoAsig ? ` de ${_capacidadEfectivaTon(vehiculoAsig.capacidad_toneladas)} ton` : ""}</span>
           </div>
           <div class="capacidad-bar">
             <div class="capacidad-bar-fill ${barClass}" style="width:${Math.min(pct, 100)}%"></div>
@@ -1633,7 +1679,9 @@ async function abrirMapaRuta(rutaId) {
         label = `<b>Depósito</b>${p.nombre ? `<br>${h(p.nombre)}` : ""}`;
       } else if (p.tipo === "mayorista") {
         icon  = mkMay;
-        label = `<b>${h(p.nombre || "Mayorista")}</b><br><span style="color:#c2410c">${p.peso_kg ? p.peso_kg.toLocaleString("es-MX") + " kg" : ""}</span>`;
+        const _mayNombre = p.nombre || "Mayorista";
+        const _mayLabel  = p.documento ? `${p.documento} | ${_mayNombre}` : _mayNombre;
+        label = `<b>${h(_mayLabel)}</b><br><span style="color:#c2410c">${p.peso_kg ? p.peso_kg.toLocaleString("es-MX") + " kg" : ""}</span>`;
       } else {
         icon  = mkSuc;
         const peso = _pesos[String(p.num_tienda)] || p.peso_kg || 0;
@@ -1753,50 +1801,13 @@ function toggleSucursales(btn) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 /**
- * Carga la configuración del reacomodamiento desde el backend y la almacena
- * en _reacomoConfig para pre-poblar el modal.
- */
-async function cargarConfigReacomodamiento() {
-  try {
-    const res = await fetch("/asignacion/config-reacomodamiento");
-    if (res.ok) {
-      _reacomoConfig = await res.json();
-    }
-  } catch (_) {
-    _reacomoConfig = null;
-  }
-}
-
-/**
- * Abre el modal de configuración de reacomodamiento y pre-carga la tolerancia.
+ * Abre el modal de confirmación de reacomodamiento (Fase 3).
+ * Sin parámetros configurables: el tope de capacidad es fijo (100 %, o 3.9 t
+ * para vehículos de 3.5-4 t) y se aplica siempre en el backend.
  */
 function abrirModalReacomo() {
-  const cfg = _reacomoConfig || {};
-  const tolPct = Math.round(((cfg.cap_tolerance ?? 0.30)) * 100);
-  _setVal("rr-cap-tolerance", tolPct);
-  _actualizarHintsTolerancia(tolPct);
-
-  const tolInput = document.getElementById("rr-cap-tolerance");
-  if (tolInput) {
-    tolInput.oninput = () => _actualizarHintsTolerancia(parseFloat(tolInput.value) || 30);
-  }
-
   document.getElementById("modal-reacomo")?.classList.remove("hidden");
   lucide.createIcons();
-}
-
-function _actualizarHintsTolerancia(tolPct) {
-  const min = document.getElementById("rr-tol-min");
-  const max = document.getElementById("rr-tol-max");
-  if (min) min.textContent = Math.round(100 - tolPct);
-  if (max) max.textContent = Math.round(100 + tolPct);
-}
-
-function _setVal(id, valor) {
-  const el = document.getElementById(id);
-  if (!el) return;
-  if (el.type === "checkbox") el.checked = !!valor;
-  else el.value = valor;
 }
 
 /**
@@ -1872,13 +1883,11 @@ async function autoAsignarVehiculos() {
 }
 
 /**
- * Lee la tolerancia del modal y ejecuta el reacomodamiento (Fase 3).
- * Envía las asignaciones actuales al backend para reasignar vehículos.
+ * Ejecuta el reacomodamiento (Fase 3): envía las asignaciones actuales al
+ * backend para reasignar vehículos con el tope de capacidad fijo (100 %,
+ * o 3.9 t para vehículos de 3.5-4 t).
  */
 async function aplicarReacomodamiento() {
-  const tolPct = parseFloat(document.getElementById("rr-cap-tolerance")?.value) || 30;
-  _reacomoConfig = { cap_tolerance: tolPct / 100 };
-
   cerrarModal("modal-reacomo");
   _mostrarBannerReacomo(true);
 
@@ -1892,7 +1901,6 @@ async function aplicarReacomodamiento() {
       config_dias:  _configDias,
       util_min:     _utilMin,
       util_max:     _utilMax,
-      reacomo_cfg:  _reacomoConfig,
     };
 
     const res = await fetch("/asignacion/reacomodamiento", {
@@ -1965,14 +1973,12 @@ function _mostrarResumenReacomo(reacomo) {
   const n_ok  = reacomo.n_en_rango      || 0;
   const n_sob = reacomo.n_sobrecargadas || 0;
   const n_sin = reacomo.n_sin_vehiculo  || 0;
-  const cfg   = reacomo.config || {};
-  const tol   = Math.round(((cfg.cap_tolerance ?? 0.30)) * 100);
 
   const el = document.createElement("div");
   el.className = "resumen-reacomo";
   el.innerHTML = `
     <strong>✔ Reacomodamiento aplicado</strong>
-    (tolerancia ${tol}% · rango ${100 - tol}%–${100 + tol}%) ·
+    (tope 100% · 3.9t para camiones de 3.5-4t) ·
     ${n_rea} reasignada${n_rea !== 1 ? "s" : ""} ·
     <span style="color:var(--verde)">${n_ok} en rango</span>
     ${n_sob > 0 ? `· <span style="color:var(--rojo)">${n_sob} sobrecargada${n_sob !== 1 ? "s" : ""}</span>` : ""}
@@ -2069,10 +2075,19 @@ function h(s) {
     btnGen.addEventListener("click", generarVRP);
     document.getElementById("btn-regenerar-vrp")?.addEventListener("click", generarVRP);
     document.getElementById("btn-ir-modificacion")?.addEventListener("click", () => {
-      window.location.href = "/modificacion";
+      irAModificacionManual(false);
+    });
+    document.getElementById("btn-crear-ruta-manual")?.addEventListener("click", () => {
+      irAModificacionManual(true);
     });
   });
 
+
+  function irAModificacionManual(abrirCrearRuta = false) {
+    const _slug = window.__PERFIL_SLUG__;
+    const base = _slug ? `/modificacion/${_slug}` : "/modificacion/";
+    window.location.href = abrirCrearRuta ? `${base}?modo=crear-ruta` : base;
+  }
   async function verificarEstadoVRP() {
     const btnGen  = document.getElementById("btn-generar-vrp");
     const genHint = document.getElementById("vrp-gen-hint");

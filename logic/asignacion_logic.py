@@ -2,6 +2,15 @@
 logic/asignacion_logic.py
 Lógica de negocio para la Sección 3 — Asignación de Rutas.
 
+Cambios v6:
+  - CAP-4 (regla de capacidad máxima permitida): los únicos vehículos que
+    pueden superar el 100 % de su capacidad nominal son los de 3.5 a 4.0 t,
+    con un tope fijo de 3.9 t (ver _capacidad_efectiva_ton). Cualquier otro
+    vehículo tiene como límite máximo exactamente el 100 % de su capacidad
+    nominal, sin tolerancia adicional, bajo ninguna circunstancia. Se eliminó
+    el slider de tolerancia manual del Reacomodamiento (Fase 3), que antes
+    permitía hasta +30 % para cualquier vehículo.
+
 Cambios v5:
   - CAP-2 corregido: util_max_default = 100 % (era 120 %).
   - CAP-3 eliminado: se suprime el fallback util_max+30 % (umbral 150 %). Cualquier
@@ -69,7 +78,7 @@ ESTRATEGIA_VOLUMEN_NULO_DEFAULT   = "BLOQUEAR"
 FACTOR_VOLUMEN_POR_DEFECTO_DEFAULT = 2.5   # m³ por tonelada de capacidad
 
 # MAY-2: radio máximo para considerar mayoristas candidatos (configurable).
-RADIO_MAYORISTAS_KM_DEFAULT = 50.0
+RADIO_MAYORISTAS_KM_DEFAULT = 10.0
 
 # ══════════════════════════════════════════════════════════════════════
 # FASE 3 — REACOMODAMIENTO (Sección 5)
@@ -79,12 +88,13 @@ RADIO_MAYORISTAS_KM_DEFAULT = 50.0
 #   2. Ordenar vehículos por capacidad_kg ascendente (más pequeño primero).
 #   3. Cada vehículo se usa como máximo una vez por día.
 #   4. Para cada ruta: asignar el vehículo más pequeño donde
-#      route_kg ≤ vehicle_capacity_kg × (1 + VRP_CAP_TOLERANCE).
+#      route_kg ≤ capacidad_efectiva_vehiculo_kg (ver _capacidad_efectiva_ton).
 #   5. Si no hay vehículo elegible → ruta sin vehículo.
 #
-#   VRP_CAP_TOLERANCE = 0.30 → rango válido 70%–130%
+# CAP-4: no existe tolerancia configurable. El único margen sobre el 100 %
+# es el de vehículos de 3.5 a 4.0 t, que tienen tope fijo de 3.9 t. Cualquier
+# otro vehículo queda capado exactamente en el 100 % de su capacidad nominal.
 # ══════════════════════════════════════════════════════════════════════
-VRP_CAP_TOLERANCE = 0.30   # ±30 % → rango válido 70%–130%
 
 
 # ── Helpers genéricos ──────────────────────────────────────────
@@ -133,8 +143,13 @@ def _parse_hhmm(s: str) -> "int | None":
 
 def _capacidad_efectiva_ton(cap) -> float:
     """
-    Regla especial: unidades de 3.5 t se consideran con tolerancia
-    hasta 4.0 t para marcar sobrecarga.
+    CAP-4 — Regla de capacidad máxima permitida.
+
+    Los únicos vehículos que pueden superar el 100 % de su capacidad nominal
+    son los de 3.5 a 4.0 t, con un tope fijo de 3.9 t (promedio de carga 3.5 t,
+    sin superar nunca las 4 t). Cualquier otro vehículo tiene como límite
+    máximo exactamente el 100 % de su capacidad nominal, sin tolerancia
+    adicional, bajo ninguna circunstancia.
     """
     try:
         c = float(cap or 0)
@@ -142,7 +157,7 @@ def _capacidad_efectiva_ton(cap) -> float:
         return 0.0
     if c <= 0:
         return 0.0
-    return 4.0 if abs(c - 3.5) < 0.05 else c
+    return 3.9 if 3.5 <= c <= 4.0 else c
 
 
 def _pct_utilizacion(peso_ton: float, cap_ton) -> float:
@@ -202,21 +217,6 @@ def _leer_config_volumen() -> tuple:
         return estrategia, factor_vol, radio_km
     except Exception:
         return ESTRATEGIA_VOLUMEN_NULO_DEFAULT, float(FACTOR_VOLUMEN_POR_DEFECTO_DEFAULT), float(RADIO_MAYORISTAS_KM_DEFAULT)
-
-
-def _leer_config_reacomodamiento() -> dict:
-    """
-    Lee los parámetros de la Fase 3 (reacomodamiento) desde MongoDB.
-    Retorna { cap_tolerance } donde cap_tolerance define el rango válido:
-    (1 - cap_tolerance)*100 % a (1 + cap_tolerance)*100 %.
-    """
-    try:
-        cfg = _obtener_config_general()
-        return {
-            "cap_tolerance": float(cfg.get("vrp_cap_tolerance", VRP_CAP_TOLERANCE)),
-        }
-    except Exception:
-        return {"cap_tolerance": VRP_CAP_TOLERANCE}
 
 
 def _es_vol_compatible(vehiculo: dict, vol_ruta: float,
@@ -891,7 +891,9 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
     )
 
     # ── Fase 3: Reacomodamiento Lógico ──────────────────────────
-    cfg_r = _leer_config_reacomodamiento()
+    # CAP-4: sin tolerancia configurable; tope fijo de 3.9 t solo para
+    # vehículos de 3.5-4 t (ver _capacidad_efectiva_ton). Cualquier otro
+    # vehículo queda capado exactamente en el 100 % de su capacidad nominal.
     resultado_reacomo = ejecutar_reacomodamiento(
         asignaciones   = asignaciones,
         estado_dias    = estado_dias,
@@ -904,7 +906,6 @@ def generar_asignacion_optimizada(payload: dict, logistica_id: str) -> dict:
         util_max       = util_max,
         estrategia_vol = estrategia_vol,
         factor_vol     = factor_vol,
-        cfg_r          = cfg_r,
     )
 
     # ── Resumen por día ──────────────────────────────────────────
@@ -1230,7 +1231,6 @@ def ejecutar_reacomodamiento(
     util_max:        float,
     estrategia_vol:  str,
     factor_vol:      float,
-    cfg_r:           "dict | None" = None,
 ) -> dict:
     """
     Fase 3 — Reacomodamiento (assign_vehicles_to_routes).
@@ -1242,21 +1242,18 @@ def ejecutar_reacomodamiento(
       2. Ordena vehículos por capacidad_kg ascendente (más pequeño primero).
       3. Cada vehículo se usa como máximo una vez por día.
       4. Para cada ruta, asigna el vehículo más pequeño donde:
-           route_kg ≤ vehicle_capacity_kg × (1 + cap_tolerance)
+           route_kg ≤ capacidad_efectiva_kg(vehiculo)
+         (CAP-4: capacidad_efectiva_kg = 3900 kg para vehículos de 3.5-4 t;
+          para cualquier otro, es exactamente su capacidad nominal — sin
+          tolerancia adicional, bajo ninguna circunstancia).
       5. Si ningún vehículo es elegible → ruta sin vehículo.
 
     Métricas de salida por ruta:
-      · utilization_pct   = (total_kg / capacity_kg) × 100
-      · within_tolerance  = |utilization_pct/100 − 1.0| ≤ cap_tolerance
-      · overloaded        = utilization_pct > (1 + cap_tolerance) × 100
+      · utilization_pct   = (total_kg / capacidad_efectiva_kg) × 100
+      · within_tolerance  = utilization_pct ≤ 100 (siempre cierto si se asignó vehículo)
+      · overloaded        = utilization_pct > 100 (salvaguarda informativa; el filtro
+                             de elegibilidad ya impide que esto ocurra)
     """
-    if cfg_r is None:
-        cfg_r = _leer_config_reacomodamiento()
-
-    cap_tolerance = float(cfg_r.get("cap_tolerance", VRP_CAP_TOLERANCE))
-    max_factor    = 1.0 + cap_tolerance    # 1.30 con tolerancia 0.30
-    max_util_pct  = max_factor * 100       # 130.0
-
     # Vehículos ordenados ascendente por capacidad (desempate por placas)
     vehiculos_sorted = sorted(
         [v for v in vehiculos_raw if (v.get("capacidad_toneladas") or 0) > 0],
@@ -1299,12 +1296,12 @@ def ejecutar_reacomodamiento(
             asig     = asignaciones.get(ruta_id, {})
 
             # Elegibles: no usados hoy, capacidad > 0,
-            # y route_kg ≤ vehicle_capacity_kg × max_factor
+            # y route_kg ≤ capacidad_efectiva_kg (CAP-4, sin tolerancia extra)
             eligible = [
                 v for v in vehiculos_sorted
                 if v.get("placas") not in usados_dia
                 and (v.get("capacidad_toneladas") or 0) > 0
-                and total_kg <= (_capacidad_efectiva_ton(v["capacidad_toneladas"]) * 1000.0) * max_factor
+                and total_kg <= _capacidad_efectiva_ton(v["capacidad_toneladas"]) * 1000.0
             ]
 
             if not eligible:
@@ -1335,8 +1332,8 @@ def ejecutar_reacomodamiento(
             placas_new = best_v.get("placas")
             cap_kg     = _capacidad_efectiva_ton(best_v.get("capacidad_toneladas", 1)) * 1000.0
             util_pct   = round((total_kg / cap_kg) * 100, 1)
-            within_tol = abs(util_pct / 100.0 - 1.0) <= cap_tolerance
-            overloaded = util_pct > max_util_pct
+            within_tol = util_pct <= 100.0
+            overloaded = util_pct > 100.0  # no debería ocurrir; el filtro de eligible ya lo impide
 
             usados_dia.add(placas_new)
 
@@ -1374,7 +1371,6 @@ def ejecutar_reacomodamiento(
 
     return {
         "aplicado":        True,
-        "config":          {"cap_tolerance": cap_tolerance},
         "n_reasignadas":   n_reasignadas,
         "n_en_rango":      n_en_rango,
         "n_sobrecargadas": n_sobrecargadas,
@@ -1382,11 +1378,6 @@ def ejecutar_reacomodamiento(
         "cambios":         cambios,
         "detalle":         detalle,
     }
-
-
-def obtener_config_reacomodamiento() -> dict:
-    """Expone la config de reacomodamiento para el endpoint de configuración."""
-    return _leer_config_reacomodamiento()
 
 
 # ── Config de días (por logística) ────────────────────────────

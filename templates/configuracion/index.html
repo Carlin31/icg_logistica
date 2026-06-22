@@ -16,7 +16,8 @@
 
   <ul class="nav-tabs" id="config-tabs">
     <li class="active"><a href="#tab-general"    data-tab="general">General</a></li>
-    <li><a href="#tab-productos"           data-tab="productos">Productos</a></li>
+    <li><a href="#tab-icg"                 data-tab="icg">ICG</a></li>
+    <li><a href="#tab-proalmex"            data-tab="proalmex">Proalmex</a></li>
     <li><a href="#tab-sucursales"          data-tab="sucursales">Sucursales</a></li>
     <li><a href="#tab-vehiculos"           data-tab="vehiculos">Vehículos</a></li>
     <li><a href="#tab-clientes-mayoristas" data-tab="clientes-mayoristas">Clientes Mayoristas</a></li>
@@ -75,14 +76,14 @@
     </form>
   </section>
 
-  <!-- ── TAB PRODUCTOS ── -->
-  <section id="tab-productos" class="tab-content hidden">
+  <!-- ── TAB ICG ── -->
+  <section id="tab-icg" class="tab-content hidden">
     <div class="section-header">
-      <h2>Gestión de Productos</h2>
-      <button id="btn-nuevo-producto" class="btn btn-success">+ Nuevo producto</button>
+      <h2>Base de Datos ICG</h2>
+      <button id="btn-nuevo-producto-icg" class="btn btn-success">+ Nuevo producto ICG</button>
     </div>
     <div class="filter-container">
-      <input type="text" id="buscar-producto-nombre" placeholder="Buscar producto…" class="input-search">
+      <input type="text" id="buscar-producto-nombre" placeholder="Buscar producto ICG…" class="input-search">
       <input type="date" id="buscar-producto-fecha" class="input-search">
     </div>
     <div class="table-responsive">
@@ -98,6 +99,34 @@
             <th class="sortable col-num">Ancho (cm)</th>
             <th class="sortable col-num">Alto (cm)</th>
             <th class="sortable col-num">Volumen (m³)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB PROALMEX ── -->
+  <section id="tab-proalmex" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Base de Datos Proalmex</h2>
+      <button id="btn-nuevo-producto-proalmex" class="btn btn-success">+ Nuevo producto Proalmex</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-producto_proalmex-nombre" placeholder="Buscar producto Proalmex…" class="input-search">
+      <input type="date" id="buscar-producto_proalmex-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-productos-proalmex" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Marca</th>
+            <th class="sortable">Descripción</th>
+            <th class="sortable">Tamaño</th>
+            <th class="sortable col-num">Costo</th>
+            <th class="sortable col-num">Peso (kg)</th>
             <th class="sortable">Última Modificación</th>
             <th>Acciones</th>
           </tr>

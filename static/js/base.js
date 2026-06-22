@@ -1,5 +1,18 @@
 // ===== UTILIDADES GLOBALES =====
 
+// ── Sesión expirada: si cualquier fetch() responde 401, volver al login ──────
+(function () {
+  const _fetchOriginal = window.fetch;
+  window.fetch = function (...args) {
+    return _fetchOriginal.apply(this, args).then((res) => {
+      if (res.status === 401) {
+        window.location.href = "/auth/login";
+      }
+      return res;
+    });
+  };
+})();
+
 // ── Fullscreen Loader ────────────────────────────────────────────────────────
 // Uso: Loader.show("Título", ["Mensaje 1…", "Mensaje 2…"])
 //      Loader.hide()

@@ -149,6 +149,7 @@ def _agregar(coleccion: str, datos: dict) -> dict:
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif coleccion == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
+        datos.setdefault("activo", True)
 
     datos["ultima_modificacion"] = _fecha_completa()
     result = db[coleccion].insert_one(datos)
@@ -212,6 +213,12 @@ def obtener_producto(producto_id: str): return _obtener("productos", producto_id
 def agregar_producto(datos: dict): return _agregar("productos", datos)
 def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)
 def eliminar_producto(producto_id: str): return _eliminar("productos", producto_id)
+
+def listar_productos_proalmex(nombre: str = "", fecha: str = ""): return _listar("productos_proalmex", ["marca", "linea", "tamano"], nombre, fecha, "marca")
+def obtener_producto_proalmex(producto_id: str): return _obtener("productos_proalmex", producto_id)
+def agregar_producto_proalmex(datos: dict): return _agregar("productos_proalmex", datos)
+def editar_producto_proalmex(producto_id: str, datos: dict): return _editar("productos_proalmex", producto_id, datos)
+def eliminar_producto_proalmex(producto_id: str): return _eliminar("productos_proalmex", producto_id)
 
 def listar_sucursales(nombre: str = "", fecha: str = ""): return _listar("sucursales", ["nombre_base", "nombre_icg-proalmex", "nombre_bimbo"], nombre, fecha, "num_tienda")
 def obtener_sucursal(sucursal_id: str): return _obtener("sucursales", sucursal_id)

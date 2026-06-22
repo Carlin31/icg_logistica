@@ -11,9 +11,9 @@
 {% block nav_mod %}active{% endblock %}
 
 {% block content %}
-<h1>Modificación manual de rutas</h1>
 <div class="mod-header">
   <div class="mod-header-left">
+    <h1>Modificación manual de rutas</h1>
     <p class="mod-subtitulo">Revisa la secuencia, ajusta el vehículo y confirma cada ruta.</p>
   </div>
   <div class="mod-header-right">
@@ -99,28 +99,36 @@
       </div>
     </div>
 
-    <!-- Indicador OSRM individual -->
-    <div id="osrm-ruta-status" class="osrm-ruta-status" style="display:none">
-      <div class="spinner-sm"></div>
-      <span>Calculando ruta con OSRM…</span>
-    </div>
+    <!-- Contenido scrollable del panel -->
+    <div class="panel-izq-scroll">
 
-    <!-- Selector de vehículo -->
-    <div id="zona-vehiculo" class="zona-vehiculo"></div>
+      <!-- Indicador OSRM individual -->
+      <div id="osrm-ruta-status" class="osrm-ruta-status" style="display:none">
+        <div class="spinner-sm"></div>
+        <span>Calculando ruta con OSRM…</span>
+      </div>
 
-    <!-- Selector de día -->
-    <div id="zona-cambio-dia" class="zona-cambio-dia"></div>
+      <!-- Selector de vehículo -->
+      <div id="zona-vehiculo" class="zona-vehiculo"></div>
 
-    <!-- Resumen de tiempos -->
-    <div id="resumen-tiempos" class="resumen-tiempos"></div>
+      <!-- Selector de día -->
+      <div id="zona-cambio-dia" class="zona-cambio-dia"></div>
 
-    <!-- Indicadores (carga, horario) -->
-    <div id="zona-indicadores"></div>
+      <!-- Resumen de tiempos -->
+      <div id="resumen-tiempos" class="resumen-tiempos"></div>
 
-    <!-- Lista de paradas (sucursales + mayoristas interleaved) -->
-    <div id="lista-sucursales" class="lista-sucursales"></div>
+      <!-- Selector de ruta (recomendada / personalizada) -->
+      <div id="zona-alternativas"></div>
 
-    <!-- Acciones de ruta -->
+      <!-- Indicadores (carga, horario) -->
+      <div id="zona-indicadores"></div>
+
+      <!-- Lista de paradas (sucursales + mayoristas interleaved) -->
+      <div id="lista-sucursales" class="lista-sucursales"></div>
+
+    </div><!-- /.panel-izq-scroll -->
+
+    <!-- Acciones de ruta (fijas al fondo) -->
     <div class="acciones-ruta">
       <button id="btn-recalcular" class="btn btn-recalcular">
         <i data-lucide="rotate-cw"></i> Recalcular tiempos
@@ -178,7 +186,7 @@
     </div>
     <div class="modal-body">
       <input type="text" id="buscar-mayorista" class="input-buscar"
-             placeholder="Buscar por nombre o código…" autocomplete="off">
+             placeholder="Buscar por documento, nombre o código…" autocomplete="off">
       <div id="lista-disponibles-may" class="lista-disponibles"></div>
     </div>
   </div>
@@ -198,14 +206,22 @@
       <label class="crear-label" for="crear-vehiculo">Vehículo</label>
       <select id="crear-vehiculo" class="input-select"></select>
 
-      <label class="crear-label" for="buscar-sucursal-crear">Sucursales (mínimo 1)</label>
+      <label class="crear-label" for="buscar-sucursal-crear">Sucursales <span style="font-weight:400;color:#94a3b8">(opcional si hay mayoristas)</span></label>
       <input type="text" id="buscar-sucursal-crear" class="input-buscar"
              placeholder="Buscar por nombre o número…" autocomplete="off">
       <div class="crear-meta">
         <span id="crear-contador">0 seleccionadas</span>
-        <span class="crear-hint">Selecciona al menos una sucursal</span>
       </div>
       <div id="lista-suc-crear" class="lista-disponibles"></div>
+
+      <label class="crear-label" for="buscar-mayorista-crear">Mayoristas opcionales</label>
+      <input type="text" id="buscar-mayorista-crear" class="input-buscar"
+             placeholder="Buscar por documento, nombre o código…" autocomplete="off">
+      <div class="crear-meta">
+        <span id="crear-contador-may">0 seleccionados</span>
+        <span class="crear-hint">Requerido si no hay sucursales</span>
+      </div>
+      <div id="lista-may-crear" class="lista-disponibles"></div>
     </div>
     <div class="modal-footer">
       <button id="btn-crear-cancel" class="btn btn-secondary">Cancelar</button>
@@ -220,7 +236,7 @@
 <div id="estado-vacio" class="estado-vacio" style="display:none">
   <i data-lucide="inbox" style="width:2.5rem;height:2.5rem;color:#cbd5e1;margin-bottom:12px"></i>
   <p>No se encontraron rutas para modificar.</p>
-  <p class="sub">Asegúrate de haber guardado la asignación en la sección <strong>Asignación</strong> primero.</p>
+  <p class="sub">Puedes crear una ruta manualmente y después agregar sucursales y mayoristas desde esta pantalla.</p>
 </div>
 
 {% endblock %}

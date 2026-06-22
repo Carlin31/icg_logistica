@@ -17,6 +17,8 @@ class LectorICG:
                 or 'COSTO' in str(col).upper()
                 or 'CAP' in str(col).upper()
                 or 'CAJAS' in str(col).upper()
+                or 'COMPRAS' in str(col).upper()
+                or 'VTA' in str(col).upper()
             ]
 
             df = df.drop(columns=cols_a_borrar, errors='ignore')

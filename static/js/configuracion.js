@@ -11,13 +11,15 @@ const DIAS_SEMANA = [
 ];
 
 function getEndpoint(tipo) {
+  if (tipo === "producto")          return "productos";
+  if (tipo === "producto_proalmex") return "productos-proalmex";
   if (tipo === "sucursal")          return "sucursales";
   if (tipo === "cliente_mayorista") return "clientes-mayoristas";
   return tipo + "s";
 }
 
 // Esquemas alineados con MongoDB (¡AQUÍ SE AGREGAN LOS CAMPOS PARA EL MODAL!)
-const CAMPOS_PRODUCTO = [
+const CAMPOS_PRODUCTO_ICG = [
   { key: "marca",       label: "Marca",        type: "text"   },
   { key: "clave_sae",   label: "Clave SAE",    type: "number" },
   { key: "descripcion", label: "Descripción",  type: "text"   },
@@ -27,6 +29,14 @@ const CAMPOS_PRODUCTO = [
   { key: "ancho",       label: "Ancho (cm)",   type: "number" },
   { key: "alto",        label: "Alto (cm)",    type: "number" },
   { key: "volumen",     label: "Volumen (m³)", type: "number", readonly: true },
+];
+
+const CAMPOS_PRODUCTO_PROALMEX = [
+  { key: "marca",   label: "Marca",   type: "text"   },
+  { key: "linea",   label: "Descripción", type: "text"   },
+  { key: "tamano",  label: "Tamaño",  type: "text"   },
+  { key: "costo",   label: "Costo",   type: "number" },
+  { key: "peso",    label: "Peso (kg)", type: "number" },
 ];
 
 const CAMPOS_SUCURSAL = [
@@ -88,7 +98,8 @@ const MSG_CFG = {
 };
 
 const _TIPO_LABEL = {
-  producto:          "Producto",
+  producto:          "Producto ICG",
+  producto_proalmex: "Producto Proalmex",
   sucursal:          "Sucursal",
   vehiculo:          "Vehículo",
   cliente_mayorista: "Cliente Mayorista",
@@ -171,6 +182,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initSortableTables();
   await cargarConfigGeneral();
   cargarDatos("producto");
+  cargarDatos("producto_proalmex");
   cargarDatos("sucursal");
   cargarDatos("vehiculo");
   cargarDatos("cliente_mayorista");
@@ -185,14 +197,15 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (_confirmResolve) { _confirmResolve(true); _confirmResolve = null; }
   });
 
-  document.getElementById("btn-nuevo-producto").addEventListener("click", () => abrirModal("create", "producto"));
+  document.getElementById("btn-nuevo-producto-icg").addEventListener("click", () => abrirModal("create", "producto"));
+  document.getElementById("btn-nuevo-producto-proalmex").addEventListener("click", () => abrirModal("create", "producto_proalmex"));
   document.getElementById("btn-nueva-sucursal").addEventListener("click", () => abrirModal("create", "sucursal"));
   document.getElementById("btn-nuevo-vehiculo").addEventListener("click", () => abrirModal("create", "vehiculo"));
   document.getElementById("btn-nuevo-cliente-mayorista").addEventListener("click", () => abrirModal("create", "cliente_mayorista"));
   document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
   document.getElementById("modal-save").addEventListener("click", guardarModal);
 
-  ["producto", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
+  ["producto", "producto_proalmex", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
     const tableEl = document.querySelector(`#tabla-${getEndpoint(tipo)} tbody`);
     if (tableEl) {
       tableEl.addEventListener("click", e => {
@@ -373,7 +386,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 11, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
+      const cols = { producto: 11, producto_proalmex: 7, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -390,6 +403,20 @@ async function cargarDatos(tipo) {
           <td>${p.ancho ?? ""}</td>
           <td>${p.alto ?? ""}</td>
           <td>${p.volumen != null && p.volumen !== 0 ? Number(p.volumen).toFixed(6) : "—"}</td>
+          <td>${p.ultima_modificacion ?? "-"}</td>
+          <td>
+            <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
+            <button class="btn btn-sm btn-danger"  data-id="${p._id}" data-accion="eliminar">Eliminar</button>
+          </td>
+        </tr>`).join("");
+    } else if (tipo === "producto_proalmex") {
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${h(p.marca)}</td>
+          <td>${h(p.linea)}</td>
+          <td>${h(p.tamano)}</td>
+          <td>$${Number(p.costo || 0).toFixed(2)}</td>
+          <td>${p.peso != null ? p.peso + " kg" : ""}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
@@ -480,7 +507,8 @@ async function cargarDatos(tipo) {
 
 async function abrirModal(mode, tipo, docId = null) {
   modalMode = mode; modalTipo = tipo; modalDocId = docId;
-  const campos = tipo === "producto"          ? CAMPOS_PRODUCTO
+  const campos = tipo === "producto"          ? CAMPOS_PRODUCTO_ICG
+               : tipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
                : tipo === "sucursal"          ? CAMPOS_SUCURSAL
                : tipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
                : CAMPOS_VEHICULO;
@@ -543,7 +571,8 @@ async function guardarModal(e) {
     // 1. Evitamos que el botón recargue la vista y aborte el fetch
     if (e) e.preventDefault(); 
 
-    const campos = modalTipo === "producto"          ? CAMPOS_PRODUCTO
+    const campos = modalTipo === "producto"          ? CAMPOS_PRODUCTO_ICG
+           : modalTipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
                  : modalTipo === "sucursal"          ? CAMPOS_SUCURSAL
                  : modalTipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
                  : CAMPOS_VEHICULO;
@@ -592,6 +621,9 @@ async function guardarModal(e) {
 
         cerrarModal();
         cargarDatos(modalTipo);
+        if (modalTipo === "vehiculo") {
+            localStorage.setItem("icg_flota_actualizada", Date.now().toString());
+        }
     } catch (error) {
         console.error("Error al guardar:", error);
         mostrarModalError("Ocurrió un error de red o de servidor al guardar.");
@@ -617,7 +649,10 @@ async function toggleActivo(docId, descripcion, abreviatura, placas, activo) {
   if (!confirmed) return;
   try {
     const res = await fetch(`/configuracion/vehiculos/${docId}/activo`, { method: "PUT" });
-    if (res.ok) cargarDatos("vehiculo");
+    if (res.ok) {
+      cargarDatos("vehiculo");
+      localStorage.setItem("icg_flota_actualizada", Date.now().toString());
+    }
   } catch (err) {
     console.error("[toggleActivo]", err);
   }
@@ -634,7 +669,10 @@ async function eliminar(tipo, docId) {
   Loader.show(`Eliminando ${label}`, MSG_CFG.eliminar);
   try {
     const res = await fetch(`/configuracion/${getEndpoint(tipo)}/${docId}`, { method: "DELETE" });
-    if (res.ok) cargarDatos(tipo);
+    if (res.ok) {
+      cargarDatos(tipo);
+      if (tipo === "vehiculo") localStorage.setItem("icg_flota_actualizada", Date.now().toString());
+    }
   } finally {
     Loader.hide();
   }
@@ -676,19 +714,19 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
 // ═══════════════════════════════════════════════════════════════
 
 (function initHistorico() {
-  const zone     = document.getElementById("hist-upload-zone");
-  const fileInput = document.getElementById("hist-file-input");
-  const preview  = document.getElementById("hist-upload-preview");
-  const fileName = document.getElementById("hist-file-name");
-  const msg      = document.getElementById("hist-msg");
-  const lista    = document.getElementById("hist-lista");
-  const spinner  = document.getElementById("hist-spinner");
-  const empty    = document.getElementById("hist-empty");
-  const badge    = document.getElementById("hist-resumen-badge");
-
-  if (!zone) return; // tab no renderizado aún
+  const zone      = document.getElementById("hist-upload-zone");
+  const fileInput  = document.getElementById("hist-file-input");
+  const preview   = document.getElementById("hist-upload-preview");
+  const fileName  = document.getElementById("hist-file-name");
+  const msg       = document.getElementById("hist-msg");
+  const lista     = document.getElementById("hist-lista");
+  const spinner   = document.getElementById("hist-spinner");
+  const empty     = document.getElementById("hist-empty");
+  const badge     = document.getElementById("hist-resumen-badge");
+  if (!zone) return;
 
   let _selectedFile = null;
+  let _todosLosDocs = [];     // copia del último fetch para re-filtrar sin ir al servidor
 
   // ── Activar al seleccionar el tab ────────────────────────────
   document.getElementById("config-tabs").addEventListener("click", e => {
@@ -733,7 +771,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
       mostrarMsg("Solo se aceptan archivos CSV.", "error");
       return;
     }
-    _selectedFile       = f;
+    _selectedFile        = f;
     fileName.textContent = f.name;
     zone.style.display   = "none";
     preview.style.display = "";
@@ -746,7 +784,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
     fd.append("archivo", _selectedFile);
     fd.append("nombre",  _selectedFile.name.replace(/\.csv$/i, ""));
 
-    document.getElementById("btn-hist-cargar").disabled = true;
+    document.getElementById("btn-hist-cargar").disabled    = true;
     document.getElementById("btn-hist-cargar").textContent = "Cargando…";
     ocultarMsg();
 
@@ -755,7 +793,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
       const data = await res.json();
       if (data.status === "ok") {
         mostrarMsg(`✓ Historial cargado: ${data.n_sucursales} sucursales · ${data.n_rutas} rutas`, "ok");
-        _selectedFile = null;
+        _selectedFile         = null;
         preview.style.display = "none";
         zone.style.display    = "";
         fileInput.value       = "";
@@ -774,35 +812,52 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
     }
   }
 
+  const _DIA_LABEL = {
+    LUNES: "Lunes", MARTES: "Martes", MIERCOLES: "Miércoles", MIÉRCOLES: "Miércoles",
+    JUEVES: "Jueves", VIERNES: "Viernes", SABADO: "Sábado", SÁBADO: "Sábado", DOMINGO: "Domingo",
+  };
+
+  // ── Cargar lista de historiales ──────────────────────────────
   async function cargarHistoricos() {
     spinner.style.display = "";
     lista.innerHTML       = "";
     empty.style.display   = "none";
     try {
-      const res   = await fetch("/configuracion/rutas-historicas");
-      const docs  = await res.json();
+      const res  = await fetch("/configuracion/rutas-historicas");
+      const docs = await res.json();
+      _todosLosDocs         = docs;
       spinner.style.display = "none";
+
       if (!docs.length) {
         empty.style.display = "";
         return;
       }
-      // Numeración: la API ya devuelve orden ascendente de peso (más antiguo=1, confirmadas=n)
-      const total = docs.length;
+
       docs.forEach((doc, i) => {
         const peso  = i + 1;
         const fecha = doc.cargado_en ? doc.cargado_en.slice(0, 16).replace("T", " ") : "—";
         const item  = document.createElement("div");
-        item.className = "hist-item";
-        const isConf   = doc.confirmada;
+        item.className       = "hist-item";
+        item.dataset.dias    = (doc.dias || []).join(",");
+        const isConf         = doc.confirmada;
+
+        // Chips de días del historial
+        const diasChips = (doc.dias || []).map(d =>
+          `<span class="hist-dia-chip">${_DIA_LABEL[d] || d}</span>`
+        ).join("");
+
         item.innerHTML = `
-          <div class="hist-item-num ${isConf ? 'confirmada' : ''}">${peso}</div>
+          <div class="hist-item-num ${isConf ? "confirmada" : ""}">${peso}</div>
           <div class="hist-item-info">
             <div class="hist-item-nombre">${h(doc.nombre)}</div>
-            <div class="hist-item-meta">${doc.n_sucursales ?? "?"} sucursales · ${doc.n_rutas ?? "?"} rutas · ${fecha}</div>
+            <div class="hist-item-meta">
+              ${doc.n_sucursales ?? "?"} suc${doc.n_mayoristas ? ` · ${doc.n_mayoristas} may` : ""} · ${doc.n_rutas ?? "?"} rutas · ${fecha}
+            </div>
+            ${diasChips ? `<div class="hist-item-dias">${diasChips}</div>` : ""}
           </div>
-          ${isConf ? '<span class="hist-item-confirmada-tag">✓ confirmada</span>' : ''}
+          ${isConf ? '<span class="hist-item-confirmada-tag">✓ confirmada</span>' : ""}
           <span class="hist-item-peso-tag">Peso: ${peso}</span>
-          <button class="btn-hist-mapa" data-id="${doc._id}" data-nombre="${h(doc.nombre)}" title="Ver rutas en el mapa">
+          <button class="btn-hist-mapa" data-id="${doc._id}" data-nombre="${ha(doc.nombre)}" title="Ver rutas en el mapa">
             <i data-lucide="map-pin"></i> Ver mapa
           </button>
           <button class="btn-hist-eliminar" data-id="${doc._id}" title="Eliminar historial">✕ Eliminar</button>
@@ -812,7 +867,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
 
       lista.querySelectorAll(".btn-hist-mapa").forEach(btn => {
         btn.addEventListener("click", () => {
-          abrirMapaHistorico(btn.dataset.id, btn.dataset.nombre);
+          abrirMapaHistorico(btn.dataset.id, btn.dataset.nombre, null);
           lucide.createIcons();
         });
       });
@@ -825,7 +880,7 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
             "Eliminar"
           );
           if (!confirmed) return;
-          const id  = btn.dataset.id;
+          const id   = btn.dataset.id;
           const res2 = await fetch(`/configuracion/rutas-historicas/${id}`, { method: "DELETE" });
           const d    = await res2.json();
           if (d.status === "ok") {
@@ -836,6 +891,9 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
           }
         });
       });
+
+      lucide.createIcons();
+
     } catch (e) {
       spinner.style.display = "none";
       empty.style.display   = "";
@@ -857,8 +915,8 @@ function ha(s) { return String(s ?? "").replace(/"/g,"&quot;").replace(/'/g,"&#3
   }
 
   function mostrarMsg(txt, tipo) {
-    msg.textContent  = txt;
-    msg.className    = `hist-msg ${tipo}`;
+    msg.textContent   = txt;
+    msg.className     = `hist-msg ${tipo}`;
     msg.style.display = "";
   }
   function ocultarMsg() {
@@ -873,13 +931,19 @@ const _HIST_COLORES = [
   '#0891b2', '#be185d', '#84cc16', '#ea580c', '#0d9488',
 ];
 
-let _histMap    = null;
-let _histSource = null; // EventSource activo
-let _histLayers = {};   // rutaId → { polyline: L.Polyline|null, markers: L.Layer[] }
-let _histRutas  = [];
-let _histActive = null; // null = todas; string = ruta aislada
-let _histTotal  = 0;
-let _histBounds = [];   // acumulación de coords para fitBounds
+let _histMap      = null;
+let _histSource   = null; // EventSource activo
+let _histLayers   = {};   // rutaId → { polyline: L.Polyline|null, markers: L.Layer[] }
+let _histRutas    = [];
+let _histActive   = null; // null = todas; string = ruta aislada
+let _histDia      = null; // null = todos los días; string = día filtrado en el mapa
+let _histTotal    = 0;
+let _histBounds   = [];   // acumulación de coords para fitBounds
+
+const _DIA_LABEL_MAP = {
+  LUNES: "Lunes", MARTES: "Martes", MIERCOLES: "Miércoles", MIÉRCOLES: "Miércoles",
+  JUEVES: "Jueves", VIERNES: "Viernes", SABADO: "Sábado", SÁBADO: "Sábado", DOMINGO: "Domingo",
+};
 
 // ── Icono de depósito (cuadrado oscuro, visible sobre cualquier fondo) ──
 function _depotIcon() {
@@ -929,7 +993,7 @@ function _actualizarProgreso(idx, total, fromCache, etaMs, rutaNombre) {
 
 // ── Apertura del modal ────────────────────────────────────────────────────────
 
-function abrirMapaHistorico(histId, histNombre) {
+function abrirMapaHistorico(histId, histNombre, diaInicial = null) {
   const overlay = document.getElementById("hist-mapa-overlay");
   if (!overlay) return;
 
@@ -940,6 +1004,7 @@ function abrirMapaHistorico(histId, histNombre) {
   _histLayers = {};
   _histRutas  = [];
   _histActive = null;
+  _histDia    = diaInicial;
   _histTotal  = 0;
   _histBounds = [];
 
@@ -949,7 +1014,9 @@ function abrirMapaHistorico(histId, histNombre) {
   document.getElementById("hist-mapa-titulo").textContent = `Historial: ${histNombre}`;
   document.getElementById("hist-mapa-sidebar-titulo").textContent = "Rutas";
   document.getElementById("hist-mapa-sidebar-list").innerHTML = "";
-  document.getElementById("btn-hist-mapa-todas").classList.add("active");
+  document.getElementById("btn-hist-mapa-todas").classList.toggle("active", _histDia === null);
+  const _diaFiltrosEl = document.getElementById("hist-dia-filtros");
+  if (_diaFiltrosEl) { _diaFiltrosEl.innerHTML = ""; _diaFiltrosEl.classList.add("hidden"); }
 
   // Inicializar mapa Leaflet
   const mapEl = document.getElementById("hist-mapa-map");
@@ -988,7 +1055,10 @@ function abrirMapaHistorico(histId, histNombre) {
       _histSource.close();
       _histSource = null;
       _mostrarProgreso(false);
-      if (_histBounds.length && _histMap) {
+      _construirFiltroDiaMapa();
+      if (_histDia) {
+        _actualizarVisibilidadHistMapa();
+      } else if (_histBounds.length && _histMap) {
         _histMap.fitBounds(_histBounds, { padding: [40, 40] });
       }
       if (!_histRutas.length) {
@@ -1032,12 +1102,22 @@ function _agregarCapaHistRuta(ruta, idx) {
   const markers = [];
   (ruta.paradas || []).forEach(p => {
     if (p.lat == null || p.lon == null) return;
-    const isDepot = p.tipo === "depot";
+    const isDepot   = p.tipo === "depot";
+    const isMay     = p.tipo === "mayorista";
     let m;
     if (isDepot) {
       m = L.marker([p.lat, p.lon], { icon: _depotIcon(), zIndexOffset: 1000 })
            .addTo(_histMap);
       m.bindPopup(`<b>🏭 Depósito</b><br>Punto de salida y regreso`);
+    } else if (isMay) {
+      m = L.circleMarker([p.lat, p.lon], {
+        radius: 7, fillColor: "#f59e0b", color: "#fff",
+        weight: 2.5, fillOpacity: 0.95,
+      }).addTo(_histMap);
+      m.bindPopup(
+        `<b>#${p.orden} ${h(p.nombre)}</b><br>Mayorista${p.kg_entrega ? `<br>${p.kg_entrega} kg` : ""}`
+      );
+      _histBounds.push([p.lat, p.lon]);
     } else {
       m = L.circleMarker([p.lat, p.lon], {
         radius: 6, fillColor: color, color: "#fff",
@@ -1058,16 +1138,90 @@ function _agregarCapaHistRuta(ruta, idx) {
   const item = document.createElement("div");
   item.className      = "hist-mapa-ruta-item";
   item.dataset.rutaId = ruta.id;
-  const nParadas = (ruta.paradas?.length ?? 1) - 1;
+  item.dataset.dia    = (ruta.dia || "").toUpperCase();
+  // Aplicar filtro de día si ya hay uno activo
+  if (_histDia && item.dataset.dia !== _histDia) item.style.display = "none";
+  const paradasSinDepot = (ruta.paradas || []).filter(p => p.tipo !== "depot");
+  const nSucs = paradasSinDepot.filter(p => p.tipo !== "mayorista").length;
+  const nMays = paradasSinDepot.filter(p => p.tipo === "mayorista").length;
+  const metaParadas = nSucs
+    ? `${nSucs} parada${nSucs !== 1 ? "s" : ""}${nMays ? ` · ${nMays} may.` : ""}`
+    : `${nMays} mayorista${nMays !== 1 ? "s" : ""}`;
   item.innerHTML = `
     <div class="hist-mapa-ruta-dot" style="background:${color}"></div>
     <div class="hist-mapa-ruta-info">
       <div class="hist-mapa-ruta-nombre">${h(ruta.nombre)}</div>
-      <div class="hist-mapa-ruta-meta">${ruta.distancia_km} km · ${Math.round(ruta.duracion_min)} min · ${nParadas} parada${nParadas !== 1 ? "s" : ""}</div>
+      <div class="hist-mapa-ruta-meta">${ruta.distancia_km} km · ${Math.round(ruta.duracion_min)} min · ${metaParadas}</div>
     </div>
   `;
   item.addEventListener("click", () => _seleccionarHistRuta(ruta.id));
   sidebarList.appendChild(item);
+}
+
+// ── Filtro por día en el mapa ─────────────────────────────────────────────────
+
+function _construirFiltroDiaMapa() {
+  const contenedor = document.getElementById("hist-dia-filtros");
+  if (!contenedor) return;
+
+  // Recopilar días únicos de las rutas cargadas
+  const diasSet = new Set();
+  _histRutas.forEach(r => { if (r.dia) diasSet.add(r.dia.toUpperCase()); });
+
+  if (!diasSet.size) { contenedor.classList.add("hidden"); return; }
+
+  const _DIA_ORDEN = ["LUNES","MARTES","MIERCOLES","MIÉRCOLES","JUEVES","VIERNES","SABADO","SÁBADO","DOMINGO"];
+  const diasOrden  = [...diasSet].sort((a, b) => _DIA_ORDEN.indexOf(a) - _DIA_ORDEN.indexOf(b));
+
+  contenedor.innerHTML = "";
+  contenedor.classList.remove("hidden");
+
+  // Botón "Todos" en el filtro del mapa (sincronizado con btn-hist-mapa-todas)
+  const btnTodos = document.createElement("button");
+  btnTodos.className   = "hist-dia-btn" + (_histDia === null ? " active" : "");
+  btnTodos.textContent = "Todos";
+  btnTodos.addEventListener("click", () => {
+    _histDia    = null;
+    _histActive = null;
+    _sincronizarBtnTodas(true);
+    _refrescarFiltroDiaMapa();
+    _actualizarVisibilidadHistMapa();
+  });
+  contenedor.appendChild(btnTodos);
+
+  diasOrden.forEach(dia => {
+    const btn = document.createElement("button");
+    btn.className   = "hist-dia-btn" + (_histDia === dia ? " active" : "");
+    btn.textContent = _DIA_LABEL_MAP[dia] || dia;
+    btn.dataset.dia = dia;
+    btn.addEventListener("click", () => {
+      _histDia    = dia;
+      _histActive = null;
+      _sincronizarBtnTodas(false);
+      _refrescarFiltroDiaMapa();
+      _actualizarVisibilidadHistMapa();
+    });
+    contenedor.appendChild(btn);
+  });
+}
+
+function _refrescarFiltroDiaMapa() {
+  const contenedor = document.getElementById("hist-dia-filtros");
+  if (!contenedor) return;
+  contenedor.querySelectorAll(".hist-dia-btn").forEach(btn => {
+    const esTodos = !btn.dataset.dia;
+    btn.classList.toggle("active", esTodos ? _histDia === null : btn.dataset.dia === _histDia);
+  });
+  // Actualizar visibilidad de items en el sidebar
+  document.querySelectorAll(".hist-mapa-ruta-item").forEach(el => {
+    const dia = (el.dataset.dia || "").toUpperCase();
+    el.style.display = (!_histDia || dia === _histDia) ? "" : "none";
+  });
+}
+
+function _sincronizarBtnTodas(activo) {
+  const btn = document.getElementById("btn-hist-mapa-todas");
+  if (btn) btn.classList.toggle("active", activo);
 }
 
 // ── Selección de ruta en el sidebar ──────────────────────────────────────────
@@ -1080,17 +1234,19 @@ function _seleccionarHistRuta(rutaId) {
     el.classList.toggle("active", !esMisma && el.dataset.rutaId === rutaId);
   });
 
-  const btnTodas = document.getElementById("btn-hist-mapa-todas");
-  if (btnTodas) btnTodas.classList.toggle("active", _histActive === null);
-
+  _sincronizarBtnTodas(_histActive === null && _histDia === null);
   _actualizarVisibilidadHistMapa();
 }
 
 function verTodasHistRutas() {
   _histActive = null;
-  document.querySelectorAll(".hist-mapa-ruta-item").forEach(el => el.classList.remove("active"));
-  const btnTodas = document.getElementById("btn-hist-mapa-todas");
-  if (btnTodas) btnTodas.classList.add("active");
+  _histDia    = null;
+  document.querySelectorAll(".hist-mapa-ruta-item").forEach(el => {
+    el.classList.remove("active");
+    el.style.display = "";
+  });
+  _sincronizarBtnTodas(true);
+  _refrescarFiltroDiaMapa();
   _actualizarVisibilidadHistMapa();
 }
 
@@ -1099,9 +1255,11 @@ function _actualizarVisibilidadHistMapa() {
   const bounds = [];
 
   _histRutas.forEach(ruta => {
-    const layer   = _histLayers[ruta.id];
+    const layer = _histLayers[ruta.id];
     if (!layer) return;
-    const visible = _histActive === null || _histActive === ruta.id;
+    const pasaDia    = !_histDia || (ruta.dia || "").toUpperCase() === _histDia;
+    const pasaRuta   = _histActive === null || _histActive === ruta.id;
+    const visible    = pasaDia && pasaRuta;
 
     if (layer.polyline) {
       if (visible) {
@@ -1132,6 +1290,7 @@ function cerrarMapaHistorico() {
   _histLayers = {};
   _histRutas  = [];
   _histActive = null;
+  _histDia    = null;
   _histTotal  = 0;
   _histBounds = [];
 }

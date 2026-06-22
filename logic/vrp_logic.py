@@ -16,6 +16,23 @@ VRP_DEV_NORMAL   = 0.30   # desviación ≤ 30 % → NORMAL
 VRP_DEV_ESPECIAL = 0.50   # desviación ≤ 50 % → EDGE_CASE
 UMBRAL_PEQUEÑO   = 1300   # kg ≤ este valor → excepción (no restricción de desviación)
 
+# CAP-4: regla de capacidad máxima permitida (igual que en asignacion_logic.py).
+# Los únicos vehículos que pueden superar el 100 % de su capacidad nominal son
+# los de 3.5 a 4.0 t (3500-4000 kg), con un tope fijo de 3900 kg (promedio de
+# carga 3.5 t, sin superar nunca las 4 t). Cualquier otro vehículo tiene como
+# límite máximo exactamente el 100 % de su capacidad nominal, sin tolerancia
+# adicional, bajo ninguna circunstancia.
+CAP_EXCEPCION_MIN_KG  = 3500
+CAP_EXCEPCION_MAX_KG  = 4000
+CAP_EXCEPCION_TOPE_KG = 3900
+
+
+def capacidad_efectiva_kg(cap_kg: float) -> float:
+    """Aplica la regla CAP-4 a una capacidad nominal expresada en kg."""
+    if CAP_EXCEPCION_MIN_KG <= cap_kg <= CAP_EXCEPCION_MAX_KG:
+        return float(CAP_EXCEPCION_TOPE_KG)
+    return float(cap_kg)
+
 _CONSOL_DEV_LOW = 0.50    # ruta >50 % por debajo del histórico → candidata a consolidar
 _CONSOL_MAX_KM  = 100.0   # distancia máxima entre centroides para consolidar
 
@@ -65,12 +82,85 @@ def nearest_neighbor(sc_dict):
     return visited
 
 
+def ordenar_paradas_por_historico(members: list, coords: dict) -> list:
+    """
+    Ordena los `sid` de una ruta priorizando la secuencia histórica.
+
+    members: [{"sid": id, "seq": int}, …]  (seq == 999 → sin historial para
+              esta ruta: sucursal nueva o movida por consolidación/reasignación)
+    coords:  {sid: (lat, lon)}
+
+    Las paradas SIN historial válido se insertan por proximidad geográfica
+    junto a su vecino más cercano ya ubicado, en lugar de recalcular toda la
+    ruta por distancia (nearest-neighbor), lo que antes descartaba el orden
+    histórico de las demás paradas con solo una parada nueva en la ruta.
+    """
+    def _coord(sid):
+        return coords.get(sid, (0.0, 0.0))
+
+    con_hist = [m for m in members if m.get("seq") != 999]
+    sin_hist = [m for m in members if m.get("seq") == 999]
+
+    if not con_hist:
+        # Ninguna parada tiene historial en esta ruta: única opción es distancia.
+        sc = {m["sid"]: _coord(m["sid"]) for m in members}
+        return nearest_neighbor(sc)
+
+    seqs = [m["seq"] for m in con_hist]
+    if len(seqs) == len(set(seqs)):
+        ordenados = sorted(con_hist, key=lambda m: m["seq"])
+    else:
+        ordenados = _ordenar_empates_por_proximidad(con_hist, _coord)
+
+    for m in sin_hist:
+        pos = _insertar_pos_proxima(ordenados, m["sid"], _coord)
+        ordenados.insert(pos, m)
+
+    return [m["sid"] for m in ordenados]
+
+
+def _ordenar_empates_por_proximidad(con_hist: list, coord_fn) -> list:
+    """Dentro de cada grupo con el mismo seq histórico, ordena por cercanía encadenada."""
+    grupos = defaultdict(list)
+    for m in con_hist:
+        grupos[m["seq"]].append(m)
+
+    ordenados: list = []
+    for seq in sorted(grupos.keys()):
+        grupo = grupos[seq]
+        if len(grupo) == 1:
+            ordenados.append(grupo[0])
+            continue
+        actual    = coord_fn(ordenados[-1]["sid"]) if ordenados else coord_fn(grupo[0]["sid"])
+        restante  = list(grupo)
+        while restante:
+            siguiente = min(restante, key=lambda m: haversine(actual[0], actual[1], *coord_fn(m["sid"])))
+            ordenados.append(siguiente)
+            actual = coord_fn(siguiente["sid"])
+            restante.remove(siguiente)
+    return ordenados
+
+
+def _insertar_pos_proxima(ordenados: list, sid, coord_fn) -> int:
+    """Índice (0-based) tras el cual insertar `sid` junto a su vecino más cercano."""
+    if not ordenados:
+        return 0
+    lat_n, lon_n = coord_fn(sid)
+    best_idx, best_dist = len(ordenados), float("inf")
+    for i, m in enumerate(ordenados):
+        dist = haversine(lat_n, lon_n, *coord_fn(m["sid"]))
+        if dist < best_dist:
+            best_dist, best_idx = dist, i + 1
+    return best_idx
+
+
 # ── Lectura de datos de MongoDB ────────────────────────────────────────────────
 
 def obtener_capacidades_vehiculos() -> dict:
     """
     Lee capacidades de vehículos activos desde MongoDB.
-    Retorna: {abreviatura: capacidad_kg (int)}
+    Retorna: {abreviatura: capacidad_kg (int)} — ya con la regla CAP-4 aplicada
+    (tope fijo de 3900 kg para vehículos de 3.5-4 t; 100 % nominal para el resto).
     """
     try:
         db   = get_db()
@@ -79,7 +169,7 @@ def obtener_capacidades_vehiculos() -> dict:
             abrev   = (v.get("abreviatura") or v.get("descripcion") or "").strip()
             cap_ton = float(v.get("capacidad_ton") or v.get("capacidad_toneladas") or 0)
             if abrev and cap_ton > 0:
-                caps[abrev] = int(cap_ton * 1000)
+                caps[abrev] = int(capacidad_efectiva_kg(cap_ton * 1000))
         return caps
     except Exception:
         return {}
@@ -140,12 +230,16 @@ def build_template_from_history(dfs: list, recency_weights: list = None) -> tupl
 
     Retorna
     -------
-    template    : {id_sucursal: (vehiculo, dia_semana, seq_mediana)}
-    kg_hist     : {id_sucursal: float}  — kg promedio ponderado
-    route_stats : {(vehiculo, dia): dict} — estadísticas por ruta
+    template       : {id_sucursal: (vehiculo, dia_semana, seq_mediana)}
+    kg_hist        : {id_sucursal: float}  — kg promedio ponderado
+    route_stats    : {(vehiculo, dia): dict} — estadísticas por ruta
+    historial_rutas: {id_sucursal: {(vehiculo, dia): peso_voto}} — TODAS las
+                      rutas a las que ha pertenecido históricamente cada
+                      sucursal (no solo la dominante), usado para reasignar
+                      sucursales cuando una ruta excede su capacidad.
     """
     if not dfs:
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     n = len(dfs)
     if recency_weights is None:
@@ -222,7 +316,9 @@ def build_template_from_history(dfs: list, recency_weights: list = None) -> tupl
             "is_small":   cap <= UMBRAL_PEQUEÑO,
         }
 
-    return template, kg_hist, route_stats
+    historial_rutas = {sid: dict(votes) for sid, votes in vd_votes.items()}
+
+    return template, kg_hist, route_stats, historial_rutas
 
 
 # ── Estado VRP ─────────────────────────────────────────────────────────────────
@@ -340,15 +436,119 @@ def _consolidate_underloaded(groups, kg_map, route_stats, coords, vehiculos_cap)
     return {k: v for k, v in groups.items() if v}, log
 
 
+# ── Resolución de sobrecarga usando historial ──────────────────────────────────
+
+def _centroide_miembros(miembros: list) -> tuple | None:
+    pts = [(m["lat"], m["lon"]) for m in miembros if m.get("lat") is not None and m.get("lon") is not None]
+    if not pts:
+        return None
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+def _resolver_sobrecarga_historica(
+    groups: dict,
+    pedidos_dict: dict,
+    vehiculos_cap: dict,
+    historial_rutas: dict,
+    max_iter: int = 200,
+) -> dict:
+    """
+    Si una ruta excede su capacidad efectiva, mueve una sucursal hacia otra
+    ruta. La sobrecarga NUNCA debe quedar sin resolver mientras exista
+    capacidad disponible en alguna otra ruta. Se prueba candidata por
+    candidata (de menor a mayor peso histórico en la ruta actual) y, para
+    cada una, se busca destino en orden:
+      1. Otra (vehículo, día) a la que también haya pertenecido históricamente
+         (mayor voto histórico) y que tenga capacidad disponible.
+      2. Si ninguna ruta con historial tiene cupo, la más cercana
+         geográficamente de entre TODAS las rutas con capacidad disponible
+         (proximidad y disponibilidad, sin requisito histórico).
+    Solo se deja sobrecargada si NINGUNA ruta del sistema tiene capacidad
+    disponible (caso límite: flota completa sin espacio).
+    """
+    historial_rutas = historial_rutas or {}
+
+    def _total(key):
+        return sum(pedidos_dict.get(m["sid"], 0) for m in groups.get(key, []))
+
+    def _mejor_destino(cand: dict, origen: tuple) -> tuple | None:
+        cand_kg    = pedidos_dict.get(cand["sid"], 0)
+        votos_cand = historial_rutas.get(cand["sid"], {})
+
+        # Nivel 1: ruta con historial de pertenencia y capacidad disponible.
+        mejor_dest, mejor_voto = None, -1.0
+        for (alt_veh, alt_dia), voto in votos_cand.items():
+            if (alt_veh, alt_dia) == origen or (alt_veh, alt_dia) not in groups:
+                continue
+            if _total((alt_veh, alt_dia)) + cand_kg > vehiculos_cap.get(alt_veh, 3500):
+                continue
+            if voto > mejor_voto:
+                mejor_voto = voto
+                mejor_dest = (alt_veh, alt_dia)
+        if mejor_dest:
+            return mejor_dest
+
+        # Nivel 2: ninguna ruta con historial tiene cupo — se garantiza la
+        # resolución por proximidad y disponibilidad entre TODAS las rutas.
+        cand_coords = (cand.get("lat"), cand.get("lon")) if cand.get("lat") is not None else None
+        mejor_dest, mejor_dist = None, float("inf")
+        for (alt_veh, alt_dia) in groups:
+            if (alt_veh, alt_dia) == origen:
+                continue
+            alt_mems = groups[(alt_veh, alt_dia)]
+            if _total((alt_veh, alt_dia)) + cand_kg > vehiculos_cap.get(alt_veh, 3500):
+                continue
+            centro = _centroide_miembros(alt_mems) if alt_mems else None
+            if cand_coords and centro:
+                dist = haversine(cand_coords[0], cand_coords[1], centro[0], centro[1])
+            else:
+                dist = 0.0  # ruta vacía o sin coordenadas: candidata válida igual
+            if dist < mejor_dist:
+                mejor_dist = dist
+                mejor_dest = (alt_veh, alt_dia)
+        return mejor_dest
+
+    for _ in range(max_iter):
+        cambio = False
+        for (veh, dia) in list(groups.keys()):
+            miembros = groups.get((veh, dia), [])
+            if not miembros or len(miembros) <= 1:
+                continue
+            cap = vehiculos_cap.get(veh, 3500)
+            if _total((veh, dia)) <= cap:
+                continue
+
+            # Probar cada sucursal (de menor a mayor voto histórico en esta
+            # ruta) hasta encontrar una con destino disponible.
+            candidatas = sorted(
+                miembros,
+                key=lambda m: historial_rutas.get(m["sid"], {}).get((veh, dia), 0.0),
+            )
+            for cand in candidatas:
+                mejor_dest = _mejor_destino(cand, (veh, dia))
+                if mejor_dest:
+                    miembros.remove(cand)
+                    cand["seq"] = 999
+                    groups[mejor_dest].append(cand)
+                    cambio = True
+                    break
+
+        if not cambio:
+            break
+
+    return groups
+
+
 # ── Generación principal VRP ───────────────────────────────────────────────────
 
 def generate_routes_vrp(
-    pedidos_dict:   dict,
-    coords_dict:    dict,
+    pedidos_dict:    dict,
+    coords_dict:     dict,
     active_template: dict,
-    kg_hist:        dict,
-    route_stats:    dict,
-    vehiculos_cap:  dict,
+    kg_hist:         dict,
+    route_stats:     dict,
+    vehiculos_cap:   dict,
+    historial_rutas: dict | None = None,
 ) -> tuple:
     """
     Genera rutas VRP híbridas.
@@ -361,6 +561,10 @@ def generate_routes_vrp(
     kg_hist         : {num_tienda (int): float}
     route_stats     : {(vehiculo, dia): dict}
     vehiculos_cap   : {abreviatura (str): capacidad_kg (int)}
+    historial_rutas : {num_tienda (int): {(vehiculo, dia): peso_voto}} — todas
+                       las rutas a las que ha pertenecido históricamente cada
+                       sucursal (ver build_template_from_history). Se usa para
+                       reasignar sucursales cuando una ruta excede su capacidad.
 
     Retorna
     -------
@@ -399,6 +603,12 @@ def generate_routes_vrp(
         groups, consol_log = _consolidate_underloaded(
             groups, pedidos_dict, route_stats, coords_dict, vehiculos_cap
         )
+
+    # ── Resolver sobrecarga: nunca debe quedar un vehículo sobre su capacidad
+    # mientras exista cupo en otra ruta (histórica primero, proximidad después) ──
+    groups = _resolver_sobrecarga_historica(
+        groups, pedidos_dict, vehiculos_cap, historial_rutas
+    )
 
     rows        = []
     report_rows = []
@@ -440,17 +650,11 @@ def generate_routes_vrp(
             "notas":        notas,
         })
 
-        # Secuencia: histórica si no hay empates; nearest-neighbor si hay duplicados o consolidados
-        if any(m["seq"] == 999 for m in members):
-            sc      = {m["sid"]: (m["lat"], m["lon"]) for m in members}
-            ordered = nearest_neighbor(sc)
-        else:
-            seqs = [m["seq"] for m in members]
-            if len(seqs) == len(set(seqs)):
-                ordered = [m["sid"] for m in sorted(members, key=lambda x: x["seq"])]
-            else:
-                sc      = {m["sid"]: (m["lat"], m["lon"]) for m in members}
-                ordered = nearest_neighbor(sc)
+        # Secuencia: prioriza el orden histórico de cada parada. Las paradas sin
+        # historial válido (nuevas o movidas por consolidación) se insertan por
+        # proximidad geográfica, sin descartar el orden histórico del resto.
+        coords_members = {m["sid"]: (m["lat"], m["lon"]) for m in members}
+        ordered = ordenar_paradas_por_historico(members, coords_members)
 
         for i, sid in enumerate(ordered, 1):
             rows.append({

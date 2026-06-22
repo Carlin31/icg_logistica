@@ -213,6 +213,10 @@ def eliminar_logistica(logistica_id: str) -> dict:
     for col in COLECCIONES_SECCION:
         db[col].delete_many({"logistica_id": oid})
 
+    # rutas_historicas guarda logistica_id como string, no ObjectId
+    db["rutas_historicas"].delete_many({"logistica_id": str(oid)})
+    db["vrp_reportes"].delete_many({"logistica_id": oid})
+
     return {"status": "ok"}
 
 
