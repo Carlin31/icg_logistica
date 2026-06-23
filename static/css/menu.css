@@ -39,11 +39,15 @@
   --header-h:      64px;
 }
 
+/* Body en columna flex: el footer siempre queda anclado al fondo del
+   viewport (nunca "flota" arriba mientras el contenido aún está cargando). */
 body {
   font-family: var(--font-body);
   background: var(--gris-bg);
   color: var(--texto-oscuro);
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   -webkit-font-smoothing: antialiased;
   zoom: 0.95;
 }
@@ -319,6 +323,8 @@ body {
    LAYOUT PRINCIPAL
    ════════════════════════════════════════════════════════════════ */
 .main {
+  flex: 1 0 auto;
+  width: 100%;
   max-width: 1200px;
   margin: 0 auto;
   padding: 2.5rem 1.5rem 4rem;
@@ -837,6 +843,11 @@ body {
   gap: .3rem;
 }
 
+/* Estado de autorización de rutas (portal del Conductor) */
+.meta-pill.autorizacion-sin       { background: var(--gris-bg); color: var(--gris-texto); }
+.meta-pill.autorizacion-ok        { background: #dcfce7; border-color: #bbf7d0; color: #166534; font-weight: 600; }
+.meta-pill.autorizacion-cancelada { background: #fee2e2; border-color: #fecaca; color: #b91c1c; font-weight: 600; }
+
 .estado-pill {
   display: inline-flex;
   align-items: center;
@@ -1227,3 +1238,36 @@ body {
   gap: .3rem;
 }
 .card-activa-badge .lucide { width: .68rem;  height: .68rem; }
+
+/* ── Footer del sistema ─────────────────────────────────────────── */
+.app-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: .4rem;
+  height: var(--header-h);
+  padding: 0 1.5rem;
+  background: var(--azul-oscuro);
+  font-size: .76rem;
+  color: rgba(255,255,255,.7);
+  /* Oculto por defecto: solo aparece tras hacer scroll (ver menu.js) */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease;
+}
+.app-footer.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-footer-brand {
+  font-weight: 700;
+  color: var(--blanco);
+}
+.app-footer-sep {
+  color: rgba(255,255,255,.3);
+}
+@media (max-width: 480px) {
+  .app-footer { font-size: .7rem; padding: 0 1rem; }
+}

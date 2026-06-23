@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+
+{% block title %}Gestión de Usuarios{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/usuarios.css') }}">
+{% endblock %}
+
+{% block nav_usuarios %}active{% endblock %}
+
+{% block content %}
+<div class="usr-header">
+  <h1>Gestión de Usuarios</h1>
+  <button id="btn-nuevo-usuario" class="btn btn-success"><i data-lucide="user-plus"></i> Nuevo usuario</button>
+</div>
+<p class="usr-descripcion">
+  Administra las cuentas de acceso al sistema. Los usuarios de tipo <strong>Conductor</strong> se crean
+  desde <a href="{{ url_for('configuracion.index') }}">Configuración → Choferes</a>; aquí puedes
+  consultarlos, cambiarles el usuario/contraseña o eliminarlos.
+</p>
+
+<input type="text" id="usr-buscar" class="input-search" placeholder="Buscar por usuario o nombre…">
+
+<div class="table-responsive">
+  <table id="tabla-usuarios" class="data-table">
+    <thead>
+      <tr>
+        <th>Usuario</th>
+        <th>Nombre</th>
+        <th>Rol</th>
+        <th>Último acceso</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</div>
+
+<!-- ── Modal crear/editar usuario ── -->
+<div id="modal-usuario" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3 id="modal-usuario-titulo">Nuevo usuario</h3>
+    <form id="form-usuario" onsubmit="event.preventDefault();">
+      <div class="form-group">
+        <label>Usuario</label>
+        <input type="text" id="campo-username" class="form-control" autocomplete="off" required>
+      </div>
+      <div class="form-group">
+        <label>Nombre</label>
+        <input type="text" id="campo-nombre" class="form-control" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Contraseña <span id="campo-password-hint" class="usr-hint"></span></label>
+        <div class="usr-password-wrap">
+          <input type="password" id="campo-password" class="form-control" autocomplete="new-password">
+          <button type="button" id="btn-toggle-password" class="usr-toggle-password" tabindex="-1">
+            <i data-lucide="eye" id="icono-toggle-password"></i>
+          </button>
+        </div>
+      </div>
+      <div class="form-group form-group-check" id="grupo-es-admin">
+        <label class="usr-checkbox">
+          <input type="checkbox" id="campo-es-admin">
+          Administrador (acceso a Gestión de Usuarios)
+        </label>
+      </div>
+    </form>
+    <div id="modal-usuario-error" class="modal-error hidden"></div>
+    <div class="modal-footer">
+      <button id="btn-cancelar-usuario" class="btn btn-secondary">Cancelar</button>
+      <button id="btn-guardar-usuario" class="btn btn-primary">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal confirmar eliminación ── -->
+<div id="modal-eliminar-usuario" class="modal-overlay hidden">
+  <div class="modal-box modal-box-sm">
+    <h3>Eliminar usuario</h3>
+    <p id="modal-eliminar-msg">¿Eliminar este usuario? Esta acción no se puede deshacer.</p>
+    <div class="modal-footer">
+      <button id="btn-cancelar-eliminar" class="btn btn-secondary">Cancelar</button>
+      <button id="btn-confirmar-eliminar" class="btn btn-danger">Eliminar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="usr-toast-container" class="usr-toast-container"></div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/usuarios.js') }}"></script>
+{% endblock %}

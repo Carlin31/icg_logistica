@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Sistema de Logística — Menú Principal</title>
+  <title>Menú Principal · ICG Logistics</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/menu.css') }}">
 </head>
@@ -33,7 +33,7 @@
       >
     </div>
     <div class="header-brand-text">
-      <span class="header-brand-name">Sistema de Logística</span>
+      <span class="header-brand-name">ICG Logistics</span>
       <span class="header-brand-sub">Integradora Comercial del Golfo</span>
     </div>
   </div>
@@ -302,6 +302,14 @@
 
 </main>
 
+<footer class="app-footer">
+  <span class="app-footer-brand">ICG Logistics</span>
+  <span class="app-footer-sep" aria-hidden="true">·</span>
+  <span>Integradora Comercial del Golfo</span>
+  <span class="app-footer-sep" aria-hidden="true">·</span>
+  <span>&copy; {{ anio_actual }}</span>
+</footer>
+
 <!-- Toast -->
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
@@ -327,7 +335,7 @@
 <div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
   <div class="fl-brand">
     <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
-    Sistema de Logística
+    ICG Logistics
   </div>
 
   <div class="fl-spinner">

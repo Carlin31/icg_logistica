@@ -1,0 +1,301 @@
+/* ================================================================
+   static/css/conductor_desktop.css
+   Portal del Conductor — interfaz de escritorio (desktop-first)
+   ================================================================ */
+
+:root {
+  --cdd-azul:       #2563eb;
+  --cdd-azul-osc:   #1e3a5f;
+  --cdd-verde:      #16a34a;
+  --cdd-rojo:       #ef4444;
+  --cdd-gris-bg:    #f1f5f9;
+  --cdd-gris-borde: #e2e8f0;
+  --cdd-gris-texto: #64748b;
+  --cdd-blanco:     #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--cdd-gris-bg);
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* el layout interno maneja su propio scroll por columna */
+}
+
+.hidden { display: none !important; }
+
+/* ── Barra superior ── */
+.cdd-header {
+  height: 60px;
+  display: flex; align-items: center; gap: 24px;
+  padding: 0 20px;
+  background: var(--cdd-azul-osc);
+  color: var(--cdd-blanco);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+}
+.cdd-brand { display: flex; align-items: center; gap: 10px; }
+.cdd-brand img { filter: brightness(0) invert(1); }
+.cdd-brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+.cdd-brand-name { font-weight: 700; font-size: .92rem; }
+.cdd-brand-sub { font-size: .68rem; color: rgba(255,255,255,.5); }
+.cdd-saludo { flex: 1; font-size: .85rem; color: rgba(255,255,255,.75); }
+.cdd-header-actions { display: flex; align-items: center; gap: 10px; }
+.cdd-btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 7px 12px; border-radius: 7px;
+  background: rgba(255,255,255,.08); color: rgba(255,255,255,.85);
+  text-decoration: none; font-size: .8rem; font-weight: 600;
+  transition: background .15s;
+}
+.cdd-btn-ghost:hover { background: rgba(255,255,255,.16); }
+.cdd-btn-ghost svg { width: 15px; height: 15px; }
+
+/* ── Layout principal: 3 columnas ── */
+.cdd-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr 380px;
+  height: calc(100vh - 60px);
+}
+
+/* ── Sidebar izquierdo ── */
+.cdd-sidebar {
+  border-right: 1px solid var(--cdd-gris-borde);
+  background: var(--cdd-blanco);
+  overflow-y: auto;
+  padding-bottom: 20px;
+}
+.cdd-sidebar-filtros {
+  display: flex; gap: 6px; padding: 14px 14px 10px;
+  position: sticky; top: 0; background: var(--cdd-blanco); z-index: 5;
+  border-bottom: 1px solid var(--cdd-gris-borde);
+  flex-wrap: wrap;
+}
+.cdd-filtro {
+  padding: 5px 11px; border-radius: 999px; border: 1px solid var(--cdd-gris-borde);
+  background: var(--cdd-blanco); color: var(--cdd-gris-texto);
+  font-size: .74rem; font-weight: 600; cursor: pointer; transition: background .15s, color .15s;
+}
+.cdd-filtro:hover { background: var(--cdd-gris-bg); }
+.cdd-filtro.active { background: var(--cdd-azul); color: var(--cdd-blanco); border-color: var(--cdd-azul); }
+
+.cdd-logisticas { padding: 10px 12px; }
+.cdd-logistica-card { margin-bottom: 16px; }
+.cdd-logistica-header {
+  display: flex; align-items: center; gap: 7px;
+  font-size: .78rem; font-weight: 700; color: var(--cdd-azul-osc);
+  margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--cdd-gris-borde);
+}
+.cdd-logistica-header svg { width: 14px; height: 14px; }
+
+.cdd-dia-bloque { margin-bottom: 10px; }
+.cdd-dia-titulo {
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--cdd-gris-texto); margin: 4px 2px 6px;
+}
+
+.cdd-ruta-item {
+  display: block; width: 100%; text-align: left;
+  background: var(--cdd-gris-bg); border: 1.5px solid transparent; border-radius: 10px;
+  padding: 9px 11px; margin-bottom: 7px; cursor: pointer; font: inherit;
+  transition: border-color .15s, background .15s;
+}
+.cdd-ruta-item:hover { background: #e8eef7; }
+.cdd-ruta-item--activa { border-color: var(--cdd-azul); background: #eff6ff; }
+.cdd-ruta-item.cdd-completada { background: #f0fdf4; }
+.cdd-ruta-item.cdd-en-curso   { background: #fffbeb; }
+.cdd-ruta-item-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px; }
+.cdd-ruta-item-veh { display: flex; align-items: center; gap: 4px; font-size: .72rem; font-weight: 600; color: var(--cdd-azul); }
+.cdd-ruta-item-veh svg { width: 12px; height: 12px; }
+.cdd-tag-icon { width: 14px; height: 14px; }
+.cdd-tag-ok { color: var(--cdd-verde); }
+.cdd-ruta-item-nombre { font-weight: 700; font-size: .82rem; margin-bottom: 6px; }
+
+/* ── Barra de progreso (compartida sidebar / toolbar) ── */
+.cdd-progreso-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.cdd-progreso-bar-wrap--sm { margin-top: 2px; }
+.cdd-progreso-track { flex: 1; height: 6px; background: var(--cdd-gris-borde); border-radius: 999px; overflow: hidden; }
+.cdd-progreso-fill { height: 100%; background: linear-gradient(90deg, var(--cdd-azul), #60a5fa); border-radius: 999px; transition: width .3s ease; }
+.cdd-progreso-label { font-size: .66rem; color: var(--cdd-gris-texto); white-space: nowrap; }
+
+.cdd-spinner, .cdd-vacio {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 40px 16px; color: var(--cdd-gris-texto); text-align: center; font-size: .82rem;
+}
+.cdd-vacio svg { width: 28px; height: 28px; opacity: .5; }
+.cdd-spin {
+  width: 22px; height: 22px; border: 3px solid var(--cdd-gris-borde);
+  border-top-color: var(--cdd-azul); border-radius: 50%;
+  animation: cdd-spin .8s linear infinite;
+}
+@keyframes cdd-spin { to { transform: rotate(360deg); } }
+
+/* ── Columna central: mapa ── */
+.cdd-mapa-col { position: relative; display: flex; flex-direction: column; }
+.cdd-mapa-toolbar {
+  display: flex; justify-content: space-between; align-items: center; gap: 20px;
+  padding: 14px 20px; background: var(--cdd-blanco); border-bottom: 1px solid var(--cdd-gris-borde);
+  z-index: 10;
+}
+.cdd-mapa-toolbar-info { display: flex; flex-direction: column; }
+.cdd-ruta-nombre { font-weight: 700; font-size: 1rem; }
+.cdd-ruta-meta { font-size: .76rem; color: var(--cdd-gris-texto); }
+.cdd-mapa-toolbar .cdd-progreso-bar-wrap { width: 220px; }
+
+.cdd-mapa { flex: 1; width: 100%; }
+.cdd-mapa-vacio {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; color: var(--cdd-gris-texto); text-align: center; padding: 20px;
+}
+.cdd-mapa-vacio svg { width: 40px; height: 40px; opacity: .4; }
+.cdd-mapa-vacio p { max-width: 260px; font-size: .85rem; }
+
+.cdd-marker, .cdd-marker-matriz {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cdd-azul); color: white; font-weight: 700; font-size: .8rem;
+  border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,.3);
+}
+.cdd-marker--entregado { background: var(--cdd-verde); }
+.cdd-marker-matriz { background: var(--cdd-azul-osc); }
+.cdd-marker-matriz svg, .cdd-marker-matriz i { width: 15px; height: 15px; }
+
+/* ── Columna derecha: detalle de paradas ── */
+.cdd-detalle {
+  border-left: 1px solid var(--cdd-gris-borde);
+  background: var(--cdd-blanco);
+  overflow-y: auto;
+  padding: 16px 14px;
+}
+.cdd-detalle-vacio {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; height: 100%; color: var(--cdd-gris-texto); text-align: center; padding: 20px;
+}
+.cdd-detalle-vacio svg { width: 32px; height: 32px; opacity: .4; }
+.cdd-detalle-vacio p { font-size: .82rem; max-width: 220px; }
+
+.cdd-parada {
+  display: flex; gap: 10px;
+  background: var(--cdd-gris-bg); border: 1px solid var(--cdd-gris-borde);
+  border-radius: 10px; padding: 11px 12px; margin-bottom: 9px;
+}
+.cdd-parada--entregada { background: #f0fdf4; border-color: #bbf7d0; }
+.cdd-parada-num {
+  flex-shrink: 0; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--cdd-blanco); border: 1px solid var(--cdd-gris-borde);
+  display: flex; align-items: center; justify-content: center;
+  font-size: .72rem; font-weight: 700; color: var(--cdd-azul-osc);
+}
+.cdd-parada--entregada .cdd-parada-num { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
+.cdd-parada-info { flex: 1; min-width: 0; }
+.cdd-parada-nombre { font-weight: 700; font-size: .85rem; margin-bottom: 2px; }
+.cdd-parada-detalle { font-size: .72rem; color: var(--cdd-gris-texto); margin-bottom: 2px; }
+.cdd-parada-tag { background: #ffedd5; color: #c2410c; font-size: .6rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-right: 4px; }
+.cdd-parada-tag--suc { background: var(--cdd-gris-borde); color: var(--cdd-gris-texto); }
+.cdd-parada-coords { font-size: .68rem; color: var(--cdd-gris-texto); font-family: monospace; }
+.cdd-parada-fecha { font-size: .68rem; color: var(--cdd-verde); margin-top: 2px; }
+.cdd-sin-coords { font-size: .68rem; color: var(--cdd-rojo); }
+
+.cdd-btn-entregar {
+  flex-shrink: 0; align-self: center;
+  display: flex; align-items: center; gap: 5px;
+  padding: 7px 12px; border-radius: 8px;
+  background: var(--cdd-azul); color: white; border: none; font-size: .76rem; font-weight: 700; cursor: pointer;
+  transition: background .15s;
+}
+.cdd-btn-entregar:hover { background: #1d4ed8; }
+.cdd-btn-entregar svg { width: 14px; height: 14px; }
+.cdd-parada-check { flex-shrink: 0; align-self: center; color: var(--cdd-verde); display: flex; }
+.cdd-parada-check svg { width: 24px; height: 24px; }
+
+/* ── Modal de confirmación ──
+   z-index alto a propósito: los controles internos de Leaflet (zoom,
+   atribución) usan z-index:1000 por defecto, así que el modal necesita
+   superarlo para no quedar detrás del mapa. */
+.cdd-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(15,23,42,.5);
+  display: flex; align-items: center; justify-content: center;
+}
+.cdd-confirm-box { background: var(--cdd-blanco); border-radius: 14px; padding: 26px; max-width: 360px; width: 100%; text-align: center; }
+.cdd-confirm-icon { width: 34px; height: 34px; color: var(--cdd-azul); margin-bottom: 8px; }
+.cdd-confirm-box h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.cdd-confirm-box p { margin: 0 0 18px; font-size: .85rem; color: var(--cdd-gris-texto); }
+.cdd-confirm-acciones { display: flex; gap: 10px; }
+.cdd-btn { flex: 1; padding: 10px; border-radius: 8px; border: none; font-weight: 700; font-size: .85rem; cursor: pointer; }
+.cdd-btn-secundario { background: var(--cdd-gris-bg); color: #334155; }
+.cdd-btn-primario { background: var(--cdd-azul); color: white; }
+.cdd-btn-primario:disabled { opacity: .6; }
+
+/* ── Historial separador en sidebar ── */
+.cdd-historial-sep {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--cdd-gris-texto); padding: 8px 4px 6px; margin-top: 4px;
+  border-top: 1px dashed var(--cdd-gris-borde);
+}
+.cdd-historial-sep svg { width: 12px; height: 12px; }
+.cdd-logistica--completada .cdd-logistica-header { color: #166534; border-bottom-color: #bbf7d0; }
+
+/* ── Parada cancelada ── */
+.cdd-parada--cancelada { background: #fff7ed; border-color: #fed7aa; }
+.cdd-parada--cancelada .cdd-parada-num { background: #ffedd5; border-color: #fed7aa; color: #9a3412; }
+
+.cdd-parada-cancelada-icon { flex-shrink: 0; align-self: center; color: var(--cdd-rojo); display: flex; }
+.cdd-parada-cancelada-icon svg { width: 22px; height: 22px; }
+.cdd-parada-cancelada-label { color: var(--cdd-rojo); font-weight: 600; }
+
+/* Acciones agrupadas */
+.cdd-parada-acciones { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; align-self: center; }
+
+/* Botón cancelar (pequeño, rojo) */
+.cdd-btn-cancelar-entrega {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(239,68,68,.4);
+  background: transparent; color: var(--cdd-rojo); font-size: .7rem; font-weight: 600; cursor: pointer;
+  transition: background .15s;
+}
+.cdd-btn-cancelar-entrega:hover { background: #fee2e2; }
+.cdd-btn-cancelar-entrega svg { width: 12px; height: 12px; }
+
+/* Botón re-entregar */
+.cdd-btn-entregar--reentrega {
+  background: transparent;
+  border: 1.5px solid var(--cdd-azul);
+  color: var(--cdd-azul);
+}
+.cdd-btn-entregar--reentrega:hover { background: #eff6ff; }
+
+/* Modal cancelar */
+.cdd-confirm-icon--rojo { color: var(--cdd-rojo); }
+.cdd-btn-rojo { background: var(--cdd-rojo); color: white; }
+.cdd-btn-rojo:disabled { opacity: .6; }
+
+/* Ruta con canceladas en el sidebar */
+.cdd-ruta-canceladas { color: var(--cdd-rojo); font-weight: 700; }
+
+/* Toast aviso */
+.cdd-toast--aviso { background: #f59e0b; color: #1c1917; }
+
+/* ── Toast ── */
+.cdd-toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); z-index: 2100;
+  padding: 11px 20px; border-radius: 9px; color: white; font-size: .85rem; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0,0,0,.2);
+}
+.cdd-toast--ok    { background: var(--cdd-verde); }
+.cdd-toast--error { background: var(--cdd-rojo); }
+
+/* ── Responsivo: pantallas de escritorio/laptop más angostas ──────
+   El panel de detalle nunca se oculta: ahí vive el único botón para
+   marcar una entrega en esta interfaz. Solo se va achicando junto
+   con el mapa y el sidebar conforme baja el ancho disponible. */
+@media (max-width: 1280px) {
+  .cdd-layout { grid-template-columns: 260px 1fr 320px; }
+}
+@media (max-width: 1100px) {
+  .cdd-layout { grid-template-columns: 220px 1fr 280px; }
+  .cdd-mapa-toolbar .cdd-progreso-bar-wrap { width: 140px; }
+}

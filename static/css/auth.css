@@ -7,6 +7,7 @@
   zoom: 1; /* anular el zoom global de base.css en esta pantalla */
   min-height: 100vh;
   display: flex;
+  flex-direction: row; /* anula el flex-direction:column que base.css aplica a <body> */
   align-items: center;
   justify-content: center;
   background: linear-gradient(135deg, var(--azul-oscuro) 0%, var(--azul-medio) 55%, var(--azul-claro) 100%);
@@ -16,6 +17,49 @@
 .auth-wrap {
   width: 100%;
   max-width: 380px;
+}
+.auth-wrap-seleccion {
+  max-width: 460px;
+}
+
+/* ── Selector de tipo de acceso (Logística / Conductor) ──────────── */
+.auth-tipo-opciones {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+.auth-tipo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1.5px solid var(--gris-borde, #e2e8f0);
+  border-radius: var(--radio-md, 12px);
+  text-decoration: none;
+  transition: border-color .15s, background .15s, transform .1s;
+}
+.auth-tipo-card:hover {
+  border-color: var(--azul-claro);
+  background: var(--azul-bg, #eff6ff);
+  transform: translateY(-1px);
+}
+.auth-tipo-card svg {
+  width: 22px;
+  height: 22px;
+  color: var(--azul-claro);
+  margin-bottom: 4px;
+}
+.auth-tipo-nombre {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--azul-oscuro);
+}
+.auth-tipo-desc {
+  font-size: 0.74rem;
+  color: var(--texto-claro);
+  line-height: 1.4;
 }
 
 .auth-card {
@@ -62,6 +106,7 @@
   color: var(--rojo-dark); font-size: 0.78rem; font-weight: 500;
   padding: 9px 12px; border-radius: var(--radio-sm); margin-bottom: 16px;
 }
+.auth-error.hidden { display: none; }
 
 .auth-form { display: flex; flex-direction: column; }
 
@@ -113,9 +158,19 @@
   padding: 12px; font-size: 0.85rem; font-weight: 700;
   cursor: pointer; transition: background 0.15s;
 }
-.auth-btn-submit:hover { background: var(--azul-dark); }
+.auth-btn-submit:hover:not(:disabled) { background: var(--azul-dark); }
+.auth-btn-submit:disabled { opacity: .6; cursor: not-allowed; }
+.auth-input:disabled { background: var(--gris-bg); cursor: not-allowed; opacity: .75; }
 
 .auth-footer {
   margin-top: 20px; text-align: center;
   font-size: 0.68rem; color: var(--texto-claro); line-height: 1.4;
 }
+.auth-cambiar-tipo {
+  display: inline-block;
+  margin-top: 6px;
+  color: var(--azul-claro);
+  text-decoration: none;
+  font-weight: 600;
+}
+.auth-cambiar-tipo:hover { text-decoration: underline; }

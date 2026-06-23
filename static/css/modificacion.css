@@ -678,6 +678,14 @@
   margin-bottom: 8px;
 }
 .crear-hint { color: #c2410c; font-weight: 600; }
+.crear-chofer-info {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.78rem; color: #1e293b; font-weight: 500;
+  background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 7px;
+  padding: 6px 10px; margin: -4px 0 12px;
+}
+.crear-chofer-info svg { width: 13px; height: 13px; flex-shrink: 0; color: #0284c7; }
+.crear-chofer-info.hidden { display: none; }
 .lista-disponibles { max-height: 350px; overflow-y: auto; }
 .disp-item {
   display: flex; justify-content: space-between; align-items: center;
@@ -803,6 +811,36 @@
   color: #94a3b8;
   text-transform: none;
   letter-spacing: 0;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   SELECTOR DE CHOFER (override por ruta/día)
+══════════════════════════════════════════════════════════════ */
+.zona-chofer {
+  border-bottom: 1px solid var(--borde, #e2e8f0);
+  padding: 6px 14px;
+}
+.chofer-selector-row { display: flex; align-items: center; gap: 8px; }
+.chofer-selector-row select {
+  flex: 1;
+  padding: 5px 8px;
+  font-size: 0.8rem;
+  border: 1px solid var(--borde, #e2e8f0);
+  border-radius: 6px;
+  background: #fff;
+}
+.chofer-badge-personalizado {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 2px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  margin: 6px 0 4px;
 }
 
 /* ── Resumen de utilización actual ───────────────────────────── */

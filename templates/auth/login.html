@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Iniciar sesión — Sistema de Logística</title>
+  <title>Iniciar sesión · ICG Logistics</title>
   <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
@@ -11,29 +11,28 @@
 <body class="auth-body">
 
 <div class="auth-wrap">
-  <div class="auth-card">
+  <div class="auth-card" id="auth-card">
 
     <div class="auth-brand">
       <div class="auth-brand-icon" aria-hidden="true">
         <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="26" height="26" class="hdr-icon">
       </div>
       <div class="auth-brand-text">
-        <span class="auth-brand-name">Sistema de Logística</span>
+        <span class="auth-brand-name">ICG Logistics</span>
         <span class="auth-brand-sub">Integradora Comercial del Golfo S.A. de C.V.</span>
       </div>
     </div>
 
-    <h1 class="auth-titulo">Iniciar sesión</h1>
+    <h1 class="auth-titulo">{{ "Acceso Conductor" if tipo == "conductor" else "Acceso Logística" }}</h1>
     <p class="auth-subtitulo">Ingresa tus credenciales para continuar</p>
 
-    {% if error %}
-    <div class="auth-error" role="alert">
+    <div class="auth-error {{ '' if error else 'hidden' }}" id="auth-error" role="alert">
       <i data-lucide="triangle-alert" style="width:15px;height:15px"></i>
-      <span>{{ error }}</span>
+      <span id="auth-error-msg">{{ error or "" }}</span>
     </div>
-    {% endif %}
 
-    <form method="POST" action="{{ url_for('auth.login') }}{% if request.args.get('next') %}?next={{ request.args.get('next') }}{% endif %}" class="auth-form" autocomplete="off">
+    <form method="POST" action="{{ url_for('auth.login') }}?tipo={{ tipo }}{% if request.args.get('next') %}&next={{ request.args.get('next') }}{% endif %}" class="auth-form" id="auth-form" autocomplete="off">
+      <input type="hidden" name="tipo" value="{{ tipo }}">
       <label class="auth-label" for="username">Usuario</label>
       <div class="auth-input-wrap">
         <i data-lucide="user" class="auth-input-icon"></i>
@@ -67,21 +66,51 @@
         </button>
       </div>
 
-      <button type="submit" class="auth-btn-submit">
+      <button type="submit" class="auth-btn-submit" id="auth-btn-submit">
         <i data-lucide="log-in" style="width:15px;height:15px"></i>
-        Entrar
+        <span>Entrar</span>
       </button>
     </form>
 
     <div class="auth-footer">
       Acceso restringido. Contacta al administrador si no cuentas con credenciales.
+      <br>
+      <a href="{{ url_for('auth.seleccionar') }}" class="auth-cambiar-tipo">‹ Cambiar tipo de acceso</a>
     </div>
   </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════════
+     FULLSCREEN LOADER — mismo estilo visual que el resto del sistema
+     (clases fl-* idénticas a las de base.html / Loader en base.js)
+     ═══════════════════════════════════════════════════════════════ -->
+<div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
+  <div class="fl-brand">
+    <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
+    ICG Logistics
+  </div>
+  <div class="fl-spinner">
+    <div class="fl-ring-outer"></div>
+    <div class="fl-ring"></div>
+    <div class="fl-core">
+      <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20" class="hdr-icon">
+    </div>
+  </div>
+  <div class="fl-dots">
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+    <div class="fl-dot"></div>
+  </div>
+  <div class="fl-title" id="fl-title">Iniciando sesión…</div>
+  <div class="fl-msg"   id="fl-msg">Un momento, por favor…</div>
+  <div class="fl-footer">Integradora Comercial del Golfo</div>
 </div>
 
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 <script>
   lucide.createIcons();
+
+  // ── Mostrar/ocultar contraseña ──────────────────────────────────
   (function () {
     const btn  = document.getElementById('auth-toggle-pw');
     const icon = document.getElementById('auth-toggle-pw-icon');
@@ -94,6 +123,102 @@
       lucide.createIcons();
     });
   })();
+
+  // ── Loader fullscreen (mismo API que Loader.show/hide de base.js) ──
+  const Loader = (() => {
+    let _rotTimer = null;
+    function show(titulo, mensajes = []) {
+      const overlay = document.getElementById('fl-overlay');
+      const title    = document.getElementById('fl-title');
+      const msg      = document.getElementById('fl-msg');
+      if (!overlay) return;
+      clearInterval(_rotTimer);
+      title.textContent = titulo;
+      msg.textContent   = mensajes[0] || '';
+      msg.classList.remove('fl-fade');
+      overlay.classList.add('fl-visible');
+      if (mensajes.length > 1) {
+        let idx = 0;
+        _rotTimer = setInterval(() => {
+          idx = (idx + 1) % mensajes.length;
+          msg.classList.add('fl-fade');
+          setTimeout(() => {
+            msg.textContent = mensajes[idx];
+            msg.classList.remove('fl-fade');
+          }, 350);
+        }, 1600);
+      }
+    }
+    function hide() {
+      clearInterval(_rotTimer);
+      const overlay = document.getElementById('fl-overlay');
+      if (overlay) overlay.classList.remove('fl-visible');
+    }
+    return { show, hide };
+  })();
+
+  // ── Envío del formulario vía fetch: loader + sin recargar en error ──
+  const MSG_LOGIN = [
+    'Verificando tus credenciales…',
+    'Preparando tu espacio de trabajo…',
+    'Un momento, estamos configurando tu sesión…',
+  ];
+
+  const form       = document.getElementById('auth-form');
+  const btnSubmit  = document.getElementById('auth-btn-submit');
+  const errorBox   = document.getElementById('auth-error');
+  const errorMsg   = document.getElementById('auth-error-msg');
+  const authCard   = document.getElementById('auth-card');
+
+  function mostrarError(mensaje) {
+    errorMsg.textContent = mensaje;
+    errorBox.classList.remove('hidden');
+  }
+  function ocultarError() {
+    errorBox.classList.add('hidden');
+  }
+  function habilitarFormulario(habilitado) {
+    form.querySelectorAll('input, button').forEach(el => { el.disabled = !habilitado; });
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    ocultarError();
+    habilitarFormulario(false);
+    Loader.show('Iniciando sesión', MSG_LOGIN);
+
+    const datos = {
+      username: document.getElementById('username').value.trim(),
+      password: document.getElementById('password').value,
+      tipo: form.querySelector('input[name="tipo"]').value,
+    };
+
+    try {
+      const res  = await fetch(form.action, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify(datos),
+      });
+      const data = await res.json().catch(() => null);
+
+      if (res.ok && data && data.status === 'ok') {
+        Loader.show('¡Listo!', ['Redirigiendo a tu panel…']);
+        authCard.style.transition = 'opacity .25s ease';
+        authCard.style.opacity    = '0';
+        setTimeout(() => { window.location.href = data.redirect || '/'; }, 300);
+      } else {
+        Loader.hide();
+        mostrarError((data && data.mensaje) || 'Usuario o contraseña incorrectos.');
+        habilitarFormulario(true);
+        document.getElementById('password').focus();
+      }
+    } catch (err) {
+      console.error('[login]', err);
+      Loader.hide();
+      mostrarError('No se pudo conectar con el servidor. Verifica tu conexión e intenta de nuevo.');
+      habilitarFormulario(true);
+    }
+  });
 </script>
 </body>
 </html>

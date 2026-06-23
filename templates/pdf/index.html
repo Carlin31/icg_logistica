@@ -62,9 +62,50 @@
             <iframe id="pdf-iframe" class="pdf-iframe" title="Vista previa del PDF"></iframe>
         </div>
 
+        <!-- ── Autorización de rutas hacia el portal del Conductor ── -->
+        <div class="autorizacion-box">
+            <div id="autorizacion-estado" class="autorizacion-estado">
+                <i data-lucide="lock" class="pdf-icon" aria-hidden="true"></i>
+                <span id="autorizacion-estado-texto">Sin autorizar</span>
+            </div>
+            <p class="autorizacion-meta" id="autorizacion-meta"></p>
+            <p class="descripcion">
+                Al autorizar, todas las rutas de esta logística quedan disponibles de
+                inmediato para sus choferes en el portal del Conductor, y la pestaña
+                <strong>Seguimiento</strong> se habilita para esta logística.
+            </p>
+            <div class="autorizacion-acciones">
+                <button id="btn-autorizar" class="btn-autorizar">
+                    <i data-lucide="shield-check" class="pdf-icon" aria-hidden="true"></i>
+                    <span>Autorizar</span>
+                </button>
+                <button id="btn-cancelar-autorizacion" class="btn-cancelar-autorizacion" style="display:none;">
+                    <i data-lucide="shield-off" class="pdf-icon" aria-hidden="true"></i>
+                    <span>Cancelar autorización</span>
+                </button>
+            </div>
+        </div>
+
     </div>
 
 </div>
+
+<!-- ── Modal de confirmación: cancelar autorización ── -->
+<div id="modal-cancelar-autorizacion" class="modal-overlay hidden">
+  <div class="modal-box">
+    <h3>Cancelar autorización</h3>
+    <p id="modal-cancelar-msg">¿Está seguro de que desea cancelar la autorización de esta ruta?</p>
+    <div id="modal-cancelar-aviso-entregas" class="alerta-warning" style="display:none; margin-top:.8rem;">
+        <i data-lucide="triangle-alert" class="pdf-icon" aria-hidden="true"></i>
+        <span id="modal-cancelar-aviso-texto"></span>
+    </div>
+    <div class="modal-footer">
+      <button id="modal-cancelar-no" class="btn-secondary">No, mantener autorización</button>
+      <button id="modal-cancelar-si" class="btn-cancelar-autorizacion">Sí, cancelar autorización</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block extra_js %}

@@ -18,10 +18,12 @@ from logic.configuracion_logic import (
     editar_producto_proalmex, eliminar_producto_proalmex,
     listar_sucursales, obtener_sucursal, agregar_sucursal, editar_sucursal, eliminar_sucursal,
     listar_vehiculos,  obtener_vehiculo,  agregar_vehiculo,  editar_vehiculo,  eliminar_vehiculo,
-    toggle_activo_vehiculo,
+    toggle_activo_vehiculo, actualizar_chofer_vehiculo,
     listar_clientes_mayoristas, obtener_cliente_mayorista, agregar_cliente_mayorista,
     editar_cliente_mayorista, eliminar_cliente_mayorista, toggle_activo_cliente_mayorista,
+    listar_choferes, obtener_chofer, agregar_chofer, eliminar_chofer,
 )
+from logic.auth_logic import generar_acceso_chofer
 
 configuracion_bp = Blueprint("configuracion", __name__)
 
@@ -210,6 +212,49 @@ def delete_vehiculo(vehiculo_id):
 @configuracion_bp.route("/vehiculos/<vehiculo_id>/activo", methods=["PUT"])
 def put_vehiculo_activo(vehiculo_id):
     return _respuesta(toggle_activo_vehiculo(vehiculo_id))
+
+
+@configuracion_bp.route("/vehiculos/<vehiculo_id>/chofer", methods=["PUT"])
+def put_vehiculo_chofer(vehiculo_id):
+    datos, err = _json_o_400()
+    if err:
+        return err
+    return _respuesta(actualizar_chofer_vehiculo(vehiculo_id, datos.get("chofer", ""), datos.get("chofer_id")))
+
+
+# ── Choferes ─────────────────────────────────────────────────────
+@configuracion_bp.route("/choferes", methods=["GET"])
+def get_choferes():
+    return jsonify(listar_choferes(request.args.get("nombre", "")))
+
+
+@configuracion_bp.route("/choferes/<chofer_id>", methods=["GET"])
+def get_chofer(chofer_id):
+    doc = obtener_chofer(chofer_id)
+    return jsonify(doc) if doc else (jsonify({"error": "No encontrado"}), 404)
+
+
+@configuracion_bp.route("/choferes", methods=["POST"])
+def post_chofer():
+    datos, err = _json_o_400()
+    if err:
+        return err
+    resultado = agregar_chofer(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@configuracion_bp.route("/choferes/<chofer_id>", methods=["DELETE"])
+def delete_chofer(chofer_id):
+    return _respuesta(eliminar_chofer(chofer_id))
+
+
+@configuracion_bp.route("/choferes/<chofer_id>/generar-acceso", methods=["POST"])
+def post_generar_acceso_chofer(chofer_id):
+    """Genera username + contraseña para que el chofer pueda usar el portal del Conductor."""
+    resultado = generar_acceso_chofer(chofer_id)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
 
 
 # ── Clientes Mayoristas ────────────────────────────────────────

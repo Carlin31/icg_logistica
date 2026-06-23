@@ -30,29 +30,6 @@
     <form id="form-general" onsubmit="event.preventDefault();">
 
 
-      <!-- Parámetros de operación -->
-      <fieldset class="config-fieldset">
-        <legend><i data-lucide="settings"></i> Parámetros de Operación</legend>
-        <div class="config-grid-2">
-          <div class="form-group">
-            <label>Velocidad promedio (km/h)</label>
-            <input name="velocidad_kmh" type="number" step="0.1" class="form-control" placeholder="24">
-          </div>
-          <div class="form-group">
-            <label>Min. de descarga por kg</label>
-            <input name="min_descarga_por_kg" type="number" step="0.01" class="form-control" placeholder="0.20">
-          </div>
-          <div class="form-group">
-            <label>Utilización mínima vehículo (%)</label>
-            <input name="utilizacion_min" type="number" step="1" class="form-control" placeholder="80">
-          </div>
-          <div class="form-group">
-            <label>Utilización máxima vehículo (%)</label>
-            <input name="utilizacion_max" type="number" step="1" class="form-control" placeholder="120">
-          </div>
-        </div>
-      </fieldset>
-
       <!-- Días de operación -->
       <fieldset class="config-fieldset">
         <legend><i data-lucide="calendar-days"></i> Días y Horarios de Operación</legend>
@@ -172,7 +149,10 @@
   <section id="tab-vehiculos" class="tab-content hidden">
     <div class="section-header">
       <h2>Gestión de Vehículos</h2>
-      <button id="btn-nuevo-vehiculo" class="btn btn-success">+ Nuevo vehículo</button>
+      <div class="section-header-actions">
+        <button id="btn-gestionar-choferes" class="btn btn-secondary"><i data-lucide="users"></i> Choferes</button>
+        <button id="btn-nuevo-vehiculo" class="btn btn-success">+ Nuevo vehículo</button>
+      </div>
     </div>
     <div class="filter-container">
       <input type="text" id="buscar-vehiculo-nombre" placeholder="Buscar (placas, abreviatura, desc.)…" class="input-search">
@@ -185,7 +165,7 @@
             <th class="sortable">Descripción</th>
             <th class="sortable">Abreviatura</th>
             <th class="sortable">Placas</th>
-            <th class="sortable">Chofer</th>
+            <th>Chofer</th>
             <th class="sortable col-num">Largo Vol. (m)</th>
             <th class="sortable col-num">Ancho Vol. (m)</th>
             <th class="sortable col-num">Alto Vol. (m)</th>
@@ -351,6 +331,22 @@
     <div class="modal-footer">
       <button id="modal-cancel" class="btn btn-secondary">Cancelar</button>
       <button id="modal-save"   class="btn btn-primary">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Mini modal: gestión de choferes -->
+<div id="modal-choferes-overlay" class="modal-overlay hidden">
+  <div class="modal-box modal-box-sm">
+    <h3>Choferes</h3>
+    <form id="form-nuevo-chofer" class="choferes-add-form" onsubmit="event.preventDefault();">
+      <input type="text" id="input-nuevo-chofer" class="form-control" placeholder="Nombre del chofer" maxlength="80">
+      <button type="submit" class="btn btn-primary btn-sm">Agregar</button>
+    </form>
+    <div id="choferes-error" class="modal-error hidden"></div>
+    <ul id="lista-choferes" class="choferes-list"></ul>
+    <div class="modal-footer">
+      <button id="btn-cerrar-choferes" class="btn btn-secondary">Cerrar</button>
     </div>
   </div>
 </div>

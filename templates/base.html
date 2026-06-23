@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Sistema de Rutas{% endblock %}</title>
+    <title>{% block title %}ICG Logistics{% endblock %} · ICG Logistics</title>
     {% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">{% endblock %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
     {% block extra_css %}{% endblock %}
@@ -21,11 +21,13 @@
   {% set _url_asi = '/asignacion/'  ~ perfil_slug %}
   {% set _url_mod = '/modificacion/' ~ perfil_slug %}
   {% set _url_pdf = '/pdf/'         ~ perfil_slug %}
+  {% set _url_seg = '/seguimiento/' ~ perfil_slug %}
 {% else %}
   {% set _url_ext = url_for('extraccion.index') %}
   {% set _url_asi = url_for('asignacion.index') %}
   {% set _url_mod = url_for('modificacion.index') %}
   {% set _url_pdf = url_for('pdf.index') %}
+  {% set _url_seg = url_for('seguimiento.index') %}
 {% endif %}
 <header class="header" id="header" role="banner">
 
@@ -46,7 +48,7 @@
             >
         </div>
         <div class="header-brand-text">
-            <span class="header-brand-name">Sistema de Logística</span>
+            <span class="header-brand-name">ICG Logistics</span>
             <span class="header-brand-sub">Integradora Comercial del Golfo S.A. de C.V.</span>
         </div>
     </a>
@@ -54,25 +56,36 @@
     <!-- ── Centro: Navegación ────────────────────────────────── -->
     <nav class="header-nav" aria-label="Módulos del sistema">
         <a href="{{ url_for('configuracion.index') }}"  class="nav-item {% block nav_config %}{% endblock %}">
-            <img src="{{ url_for('static', filename='img/icon-config.svg') }}"        alt="" width="15" height="15" class="hdr-icon">
-            <span>Config.</span>
+            <i data-lucide="settings" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
+            <span>Configuración</span>
         </a>
         <a href="{{ _url_ext }}"                        class="nav-item {% block nav_ext    %}{% endblock %}">
-            <img src="{{ url_for('static', filename='img/icon-extraccion.svg') }}"    alt="" width="15" height="15" class="hdr-icon">
+            <i data-lucide="download" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
             <span>Extracción</span>
         </a>
         <a href="{{ _url_asi }}"                        class="nav-item {% block nav_asig   %}{% endblock %}">
-            <img src="{{ url_for('static', filename='img/icon-asignacion.svg') }}"    alt="" width="15" height="15" class="hdr-icon">
+            <i data-lucide="list-checks" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
             <span>Asignación</span>
         </a>
         <a href="{{ _url_mod }}"                        class="nav-item {% block nav_mod    %}{% endblock %}">
-            <img src="{{ url_for('static', filename='img/icon-modificacion.svg') }}"  alt="" width="15" height="15" class="hdr-icon">
-            <span>Modif.</span>
+            <i data-lucide="edit-3" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
+            <span>Modificación</span>
         </a>
         <a href="{{ _url_pdf }}"                        class="nav-item {% block nav_pdf    %}{% endblock %}">
-            <img src="{{ url_for('static', filename='img/icon-pdf.svg') }}"           alt="" width="15" height="15" class="hdr-icon">
+            <i data-lucide="file-text" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
             <span>PDF</span>
         </a>
+        {% if perfil_autorizado %}
+        <a href="{{ _url_seg }}" class="nav-item {% block nav_seg %}{% endblock %}">
+            <i data-lucide="route" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
+            <span>Seguimiento</span>
+        </a>
+        {% else %}
+        <span class="nav-item nav-item--disabled" title="Autoriza las rutas desde PDF para habilitar esta pestaña" aria-disabled="true">
+            <i data-lucide="route" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
+            <span>Seguimiento</span>
+        </span>
+        {% endif %}
     </nav>
 
     <!-- ── Derecha: Badge de perfil + Botón de menú ─────────── -->
@@ -84,6 +97,16 @@
         </a>
         {% endif %}
         {% if usuario_nombre %}
+        <div class="zoom-control" id="zoom-control" title="Zoom de la página">
+            <button type="button" id="btn-zoom-out" aria-label="Reducir zoom">−</button>
+            <span class="zoom-nivel" id="zoom-nivel">100%</span>
+            <button type="button" id="btn-zoom-in" aria-label="Aumentar zoom">+</button>
+        </div>
+        {% if usuario_es_admin %}
+        <a href="{{ url_for('usuarios.index') }}" class="nav-item nav-item--icon {% block nav_usuarios %}{% endblock %}" title="Gestión de Usuarios">
+            <i data-lucide="users-round" class="hdr-icon-lucide" style="width:15px;height:15px"></i>
+        </a>
+        {% endif %}
         <a href="{{ url_for('auth.logout') }}" class="usuario-badge" title="Cerrar sesión ({{ usuario_nombre }})">
             <span class="usuario-badge-nombre">{{ usuario_nombre }}</span>
             <span class="usuario-badge-salir">Salir</span>
@@ -128,25 +151,44 @@
         <div class="nav-section-label">Módulos del sistema</div>
 
         <a href="{{ url_for('configuracion.index') }}"  class="nav-link">
-            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-config.svg') }}"        alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-icon"><i data-lucide="settings" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
             <span class="nav-link-label">Configuración</span>
         </a>
         <a href="{{ _url_ext }}"                        class="nav-link">
-            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-extraccion.svg') }}"    alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-icon"><i data-lucide="download" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
             <span class="nav-link-label">Extracción</span>
         </a>
         <a href="{{ _url_asi }}"                        class="nav-link">
-            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-asignacion.svg') }}"    alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-icon"><i data-lucide="list-checks" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
             <span class="nav-link-label">Asignación</span>
         </a>
         <a href="{{ _url_mod }}"                        class="nav-link">
-            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-modificacion.svg') }}"  alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-icon"><i data-lucide="edit-3" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
             <span class="nav-link-label">Modificación</span>
         </a>
         <a href="{{ _url_pdf }}"                        class="nav-link">
-            <span class="nav-link-icon"><img src="{{ url_for('static', filename='img/icon-pdf.svg') }}"           alt="" width="16" height="16" class="hdr-icon"></span>
+            <span class="nav-link-icon"><i data-lucide="file-text" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
             <span class="nav-link-label">PDF</span>
         </a>
+        {% if perfil_autorizado %}
+        <a href="{{ _url_seg }}" class="nav-link">
+            <span class="nav-link-icon"><i data-lucide="route" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
+            <span class="nav-link-label">Seguimiento</span>
+        </a>
+        {% else %}
+        <span class="nav-link nav-link--disabled" title="Autoriza las rutas desde PDF para habilitar esta pestaña" aria-disabled="true">
+            <span class="nav-link-icon"><i data-lucide="route" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
+            <span class="nav-link-label">Seguimiento</span>
+        </span>
+        {% endif %}
+
+        {% if usuario_es_admin %}
+        <div class="nav-section-label">Administración</div>
+        <a href="{{ url_for('usuarios.index') }}" class="nav-link">
+            <span class="nav-link-icon"><i data-lucide="users-round" class="hdr-icon-lucide" style="width:16px;height:16px"></i></span>
+            <span class="nav-link-label">Gestión de Usuarios</span>
+        </a>
+        {% endif %}
     </div>
 </nav>
 
@@ -160,13 +202,24 @@
 </main>
 
 <!-- ═══════════════════════════════════════════════════════════════
+     FOOTER
+     ═══════════════════════════════════════════════════════════════ -->
+<footer class="app-footer">
+    <span class="app-footer-brand">ICG Logistics</span>
+    <span class="app-footer-sep" aria-hidden="true">·</span>
+    <span>Integradora Comercial del Golfo</span>
+    <span class="app-footer-sep" aria-hidden="true">·</span>
+    <span>&copy; {{ anio_actual }}</span>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════════════
      FULLSCREEN LOADER — disponible en todas las secciones
      Controlado por Loader.show() / Loader.hide() en base.js
      ═══════════════════════════════════════════════════════════════ -->
 <div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
   <div class="fl-brand">
     <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
-    Sistema de Logística
+    ICG Logistics
   </div>
   <div class="fl-spinner">
     <div class="fl-ring-outer"></div>

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Iniciar sesión · ICG Logistics</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+</head>
+<body class="auth-body">
+
+<div class="auth-wrap auth-wrap-seleccion">
+  <div class="auth-card">
+
+    <div class="auth-brand">
+      <div class="auth-brand-icon" aria-hidden="true">
+        <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="26" height="26" class="hdr-icon">
+      </div>
+      <div class="auth-brand-text">
+        <span class="auth-brand-name">ICG Logistics</span>
+        <span class="auth-brand-sub">Integradora Comercial del Golfo S.A. de C.V.</span>
+      </div>
+    </div>
+
+    <h1 class="auth-titulo">¿Cómo quieres ingresar?</h1>
+    <p class="auth-subtitulo">Elige el tipo de acceso para continuar</p>
+
+    <div class="auth-tipo-opciones">
+      <a href="{{ url_for('auth.login', tipo='logistica') }}" class="auth-tipo-card">
+        <i data-lucide="layout-dashboard"></i>
+        <span class="auth-tipo-nombre">Logística</span>
+        <span class="auth-tipo-desc">Administración, asignación y modificación de rutas</span>
+      </a>
+      <a href="{{ url_for('auth.login', tipo='conductor') }}" class="auth-tipo-card">
+        <i data-lucide="truck"></i>
+        <span class="auth-tipo-nombre">Conductor</span>
+        <span class="auth-tipo-desc">Consulta y entrega de tus rutas asignadas</span>
+      </a>
+    </div>
+
+    <div class="auth-footer">
+      Acceso restringido. Contacta al administrador si no cuentas con credenciales.
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script>lucide.createIcons();</script>
+</body>
+</html>

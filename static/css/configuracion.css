@@ -20,6 +20,47 @@
 
 /* ── Section header ── */
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.section-header-actions { display: flex; gap: 8px; align-items: center; }
+.section-header-actions .btn svg { width: 14px; height: 14px; }
+
+/* ── Selector de chofer inline (tabla de vehículos) ── */
+.chofer-select { display: block; width: 160px; min-width: 160px; max-width: 160px; padding: 5px 8px; font-size: var(--text-sm); border: 1px solid var(--gris-borde); border-radius: var(--radio-btn); background: var(--blanco); box-sizing: border-box; }
+#tabla-vehiculos td:nth-child(4) { white-space: nowrap; }
+.chofer-select option[data-no-registrado] { color: #b45309; }
+
+/* ── Mini interfaz: gestión de choferes ── */
+.modal-box-sm { max-width: 380px; }
+.choferes-add-form { display: flex; gap: 8px; margin-bottom: 12px; }
+.choferes-add-form .form-control { flex: 1; }
+.choferes-list { list-style: none; padding: 0; margin: 0; max-height: 280px; overflow-y: auto; border: 1px solid var(--gris-borde); border-radius: var(--radio-btn); }
+.choferes-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--gris-borde); font-size: var(--text-base); }
+.choferes-list li:last-child { border-bottom: none; }
+.choferes-list .choferes-empty { color: var(--gris-texto); text-align: center; padding: 16px; }
+.choferes-list button { background: none; border: none; color: #ef4444; cursor: pointer; padding: 4px; display: flex; align-items: center; }
+.choferes-list button:hover { color: #b91c1c; }
+.choferes-list button svg { width: 16px; height: 16px; }
+.choferes-li-acciones { display: flex; align-items: center; gap: 8px; }
+.btn-generar-acceso {
+  display: flex; align-items: center; gap: 4px;
+  background: var(--azul-bg); color: var(--azul) !important;
+  border: 1px solid var(--azul-borde); border-radius: var(--radio-btn);
+  padding: 4px 8px !important; font-size: var(--text-xs); font-weight: 600; white-space: nowrap;
+}
+.btn-generar-acceso:hover { background: var(--azul-borde); color: var(--azul-dark) !important; }
+.btn-generar-acceso svg { width: 13px; height: 13px; }
+.btn-generar-acceso:disabled { opacity: .6; cursor: not-allowed; }
+.chofer-acceso-badge {
+  display: flex; align-items: center; gap: 4px;
+  color: #16a34a; font-size: var(--text-xs); font-weight: 600; white-space: nowrap;
+}
+.chofer-acceso-badge svg { width: 13px; height: 13px; }
+.modal-error.choferes-credenciales {
+  background: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
+  font-size: var(--text-sm); line-height: 1.5;
+}
+.modal-error.choferes-credenciales code {
+  background: #dcfce7; padding: 2px 6px; border-radius: 4px; font-weight: 700;
+}
 
 /* ── Search ── */
 .input-search {

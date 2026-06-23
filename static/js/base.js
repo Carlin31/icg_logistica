@@ -70,3 +70,70 @@ function mostrarMensaje(contenedor, mensaje, tipo = 'info') {
         el.innerHTML = `<div class="mensaje ${tipo}">${mensaje}</div>`;
     }
 }
+
+// ── Footer: oculto por defecto, solo aparece tras hacer scroll ───────────────
+(function () {
+    const footer = document.querySelector('.app-footer');
+    if (!footer) return;
+
+    function actualizarVisibilidad() {
+        footer.classList.toggle('visible', window.scrollY > 10);
+    }
+
+    window.addEventListener('scroll', actualizarVisibilidad, { passive: true });
+    actualizarVisibilidad();
+})();
+
+// ── Zoom de página, guardado por usuario en el servidor ──────────────────────
+(function () {
+    const ZOOM_MIN  = 80;
+    const ZOOM_MAX  = 150;
+    const ZOOM_STEP = 10;
+    const ZOOM_DEFAULT = 100;
+
+    const control = document.getElementById('zoom-control');
+    if (!control) return; // sin sesión iniciada: no se muestra el control
+
+    const btnOut  = document.getElementById('btn-zoom-out');
+    const btnIn   = document.getElementById('btn-zoom-in');
+    const nivelEl = document.getElementById('zoom-nivel');
+
+    let _zoom = ZOOM_DEFAULT;
+    let _guardarTimer = null;
+
+    function aplicarZoom(pct) {
+        document.documentElement.style.zoom = pct + '%';
+        if (nivelEl) nivelEl.textContent = pct + '%';
+        if (btnOut)  btnOut.disabled = pct <= ZOOM_MIN;
+        if (btnIn)   btnIn.disabled  = pct >= ZOOM_MAX;
+    }
+
+    function guardarZoom(pct) {
+        clearTimeout(_guardarTimer);
+        _guardarTimer = setTimeout(() => {
+            fetch('/auth/zoom', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ zoom: pct }),
+            }).catch(err => console.warn('[zoom]', err));
+        }, 300);
+    }
+
+    function cambiarZoom(delta) {
+        _zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, _zoom + delta));
+        aplicarZoom(_zoom);
+        guardarZoom(_zoom);
+    }
+
+    if (btnOut) btnOut.addEventListener('click', () => cambiarZoom(-ZOOM_STEP));
+    if (btnIn)  btnIn.addEventListener('click',  () => cambiarZoom(ZOOM_STEP));
+
+    // Cargar el nivel guardado para este usuario y aplicarlo de inmediato
+    fetch('/auth/zoom')
+        .then(res => res.ok ? res.json() : { zoom: ZOOM_DEFAULT })
+        .then(data => {
+            _zoom = Number(data.zoom) || ZOOM_DEFAULT;
+            aplicarZoom(_zoom);
+        })
+        .catch(() => aplicarZoom(ZOOM_DEFAULT));
+})();

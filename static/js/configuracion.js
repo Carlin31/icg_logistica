@@ -55,7 +55,7 @@ const CAMPOS_VEHICULO = [
   { key: "descripcion",         label: "Descripción",          type: "text"   },
   { key: "abreviatura",         label: "Abreviatura",          type: "text"   },
   { key: "placas",              label: "Placas",               type: "text"   },
-  { key: "chofer",              label: "Chofer",               type: "text"   },
+  { key: "chofer",              label: "Chofer",               type: "select" },
   { key: "largo_volumetria",    label: "Largo Volumetría (m)", type: "number" },
   { key: "ancho_volumetria",    label: "Ancho Volumetría (m)", type: "number" },
   { key: "alto_volumetria",     label: "Alto Volumetría (m)",  type: "number" },
@@ -108,6 +108,158 @@ const _TIPO_LABEL = {
 let modalMode  = null;
 let modalTipo  = null;
 let modalDocId = null;
+let _choferes  = [];   // [{ _id, nombre }]
+
+// ── Choferes ─────────────────────────────────────────────────
+async function cargarChoferes() {
+  try {
+    const res = await fetch("/configuracion/choferes", { cache: "no-store" });
+    _choferes = res.ok ? await res.json() : [];
+  } catch (err) {
+    console.error("[cargarChoferes]", err);
+    _choferes = [];
+  }
+  renderListaChoferes();
+  return _choferes;
+}
+
+function renderListaChoferes() {
+  const ul = document.getElementById("lista-choferes");
+  if (!ul) return;
+  if (_choferes.length === 0) {
+    ul.innerHTML = `<li class="choferes-empty">Sin choferes registrados.</li>`;
+    return;
+  }
+  ul.innerHTML = _choferes.map(c => `
+    <li>
+      <span>${h(c.nombre)}</span>
+      <span class="choferes-li-acciones">
+        ${c.tiene_acceso
+          ? `<span class="chofer-acceso-badge" title="Ya tiene credenciales para el portal del Conductor">
+               <i data-lucide="check-circle"></i> Acceso generado
+             </span>`
+          : `<button type="button" class="btn-generar-acceso" data-id="${c._id}" data-nombre="${ha(c.nombre)}" title="Generar acceso al portal del Conductor">
+               <i data-lucide="key-round"></i> Generar acceso
+             </button>`}
+        <button type="button" data-id="${c._id}" title="Eliminar chofer">
+          <i data-lucide="trash-2"></i>
+        </button>
+      </span>
+    </li>`).join("");
+  lucide.createIcons();
+}
+
+async function generarAccesoChofer(choferId, nombre, btn) {
+  if (btn) { btn.disabled = true; btn.innerHTML = `<i data-lucide="loader-circle"></i> Generando…`; lucide.createIcons(); }
+  try {
+    const res = await fetch(`/configuracion/choferes/${choferId}/generar-acceso`, { method: "POST" });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.status === "error") {
+      cfgToast(data?.mensaje || "Error al generar el acceso.");
+      await cargarChoferes();
+      return;
+    }
+    mostrarCredencialesChofer(nombre, data.username, data.password);
+    await cargarChoferes();
+  } catch (err) {
+    console.error("[generarAccesoChofer]", err);
+    cfgToast("Error de conexión al generar el acceso.");
+    await cargarChoferes();
+  }
+}
+
+/** Muestra usuario/contraseña UNA SOLA VEZ (no se pueden recuperar después). */
+function mostrarCredencialesChofer(nombre, username, password) {
+  const errEl = document.getElementById("choferes-error");
+  errEl.classList.remove("hidden");
+  errEl.classList.add("choferes-credenciales");
+  errEl.innerHTML = `
+    <strong>Acceso creado para ${h(nombre)}</strong> — cópialo ahora, no podrás verlo de nuevo:<br>
+    Usuario: <code>${h(username)}</code> &nbsp; Contraseña: <code>${h(password)}</code>`;
+}
+
+async function agregarChofer() {
+  const input = document.getElementById("input-nuevo-chofer");
+  const errEl = document.getElementById("choferes-error");
+  const nombre = input.value.trim();
+  errEl.classList.add("hidden");
+  errEl.classList.remove("choferes-credenciales");
+  if (!nombre) return;
+
+  try {
+    const res = await fetch("/configuracion/choferes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || data?.status === "error") {
+      errEl.textContent = data?.mensaje || "Error al agregar el chofer.";
+      errEl.classList.remove("hidden");
+      return;
+    }
+    input.value = "";
+    await cargarChoferes();
+    cargarDatos("vehiculo");
+  } catch (err) {
+    console.error("[agregarChofer]", err);
+    errEl.textContent = "Error de conexión al agregar el chofer.";
+    errEl.classList.remove("hidden");
+  }
+}
+
+async function eliminarChofer(choferId) {
+  const confirmed = await mostrarConfirm(
+    "Eliminar chofer",
+    "Este chofer se eliminará de la lista. Los vehículos que ya lo tengan asignado conservarán el nombre hasta que se cambie manualmente.",
+    "Eliminar"
+  );
+  if (!confirmed) return;
+  try {
+    const res = await fetch(`/configuracion/choferes/${choferId}`, { method: "DELETE" });
+    if (res.ok) {
+      await cargarChoferes();
+      cargarDatos("vehiculo");
+    }
+  } catch (err) {
+    console.error("[eliminarChofer]", err);
+  }
+}
+
+async function actualizarChoferVehiculo(vehiculoId, chofer, choferId = null) {
+  try {
+    const res = await fetch(`/configuracion/vehiculos/${vehiculoId}/chofer`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chofer, chofer_id: choferId }),
+    });
+    if (res.ok) {
+      localStorage.setItem("icg_flota_actualizada", Date.now().toString());
+      cfgToast("Chofer actualizado.", "ok");
+      cargarDatos("vehiculo");
+    } else {
+      cfgToast("Error al actualizar el chofer.");
+      cargarDatos("vehiculo");
+    }
+  } catch (err) {
+    console.error("[actualizarChoferVehiculo]", err);
+    cfgToast("Error de conexión al actualizar el chofer.");
+    cargarDatos("vehiculo");
+  }
+}
+
+/** Genera las <option> del selector de chofer; incluye el valor actual aunque no esté en la lista oficial. */
+function _opcionesChofer(actual) {
+  const nombres = _choferes.map(c => c.nombre);
+  let extra = "";
+  if (actual && !nombres.includes(actual)) {
+    extra = `<option value="${ha(actual)}" data-no-registrado selected>${h(actual)} (no registrado)</option>`;
+  }
+  const opciones = _choferes.map(c =>
+    `<option value="${ha(c.nombre)}" data-chofer-id="${c._id}" ${c.nombre === actual ? "selected" : ""}>${h(c.nombre)}</option>`
+  ).join("");
+  return `<option value="" ${!actual ? "selected" : ""}>— Sin asignar —</option>${extra}${opciones}`;
+}
 
 // ── Toast de notificación ───────────────────────────────────────
 function cfgToast(mensaje, tipo = "error", duracion = 4500) {
@@ -181,6 +333,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   initTabs();
   initSortableTables();
   await cargarConfigGeneral();
+  await cargarChoferes();
   cargarDatos("producto");
   cargarDatos("producto_proalmex");
   cargarDatos("sucursal");
@@ -223,9 +376,41 @@ document.addEventListener("DOMContentLoaded", async () => {
           btn.dataset.activo === "true"
         );
       });
+      if (tipo === "vehiculo") {
+        tableEl.addEventListener("change", e => {
+          const sel = e.target.closest("select.chofer-select");
+          if (sel) {
+            const choferId = sel.selectedOptions[0]?.dataset.choferId || null;
+            actualizarChoferVehiculo(sel.dataset.id, sel.value, choferId);
+          }
+        });
+      }
     }
     document.getElementById(`buscar-${tipo}-nombre`).addEventListener("input", () => debounceCarga(tipo));
     document.getElementById(`buscar-${tipo}-fecha`).addEventListener("change", () => cargarDatos(tipo));
+  });
+
+  // Mini interfaz: gestión de choferes
+  document.getElementById("btn-gestionar-choferes").addEventListener("click", async () => {
+    const errEl = document.getElementById("choferes-error");
+    errEl.classList.add("hidden");
+    errEl.classList.remove("choferes-credenciales");
+    document.getElementById("input-nuevo-chofer").value = "";
+    await cargarChoferes();
+    document.getElementById("modal-choferes-overlay").classList.remove("hidden");
+  });
+  document.getElementById("btn-cerrar-choferes").addEventListener("click", () => {
+    document.getElementById("modal-choferes-overlay").classList.add("hidden");
+  });
+  document.getElementById("form-nuevo-chofer").addEventListener("submit", agregarChofer);
+  document.getElementById("lista-choferes").addEventListener("click", e => {
+    const btnAcceso = e.target.closest(".btn-generar-acceso");
+    if (btnAcceso) {
+      generarAccesoChofer(btnAcceso.dataset.id, btnAcceso.dataset.nombre, btnAcceso);
+      return;
+    }
+    const btn = e.target.closest("button[data-id]");
+    if (btn) eliminarChofer(btn.dataset.id);
   });
 
   // Formulario general
@@ -449,7 +634,11 @@ async function cargarDatos(tipo) {
           <td>${h(v.descripcion)}</td>
           <td>${h(v.abreviatura)}</td>
           <td>${h(v.placas)}</td>
-          <td>${h(v.chofer)}</td>
+          <td>
+            <select class="chofer-select" data-id="${v._id}">
+              ${_opcionesChofer(v.chofer || "")}
+            </select>
+          </td>
           <td>${v.largo_volumetria ?? ""}</td>
           <td>${v.ancho_volumetria ?? ""}</td>
           <td>${v.alto_volumetria ?? ""}</td>
@@ -498,6 +687,8 @@ async function cargarDatos(tipo) {
           </td>
         </tr>`}).join("");
     }
+
+    _reaplicarOrdenSiActivo(`#tabla-${getEndpoint(tipo)}`);
   } catch (err) {
     console.error(`[cargarDatos:${tipo}]`, err);
     // Asegúrate de cambiar el colspan aquí también si ajustas las columnas
@@ -520,11 +711,24 @@ async function abrirModal(mode, tipo, docId = null) {
     existente = await res.json();
   }
 
-  document.getElementById("modal-form").innerHTML = campos.map(c => `
+  if (tipo === "vehiculo") await cargarChoferes();
+
+  document.getElementById("modal-form").innerHTML = campos.map(c => {
+    if (c.type === "select" && c.key === "chofer") {
+      return `
+      <div class="form-group">
+        <label>${h(c.label)}</label>
+        <select name="${c.key}" class="form-control" id="modal-field-${c.key}">
+          ${_opcionesChofer(existente[c.key] || "")}
+        </select>
+      </div>`;
+    }
+    return `
     <div class="form-group">
       <label>${h(c.label)}${c.readonly ? ' <span class="config-computed-badge">auto</span>' : ''}</label>
       <input name="${c.key}" type="${c.type}" value="${existente[c.key] != null ? ha(String(existente[c.key])) : ""}" class="form-control${c.readonly ? ' config-field-readonly' : ''}" id="modal-field-${c.key}"${c.readonly ? ' readonly tabindex="-1"' : ''}${c.step != null ? ` step="${c.step}"` : ''}${c.min != null ? ` min="${c.min}"` : ''}>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 
   if (tipo === "producto") {
     ['largo', 'ancho', 'alto'].forEach(k => {
@@ -591,6 +795,10 @@ async function guardarModal(e) {
             payload[key] = isNaN(num) ? null : num;
         } else {
             payload[key] = raw;
+        }
+
+        if (key === "chofer" && type === "select") {
+            payload.chofer_id = el.selectedOptions[0]?.dataset.choferId || null;
         }
     });
 
@@ -678,6 +886,20 @@ async function eliminar(tipo, docId) {
   }
 }
 
+/** Ordena un array de <tr> según una columna; mult=1 ascendente, mult=-1 descendente. */
+function _ordenarFilas(rows, colIndex, isNum, mult) {
+  rows.sort((a, b) => {
+    let va = a.cells[colIndex]?.innerText.trim() || "";
+    let vb = b.cells[colIndex]?.innerText.trim() || "";
+    if (isNum) {
+      va = parseFloat(va.replace(/[^0-9.-]+/g, "")) || 0;
+      vb = parseFloat(vb.replace(/[^0-9.-]+/g, "")) || 0;
+    } else { va = va.toLowerCase(); vb = vb.toLowerCase(); }
+    return va < vb ? -mult : va > vb ? mult : 0;
+  });
+  return rows;
+}
+
 function initSortableTables() {
   document.querySelectorAll("th.sortable").forEach(th => {
     th.addEventListener("click", () => {
@@ -692,18 +914,33 @@ function initSortableTables() {
       th.classList.add(wasAsc ? "desc" : "asc");
       const mult = wasAsc ? -1 : 1;
 
-      rows.sort((a, b) => {
-        let va = a.cells[colIndex]?.innerText.trim() || "";
-        let vb = b.cells[colIndex]?.innerText.trim() || "";
-        if (isNum) {
-          va = parseFloat(va.replace(/[^0-9.-]+/g, "")) || 0;
-          vb = parseFloat(vb.replace(/[^0-9.-]+/g, "")) || 0;
-        } else { va = va.toLowerCase(); vb = vb.toLowerCase(); }
-        return va < vb ? -mult : va > vb ? mult : 0;
-      });
-      tbody.append(...rows);
+      tbody.append(..._ordenarFilas(rows, colIndex, isNum, mult));
     });
   });
+}
+
+/**
+ * Reaplica el orden activo (columna + dirección) de una tabla tras recargar
+ * sus datos vía AJAX. El <thead> no se reemplaza al refrescar, así que la
+ * clase "asc"/"desc" del <th> sobrevive; solo hace falta reordenar las
+ * filas nuevas para que el filtro seleccionado por el usuario no se pierda.
+ */
+function _reaplicarOrdenSiActivo(tableSelector) {
+  const table = document.querySelector(tableSelector);
+  if (!table) return;
+  const th = table.querySelector("th.asc, th.desc");
+  if (!th) return;
+
+  const tbody = table.querySelector("tbody");
+  const rows  = Array.from(tbody.rows);
+  // No reordenar el placeholder de "Sin registros" / "Error de conexión"
+  if (rows.length === 0 || (rows.length === 1 && rows[0].cells.length === 1)) return;
+
+  const colIndex = Array.from(th.parentNode.children).indexOf(th);
+  const isNum    = th.classList.contains("col-num");
+  const mult     = th.classList.contains("asc") ? 1 : -1;
+
+  tbody.append(..._ordenarFilas(rows, colIndex, isNum, mult));
 }
 
 function h(s)  { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }

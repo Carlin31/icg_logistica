@@ -206,3 +206,75 @@
     border: none;
     background: var(--gris-bg-alt);
 }
+
+/* ── Autorización de rutas ── */
+.autorizacion-box {
+    margin-top: 1.4rem;
+    padding: 1rem 1.2rem;
+    border-radius: var(--radio-sm);
+    border: 1px solid var(--gris-borde);
+    background: var(--gris-bg-alt);
+}
+.autorizacion-estado { display: flex; align-items: center; gap: .5rem; font-weight: 700; margin-bottom: .6rem; }
+.autorizacion-estado svg { width: 16px; height: 16px; }
+.autorizacion-estado.sin_autorizar { color: var(--gris-texto); }
+.autorizacion-estado.autorizado    { color: #166534; }
+.autorizacion-estado.cancelada     { color: var(--rojo, #b91c1c); }
+.autorizacion-meta { font-size: var(--text-sm); color: var(--gris-texto); margin-bottom: .8rem; }
+.autorizacion-acciones { display: flex; gap: .6rem; flex-wrap: wrap; }
+.btn-autorizar {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: #16a34a;
+    color: var(--blanco);
+    border: none;
+    border-radius: var(--radio-btn);
+    padding: 0.65rem 1.5rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+}
+.btn-autorizar:hover:not(:disabled) { background: #15803d; }
+.btn-autorizar:disabled { opacity: .55; cursor: not-allowed; }
+
+.btn-cancelar-autorizacion {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--blanco);
+    color: var(--rojo, #b91c1c);
+    border: 1.5px solid var(--rojo, #b91c1c);
+    border-radius: var(--radio-btn);
+    padding: 0.65rem 1.4rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s, color .2s;
+}
+.btn-cancelar-autorizacion:hover:not(:disabled) { background: var(--rojo, #b91c1c); color: var(--blanco); }
+.btn-cancelar-autorizacion:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ── Modal de confirmación (cancelar autorización) ── */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal-overlay.hidden { display: none; }
+.modal-box { background: var(--blanco); border-radius: var(--radio-sm); padding: 28px; width: 480px; max-width: 92vw; max-height: 85vh; overflow-y: auto; box-shadow: var(--sombra-xl); }
+.modal-box h3 { margin: 0 0 .6rem; }
+.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    background: var(--gris-icono, #6b7280);
+    color: var(--blanco);
+    border: none;
+    border-radius: var(--radio-btn);
+    padding: 0.65rem 1.4rem;
+    font-size: var(--text-md);
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+}
+.btn-secondary:hover:not(:disabled) { background: #4b5563; }
+.btn-secondary:disabled { opacity: .55; cursor: not-allowed; }

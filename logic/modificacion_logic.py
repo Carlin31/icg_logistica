@@ -67,6 +67,19 @@ def _doc_key(m: dict) -> str:
     return str(m.get("documento") or m.get("id_cliente", ""))
 
 
+def _override_chofer_nombre(valor) -> str:
+    """chofer_overrides[ruta_id] puede ser un dict nuevo {nombre, chofer_id} o un string legado."""
+    if isinstance(valor, dict):
+        return (valor.get("nombre") or "").strip()
+    return (valor or "").strip()
+
+
+def _override_chofer_id(valor) -> str | None:
+    if isinstance(valor, dict):
+        return valor.get("chofer_id")
+    return None
+
+
 def _override_key_matches(m: dict, key) -> bool:
     """True si el mayorista coincide con la clave de override.
     Las claves string se comparan contra documento; las int contra id_cliente (legacy).
@@ -537,6 +550,7 @@ def _vehiculo_serializar(v: dict) -> dict:
         "abrev":         v.get("abreviatura", "") or v.get("descripcion", ""),
         "descripcion":   v.get("descripcion", ""),
         "chofer":        v.get("chofer", "") or "",
+        "chofer_id":     str(v["chofer_id"]) if v.get("chofer_id") else None,
         "capacidad_ton": float(cap),
         "volumen_m3":    float(v.get("volumen_m3") or 0),
         "tipo":          v.get("categoria", "") or "",
@@ -663,7 +677,22 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         }
 
     # detalle_por_dia = { dia: { ruta_id: { ... } } }  ← dict anidado, NO lista
-    detalle_por_dia = doc_asig.get("detalle_por_dia", {})
+    detalle_por_dia  = doc_asig.get("detalle_por_dia", {})
+    chofer_overrides = doc_asig.get("chofer_overrides", {}) or {}
+    orden_overrides  = doc_asig.get("orden_overrides", {}) or {}
+
+    # Chofer por defecto de cada vehículo (colección `vehiculos`), por placas
+    chofer_por_placas: dict = {}
+    try:
+        for v in db["vehiculos"].find({}, {"placas": 1, "chofer": 1, "chofer_id": 1}):
+            plac = v.get("placas", "")
+            if plac:
+                chofer_por_placas[plac] = {
+                    "nombre":    (v.get("chofer", "") or "").strip(),
+                    "chofer_id": str(v["chofer_id"]) if v.get("chofer_id") else None,
+                }
+    except Exception as e:
+        print(f"[obtener_rutas_para_modificar] chofer_por_placas error: {e}")
 
     # ── 2. Datos de rutas y coordenadas desde rutas_config ────
     coords_map = _obtener_coordenadas_sucursales()   # { num_tienda_str: {latitud, longitud} }
@@ -850,6 +879,22 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             if dk in may_orden_map:
                 m["orden"] = may_orden_map[dk]
 
+        # Orden manual guardado (drag & drop en Modificación) tiene prioridad
+        # sobre el orden geográfico recién calculado arriba, para que la
+        # secuencia elegida por el usuario sobreviva a una recarga de página.
+        orden_ov = orden_overrides.get(ruta_id)
+        if orden_ov:
+            suc_orden_ov = {str(o.get("key")): o.get("orden") for o in orden_ov if o.get("tipo") == "sucursal"}
+            may_orden_ov = {str(o.get("key")): o.get("orden") for o in orden_ov if o.get("tipo") == "mayorista"}
+            for s in sucursales_norm:
+                nt = str(s.get("num_tienda", ""))
+                if nt in suc_orden_ov:
+                    s["orden"] = suc_orden_ov[nt]
+            for m in mayoristas_norm:
+                dk = _doc_key(m)
+                if dk in may_orden_ov:
+                    m["orden"] = may_orden_ov[dk]
+
         meta = meta_por_ruta.get(ruta_id, {})
         placas       = meta.get("placas", "")
         veh_abrev    = meta.get("veh_abrev", "")
@@ -875,6 +920,14 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
 
         con_coords = sum(1 for s in sucursales_norm if s["latitud"] is not None)
 
+        veh_chofer_info  = chofer_por_placas.get(placas, {})
+        chofer_default    = veh_chofer_info.get("nombre", "")
+        chofer_default_id = veh_chofer_info.get("chofer_id")
+        override_val      = chofer_overrides.get(ruta_id)
+        override_nombre   = _override_chofer_nombre(override_val)
+        chofer_actual     = override_nombre or chofer_default
+        chofer_actual_id  = _override_chofer_id(override_val) or (chofer_default_id if not override_nombre else None)
+
         rutas_normalizadas.append({
             "id":                    ruta_id,
             "nombre":                nombre_r,
@@ -883,6 +936,10 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             "vehiculo_placas":       placas,
             "vehiculo_abrev":        veh_abrev,
             "capacidad_ton":         cap_ton,
+            "chofer":                chofer_actual,
+            "chofer_id":             chofer_actual_id,
+            "chofer_default":        chofer_default,
+            "chofer_personalizado":  bool(override_nombre),
             "peso_kg":               peso_kg,
             "pct_utilizacion":       pct,
             "cumple_peso":           True,
@@ -1402,6 +1459,9 @@ def crear_ruta_manual(
             "longitud":     float(lon) if lon is not None else None,
         })
 
+    chofer_default    = (veh.get("chofer", "") or "").strip()
+    chofer_default_id = str(veh["chofer_id"]) if veh.get("chofer_id") else None
+
     ruta_ui = {
         "id":                    ruta_id,
         "nombre":                nombre_ruta,
@@ -1410,6 +1470,10 @@ def crear_ruta_manual(
         "vehiculo_placas":       placas,
         "vehiculo_abrev":        abrev,
         "capacidad_ton":         cap_ton,
+        "chofer":                chofer_default,
+        "chofer_id":             chofer_default_id,
+        "chofer_default":        chofer_default,
+        "chofer_personalizado":  False,
         "peso_kg":               peso_total_kg,
         "pct_utilizacion":       pct,
         "cumple_peso":           True,
@@ -1527,6 +1591,93 @@ def actualizar_vehiculo_en_asignacion(
                 f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_abreviatura": vehiculo_abreviatura or "",
                 f"detalle_por_dia.{dia}.{ruta_id}.capacidad_ton":        capacidad_ton,
             }},
+        )
+        return {"status": "ok"}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
+def actualizar_chofer_en_asignacion(
+    logistica_id: str, ruta_id: str, dia: str, chofer: str, chofer_id: str | None = None,
+) -> dict:
+    """
+    Cambia el chofer asignado a una ruta puntual de un día específico.
+
+    No modifica el chofer por defecto del vehículo (colección `vehiculos`):
+    se guarda como override en `asignaciones.chofer_overrides.{ruta_id}`
+    (dict {"nombre", "chofer_id"}, igual que `mayoristas_overrides`), para
+    que sobreviva si se regenera o se vuelve a guardar la Asignación. Un
+    chofer vacío elimina el override y la ruta vuelve a usar el chofer por
+    defecto del vehículo.
+    """
+    oid = _parse_oid(logistica_id)
+    if not oid:
+        return {"status": "error", "mensaje": "logistica_id inválido"}
+    try:
+        db  = get_db()
+        doc = db["asignaciones"].find_one({"logistica_id": oid}, {"chofer_overrides": 1, "detalle_por_dia": 1})
+        if not doc:
+            return {"status": "error", "mensaje": "No existe una asignación guardada."}
+
+        rutas_del_dia = (doc.get("detalle_por_dia") or {}).get(dia) or {}
+        if ruta_id not in rutas_del_dia:
+            return {"status": "error", "mensaje": "La ruta no existe en ese día."}
+
+        overrides = dict(doc.get("chofer_overrides", {}) or {})
+        chofer = (chofer or "").strip()
+        if chofer:
+            overrides[ruta_id] = {"nombre": chofer, "chofer_id": chofer_id}
+        else:
+            overrides.pop(ruta_id, None)
+
+        db["asignaciones"].update_one(
+            {"logistica_id": oid},
+            {"$set": {"chofer_overrides": overrides}},
+        )
+        return {"status": "ok", "chofer": chofer}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
+def actualizar_orden_paradas(logistica_id: str, ruta_id: str, dia: str, orden_paradas: list) -> dict:
+    """
+    Persiste la secuencia exacta de paradas (sucursales + mayoristas
+    entrelazados) de una ruta, tal como quedó tras un drag & drop o un
+    agregar/quitar parada en el editor de Modificación.
+
+    `orden_paradas` es una lista de
+        {"tipo": "sucursal"|"mayorista", "key": <num_tienda o documento/id_cliente>, "orden": int}
+
+    Se guarda en `asignaciones.orden_overrides.{ruta_id}` y tiene prioridad
+    sobre el orden geográfico que recalcula `calcular_distribucion_mayoristas()`
+    en cada lectura, para que la secuencia elegida por el usuario no se
+    pierda al recargar la página.
+    """
+    oid = _parse_oid(logistica_id)
+    if not oid:
+        return {"status": "error", "mensaje": "logistica_id inválido"}
+    if not isinstance(orden_paradas, list):
+        return {"status": "error", "mensaje": "Se esperaba una lista de paradas."}
+    try:
+        limpio = []
+        for item in orden_paradas:
+            if not isinstance(item, dict):
+                continue
+            tipo  = item.get("tipo")
+            key   = item.get("key")
+            orden = item.get("orden")
+            if tipo not in ("sucursal", "mayorista") or key is None or orden is None:
+                continue
+            try:
+                limpio.append({"tipo": tipo, "key": str(key), "orden": int(orden)})
+            except (TypeError, ValueError):
+                continue
+
+        db = get_db()
+        db["asignaciones"].update_one(
+            {"logistica_id": oid},
+            {"$set": {f"orden_overrides.{ruta_id}": limpio}},
+            upsert=True,
         )
         return {"status": "ok"}
     except Exception as e:

@@ -1,0 +1,287 @@
+/* ================================================================
+   static/css/conductor.css
+   Portal del Conductor — diseño mobile-first (uso en campo)
+   ================================================================ */
+
+:root {
+  --cd-azul:       #2563eb;
+  --cd-azul-osc:   #1e3a5f;
+  --cd-verde:      #16a34a;
+  --cd-naranja:    #f59e0b;
+  --cd-rojo:       #ef4444;
+  --cd-gris-bg:    #f1f5f9;
+  --cd-gris-borde: #e2e8f0;
+  --cd-gris-texto: #64748b;
+  --cd-blanco:     #ffffff;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--cd-gris-bg);
+  color: #1e293b;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden { display: none !important; }
+
+/* ── Header ── */
+.cd-header {
+  position: sticky; top: 0; z-index: 50;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--cd-azul-osc);
+  color: var(--cd-blanco);
+}
+.cd-header-brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.95rem; }
+.cd-header-brand img { filter: brightness(0) invert(1); }
+.cd-header-actions { display: flex; align-items: center; gap: 16px; }
+.cd-salir { color: rgba(255,255,255,.8); display: flex; }
+.cd-salir svg { width: 20px; height: 20px; }
+.cd-vista-toggle { color: rgba(255,255,255,.6); display: flex; }
+.cd-vista-toggle svg { width: 19px; height: 19px; }
+
+/* ── Vistas ── */
+.cd-vista { min-height: calc(100vh - 52px); padding-bottom: 24px; }
+
+.cd-saludo { padding: 16px; }
+.cd-saludo-hola { display: block; font-size: 1.1rem; }
+.cd-saludo-sub { display: block; color: var(--cd-gris-texto); font-size: 0.85rem; margin-top: 2px; }
+
+.cd-spinner, .cd-vacio {
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 40px 20px; color: var(--cd-gris-texto); text-align: center;
+}
+.cd-vacio svg { width: 34px; height: 34px; opacity: .5; }
+.cd-vacio span { font-size: 0.82rem; }
+.cd-spin {
+  width: 26px; height: 26px; border: 3px solid var(--cd-gris-borde);
+  border-top-color: var(--cd-azul); border-radius: 50%;
+  animation: cd-spin 0.8s linear infinite;
+}
+@keyframes cd-spin { to { transform: rotate(360deg); } }
+
+/* ── Cards de logística / ruta ── */
+.cd-logistica-card {
+  background: var(--cd-blanco);
+  margin: 0 12px 14px;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  overflow: hidden;
+}
+.cd-logistica-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 16px;
+  background: var(--cd-azul-osc); color: var(--cd-blanco);
+}
+.cd-logistica-header svg { width: 20px; height: 20px; flex-shrink: 0; opacity: .85; }
+.cd-logistica-nombre { font-weight: 700; font-size: 0.92rem; }
+.cd-logistica-fechas { font-size: 0.72rem; opacity: .75; }
+
+.cd-dia-bloque { padding: 10px 12px 4px; }
+.cd-dia-titulo {
+  font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: .04em; color: var(--cd-gris-texto); margin: 6px 4px;
+}
+
+.cd-ruta-card {
+  display: block; width: 100%; text-align: left;
+  background: var(--cd-gris-bg);
+  border: 1px solid var(--cd-gris-borde);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  font: inherit;
+}
+.cd-ruta-card.cd-completada { border-color: #bbf7d0; background: #f0fdf4; }
+.cd-ruta-card.cd-en-curso   { border-color: #fde68a; background: #fffbeb; }
+
+.cd-ruta-card-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.cd-ruta-card-veh { display: flex; align-items: center; gap: 5px; font-size: 0.78rem; font-weight: 600; color: var(--cd-azul); }
+.cd-ruta-card-veh svg { width: 14px; height: 14px; }
+.cd-ruta-card-nombre { font-weight: 700; font-size: 0.92rem; margin-bottom: 8px; }
+
+.cd-tag { display: inline-flex; align-items: center; gap: 3px; font-size: 0.66rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; }
+.cd-tag svg { width: 11px; height: 11px; }
+.cd-tag-ok    { background: #dcfce7; color: #166534; }
+.cd-tag-curso { background: #fef3c7; color: #92400e; }
+
+/* ── Barra de progreso ── */
+.cd-progreso-bar-wrap { display: flex; align-items: center; gap: 8px; }
+.cd-progreso-bar-wrap--sm { margin-top: 4px; }
+.cd-progreso-track { flex: 1; height: 7px; background: var(--cd-gris-borde); border-radius: 999px; overflow: hidden; }
+.cd-progreso-fill { height: 100%; background: linear-gradient(90deg, var(--cd-azul), #60a5fa); border-radius: 999px; transition: width .3s ease; }
+.cd-progreso-label { font-size: 0.68rem; color: var(--cd-gris-texto); white-space: nowrap; }
+
+/* ── Vista de ruta: topbar + mapa ── */
+.cd-ruta-topbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; background: var(--cd-blanco); border-bottom: 1px solid var(--cd-gris-borde);
+}
+.cd-btn-volver {
+  display: flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--cd-gris-bg); border: none; flex-shrink: 0;
+}
+.cd-btn-volver svg { width: 18px; height: 18px; }
+.cd-ruta-titulo { display: flex; flex-direction: column; overflow: hidden; }
+.cd-ruta-titulo span:first-child { font-weight: 700; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-ruta-meta { font-size: 0.72rem; color: var(--cd-gris-texto); }
+
+#cd-vista-ruta .cd-progreso-bar-wrap { padding: 10px 16px; background: var(--cd-blanco); border-bottom: 1px solid var(--cd-gris-borde); }
+
+.cd-mapa-titulo {
+  display: flex; align-items: center; gap: 6px;
+  padding: 14px 16px 6px;
+  font-size: 0.78rem; font-weight: 700; color: var(--cd-gris-texto);
+  text-transform: uppercase; letter-spacing: .03em;
+}
+.cd-mapa-titulo svg { width: 14px; height: 14px; }
+.cd-mapa { width: 100%; height: 38vh; min-height: 220px; }
+
+.cd-marker, .cd-marker-matriz {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--cd-azul); color: white; font-weight: 700; font-size: 0.78rem;
+  border-radius: 50%; border: 2px solid white; box-shadow: 0 1px 4px rgba(0,0,0,.3);
+}
+.cd-marker--entregado { background: var(--cd-verde); }
+.cd-marker-matriz { background: var(--cd-azul-osc); }
+.cd-marker-matriz svg, .cd-marker-matriz i { width: 14px; height: 14px; }
+
+/* ── Lista de paradas ── */
+.cd-lista-paradas { padding: 10px 12px 8px; }
+.cd-parada {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--cd-blanco); border: 1px solid var(--cd-gris-borde);
+  border-radius: 12px; padding: 10px 12px; margin-bottom: 8px;
+}
+.cd-parada--entregada { background: #f0fdf4; border-color: #bbf7d0; opacity: .85; }
+.cd-parada-num {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--cd-gris-bg); display: flex; align-items: center; justify-content: center;
+  font-size: 0.76rem; font-weight: 700; color: var(--cd-azul-osc);
+}
+.cd-parada--entregada .cd-parada-num { background: #dcfce7; color: #166534; }
+.cd-parada-info { flex: 1; min-width: 0; }
+.cd-parada-nombre { font-weight: 600; font-size: 0.86rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cd-parada-detalle { font-size: 0.72rem; color: var(--cd-gris-texto); }
+.cd-parada-tag { background: #ffedd5; color: #c2410c; font-size: 0.62rem; font-weight: 700; padding: 1px 6px; border-radius: 999px; margin-right: 4px; }
+.cd-sin-coords { color: var(--cd-rojo); }
+
+.cd-btn-entregar {
+  flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px;
+  background: var(--cd-azul); color: white; border: none; display: flex; align-items: center; justify-content: center;
+}
+.cd-btn-entregar svg { width: 18px; height: 18px; }
+.cd-parada-check { flex-shrink: 0; color: var(--cd-verde); display: flex; }
+.cd-parada-check svg { width: 22px; height: 22px; }
+
+/* ── Modal de confirmación ──
+   z-index alto a propósito: los controles internos de Leaflet (zoom,
+   atribución) usan z-index:1000 por defecto, así que el modal necesita
+   superarlo para no quedar detrás del mapa. */
+.cd-overlay {
+  position: fixed; inset: 0; z-index: 2000;
+  background: rgba(15,23,42,.55);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+}
+.cd-confirm-box {
+  background: var(--cd-blanco); border-radius: 16px; padding: 24px 20px;
+  max-width: 320px; width: 100%; text-align: center;
+}
+.cd-confirm-icon { width: 38px; height: 38px; color: var(--cd-azul); margin-bottom: 10px; }
+.cd-confirm-box h3 { margin: 0 0 6px; font-size: 1.05rem; }
+.cd-confirm-box p { margin: 0 0 18px; font-size: 0.85rem; color: var(--cd-gris-texto); }
+.cd-confirm-acciones { display: flex; gap: 10px; }
+.cd-btn { flex: 1; padding: 11px; border-radius: 10px; border: none; font-weight: 700; font-size: 0.85rem; }
+.cd-btn-secundario { background: var(--cd-gris-bg); color: #334155; }
+.cd-btn-primario { background: var(--cd-azul); color: white; }
+.cd-btn-primario:disabled { opacity: .6; }
+
+/* ── Toast ── */
+.cd-toast {
+  position: fixed; left: 16px; right: 16px; bottom: 18px; z-index: 2100;
+  padding: 12px 16px; border-radius: 10px; color: white; font-size: 0.85rem; font-weight: 600;
+  box-shadow: 0 4px 14px rgba(0,0,0,.2);
+  text-align: center;
+}
+.cd-toast--ok    { background: var(--cd-verde); }
+.cd-toast--error { background: var(--cd-rojo); }
+
+/* ── Historial de rutas completadas ── */
+#cd-historial-section { margin: 0 12px 20px; }
+
+.cd-historial-toggle {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  background: none; border: none; font: inherit; cursor: pointer;
+  color: var(--cd-gris-texto); font-size: 0.78rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .04em;
+  padding: 10px 4px;
+}
+.cd-historial-toggle svg { width: 15px; height: 15px; }
+.cd-historial-chevron { margin-left: auto; transition: transform .2s ease; }
+.cd-historial-toggle--abierto .cd-historial-chevron { transform: rotate(180deg); }
+
+.cd-historial-lista { /* visible cuando no tiene .hidden */ }
+
+.cd-logistica--completada .cd-logistica-header { background: #166534; }
+.cd-ruta-canceladas { color: var(--cd-rojo); font-style: normal; }
+
+/* ── Parada cancelada ── */
+.cd-parada--cancelada {
+  background: #fff7ed;
+  border-color: #fed7aa;
+  opacity: .92;
+}
+.cd-parada--cancelada .cd-parada-num { background: #ffedd5; color: #9a3412; }
+
+.cd-parada-cancelada-icon { flex-shrink: 0; color: var(--cd-rojo); display: flex; }
+.cd-parada-cancelada-icon svg { width: 22px; height: 22px; }
+
+.cd-parada-cancelada-label { color: var(--cd-rojo); font-weight: 600; }
+.cd-parada-hora { color: var(--cd-verde); font-weight: 500; }
+
+/* ── Acciones agrupadas (check + cancelar) ── */
+.cd-parada-acciones {
+  display: flex; flex-direction: column; align-items: center; gap: 5px; flex-shrink: 0;
+}
+
+/* Botón cancelar entrega (pequeño, discreto) */
+.cd-btn-cancelar-entrega {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: 6px;
+  background: transparent; color: var(--cd-rojo);
+  border: 1px solid rgba(239,68,68,.45);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; opacity: .75;
+  transition: opacity .15s, background .15s;
+}
+.cd-btn-cancelar-entrega:hover { opacity: 1; background: #fee2e2; }
+.cd-btn-cancelar-entrega svg { width: 13px; height: 13px; }
+
+/* Botón re-entregar (azul, igual que entregar pero con borde) */
+.cd-btn-entregar--reentrega {
+  background: transparent;
+  border: 1.5px solid var(--cd-azul);
+  color: var(--cd-azul);
+}
+
+/* ── Modal cancelar (botón rojo) ── */
+.cd-confirm-icon--rojo { color: var(--cd-rojo); }
+.cd-btn-rojo { background: var(--cd-rojo); color: white; }
+.cd-btn-rojo:disabled { opacity: .6; }
+
+/* ── Toast aviso (naranja) ── */
+.cd-toast--aviso { background: var(--cd-naranja); color: #1c1917; }
+
+/* ── Pantallas más grandes (tablet/desktop): centrar contenido ── */
+@media (min-width: 640px) {
+  body { display: flex; justify-content: center; background: #e2e8f0; }
+  .cd-header, .cd-vista { max-width: 480px; width: 100%; }
+  .cd-header { position: fixed; left: 50%; transform: translateX(-50%); max-width: 480px; width: 100%; }
+  .cd-vista { margin-top: 52px; background: var(--cd-gris-bg); min-height: calc(100vh - 52px); box-shadow: 0 0 24px rgba(0,0,0,.08); }
+}

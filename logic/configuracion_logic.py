@@ -150,6 +150,7 @@ def _agregar(coleccion: str, datos: dict) -> dict:
     elif coleccion == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         datos.setdefault("activo", True)
+        datos["chofer_id"] = _parse_oid(datos.get("chofer_id")) if datos.get("chofer_id") else None
 
     datos["ultima_modificacion"] = _fecha_completa()
     result = db[coleccion].insert_one(datos)
@@ -186,6 +187,8 @@ def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif coleccion == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
+        if "chofer_id" in datos:
+            datos["chofer_id"] = _parse_oid(datos.get("chofer_id")) if datos.get("chofer_id") else None
 
     update_query = {"$set": datos}
     if campo and campo not in datos:
@@ -243,6 +246,50 @@ def obtener_vehiculo(vehiculo_id: str): return _obtener("vehiculos", vehiculo_id
 def agregar_vehiculo(datos: dict): return _agregar("vehiculos", datos)
 def editar_vehiculo(vehiculo_id: str, datos: dict): return _editar("vehiculos", vehiculo_id, datos)
 def eliminar_vehiculo(vehiculo_id: str): return _eliminar("vehiculos", vehiculo_id)
+
+def actualizar_chofer_vehiculo(vehiculo_id: str, chofer: str, chofer_id: str | None = None) -> dict:
+    """
+    Actualiza el campo `chofer` (nombre, para PDF/UI existente) y, si se
+    provee, `chofer_id` (referencia real a la colección `choferes`, usada
+    por el portal del Conductor para saber con certeza qué rutas son suyas).
+    """
+    oid = _parse_oid(vehiculo_id)
+    if oid is None:
+        return {"status": "error", "mensaje": "ID inválido"}
+    db = get_db()
+    chofer_oid = _parse_oid(chofer_id) if chofer_id else None
+    result = db.vehiculos.update_one(
+        {"_id": oid},
+        {"$set": {
+            "chofer":             (chofer or "").strip(),
+            "chofer_id":          chofer_oid,
+            "ultima_modificacion": _fecha_completa(),
+        }},
+    )
+    if result.matched_count == 0:
+        return {"status": "error", "mensaje": "Vehículo no encontrado"}
+    return {"status": "ok"}
+
+# ── Choferes ───────────────────────────────────────────────
+def listar_choferes(nombre: str = "") -> list:
+    choferes = _listar("choferes", "nombre", nombre, "", "nombre")
+    for c in choferes:
+        c["tiene_acceso"] = bool(c.get("usuario_id"))
+        c.pop("usuario_id", None)
+    return choferes
+
+def obtener_chofer(chofer_id: str): return _obtener("choferes", chofer_id)
+
+def agregar_chofer(datos: dict) -> dict:
+    nombre = (datos.get("nombre") or "").strip()
+    if not nombre:
+        return {"status": "error", "mensaje": "El nombre del chofer es obligatorio."}
+    db = get_db()
+    if db.choferes.find_one({"nombre": {"$regex": f"^{nombre}$", "$options": "i"}}):
+        return {"status": "error", "mensaje": "Ya existe un chofer con ese nombre."}
+    return _agregar("choferes", {"nombre": nombre})
+
+def eliminar_chofer(chofer_id: str): return _eliminar("choferes", chofer_id)
 
 def listar_clientes_mayoristas(nombre: str = "", fecha: str = ""): return _listar("clientes_mayoristas", ["nombre", "poblacion"], nombre, fecha, "id_cliente")
 def obtener_cliente_mayorista(cliente_id: str): return _obtener("clientes_mayoristas", cliente_id)

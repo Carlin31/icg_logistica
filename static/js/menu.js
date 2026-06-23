@@ -9,6 +9,19 @@
  *     la persistencia por sección ahora es directa en cada módulo).
  */
 
+// ── Footer: oculto por defecto, solo aparece tras hacer scroll ───────────────
+(function () {
+  const footer = document.querySelector('.app-footer');
+  if (!footer) return;
+
+  function actualizarVisibilidad() {
+    footer.classList.toggle('visible', window.scrollY > 10);
+  }
+
+  window.addEventListener('scroll', actualizarVisibilidad, { passive: true });
+  actualizarVisibilidad();
+})();
+
 // ── Estado global ────────────────────────────────────────────────────────────
 let _todasLogisticas = [];
 let _logisticaActivaId   = null;
@@ -259,6 +272,13 @@ function renderCard(l) {
     ? "border-color: var(--azul-claro); box-shadow: 0 0 0 2px rgba(45,108,202,.25);"
     : "";
 
+  const AUTORIZACION_INFO = {
+    sin_autorizar: { texto: "Sin autorizar", clase: "autorizacion-sin", icono: "lock" },
+    autorizado:    { texto: "Autorizado",    clase: "autorizacion-ok",  icono: "shield-check" },
+    cancelada:     { texto: "Cancelada",     clase: "autorizacion-cancelada", icono: "shield-off" },
+  };
+  const autInfo = AUTORIZACION_INFO[l.estado_autorizacion] || AUTORIZACION_INFO.sin_autorizar;
+
   return `
     <div class="card" id="card-${l._id}" style="${borderColor}">
       <div class="card-top"></div>
@@ -268,6 +288,7 @@ function renderCard(l) {
         <div class="card-meta">
           <span class="meta-pill"><i data-lucide="calendar"></i> ${formatearFecha(l.fecha_inicio)} — ${formatearFecha(l.fecha_fin)}</span>
           <span class="meta-pill"><i data-lucide="clock"></i> ${l.ultima_modificacion || l.creado_en || "—"}</span>
+          <span class="meta-pill ${autInfo.clase}"><i data-lucide="${autInfo.icono}"></i> ${autInfo.texto}</span>
         </div>
         <div class="secciones-progreso">${dotsHTML}</div>
       </div>

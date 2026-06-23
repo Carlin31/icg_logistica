@@ -19,6 +19,8 @@ from logic.modificacion_logic import (
     guardar_modificacion,
     obtener_modificacion_previa,
     actualizar_vehiculo_en_asignacion,
+    actualizar_chofer_en_asignacion,
+    actualizar_orden_paradas,
     quitar_sucursal_de_asignacion,
     agregar_sucursal_a_asignacion,
     actualizar_rutas_confirmadas,
@@ -146,6 +148,51 @@ def post_actualizar_vehiculo():
             datos.get("vehiculo_placas"),
             datos.get("vehiculo_abreviatura"),
             datos.get("capacidad_ton"),
+        )
+        code = 200 if resultado.get("status") == "ok" else 500
+        return jsonify(resultado), code
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/actualizar-chofer", methods=["POST"])
+def post_actualizar_chofer():
+    """Cambia el chofer de una ruta puntual (día + ruta), sin afectar el chofer por defecto del vehículo."""
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+    try:
+        resultado = actualizar_chofer_en_asignacion(
+            lid,
+            datos.get("ruta_id"),
+            datos.get("dia"),
+            datos.get("chofer", ""),
+            datos.get("chofer_id"),
+        )
+        code = 200 if resultado.get("status") == "ok" else 500
+        return jsonify(resultado), code
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 500
+
+
+@modificacion_bp.route("/actualizar-orden", methods=["POST"])
+def post_actualizar_orden():
+    """Persiste la secuencia exacta de paradas de una ruta (drag & drop / agregar / quitar)."""
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    datos, err2 = _json_o_400()
+    if err2:
+        return err2
+    try:
+        resultado = actualizar_orden_paradas(
+            lid,
+            datos.get("ruta_id"),
+            datos.get("dia"),
+            datos.get("orden_paradas") or [],
         )
         code = 200 if resultado.get("status") == "ok" else 500
         return jsonify(resultado), code

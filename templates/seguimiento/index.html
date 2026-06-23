@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+
+{% block title %}Seguimiento de Entregas{% endblock %}
+{% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-pdf.svg') }}">{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/seguimiento.css') }}">
+{% endblock %}
+
+{% block nav_seg %}active{% endblock %}
+
+{% block content %}
+<h1>Seguimiento de Entregas</h1>
+
+<div id="seg-container">
+
+    <div id="seg-sin-autorizar" class="alerta-warning" style="display:none;">
+        <i data-lucide="lock" class="pdf-icon" aria-hidden="true"></i>
+        Esta logística todavía no ha sido autorizada.
+        <a href="{{ url_for('pdf.index') }}">Autoriza las rutas desde la sección PDF</a> para ver su avance aquí.
+    </div>
+
+    <!-- Contenedor con pestañas (visible cuando hay logística autorizada) -->
+    <div id="seg-tabs-container" style="display:none;">
+
+        <!-- Barra de pestañas -->
+        <div class="seg-tabs" role="tablist">
+            <button class="seg-tab seg-tab--activa" id="tab-seguimiento" role="tab"
+                    aria-selected="true" aria-controls="seg-panel-seguimiento" data-tab="seguimiento">
+                <i data-lucide="list-checks"></i>
+                Seguimiento
+            </button>
+            <button class="seg-tab" id="tab-historial" role="tab"
+                    aria-selected="false" aria-controls="seg-panel-historial" data-tab="historial">
+                <i data-lucide="shield-check"></i>
+                Historial
+            </button>
+        </div>
+
+        <!-- ── Panel: Seguimiento ── -->
+        <div id="seg-panel-seguimiento" class="seg-tab-panel" role="tabpanel" aria-labelledby="tab-seguimiento">
+            <div class="seg-layout">
+
+                <!-- Columna izquierda: filtros + tabla -->
+                <div class="seg-col-izq">
+                    <div class="seg-filtros">
+                        <input type="text" id="seg-buscar" class="input-search" placeholder="Buscar por ruta, chofer o vehículo…">
+                        <select id="seg-filtro-dia" class="seg-select">
+                            <option value="">Todos los días</option>
+                            <option value="lunes">Lunes</option>
+                            <option value="martes">Martes</option>
+                            <option value="miercoles">Miércoles</option>
+                            <option value="jueves">Jueves</option>
+                            <option value="viernes">Viernes</option>
+                            <option value="sabado">Sábado</option>
+                            <option value="domingo">Domingo</option>
+                        </select>
+                        <select id="seg-filtro-estado" class="seg-select">
+                            <option value="">Todos los estados</option>
+                            <option value="sin_iniciar">Sin iniciar</option>
+                            <option value="en_curso">En curso</option>
+                            <option value="completada">Completada</option>
+                        </select>
+                        <span class="seg-en-vivo" title="Esta vista se actualiza automáticamente">
+                            <span class="seg-en-vivo-dot"></span> En vivo
+                            <span id="seg-actualizado" class="seg-actualizado"></span>
+                        </span>
+                    </div>
+
+                    <div class="table-responsive">
+                      <table id="tabla-seguimiento" class="data-table">
+                        <thead>
+                          <tr>
+                            <th>Día</th>
+                            <th>Ruta</th>
+                            <th>Chofer</th>
+                            <th>Vehículo</th>
+                            <th>Estado</th>
+                            <th>Avance</th>
+                            <th>Inicio real</th>
+                            <th>Fin real</th>
+                            <th></th>
+                          </tr>
+                        </thead>
+                        <tbody></tbody>
+                      </table>
+                    </div>
+                </div>
+
+                <!-- Columna derecha: detalle de paradas -->
+                <div class="seg-col-der">
+                    <div class="seg-panel-der seg-panel-der--detalle">
+                        <div class="seg-panel-der-header">
+                            <i data-lucide="list-checks" class="seg-panel-icon"></i>
+                            <span id="seg-detalle-ruta-nombre" class="seg-panel-der-titulo">Detalle de paradas</span>
+                            <button id="seg-detalle-cerrar" class="seg-panel-cerrar" style="display:none;" title="Cerrar detalle">
+                                <i data-lucide="x"></i>
+                            </button>
+                        </div>
+                        <div id="seg-detalle-vacio" class="seg-panel-der-vacio">
+                            <i data-lucide="mouse-pointer-click"></i>
+                            <p>Selecciona una ruta de la tabla para ver el historial de sus paradas.</p>
+                        </div>
+                        <div id="seg-detalle-body" class="seg-panel-der-body" style="display:none;"></div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ── Panel: Historial de autorizaciones ── -->
+        <div id="seg-panel-historial" class="seg-tab-panel" style="display:none;" role="tabpanel" aria-labelledby="tab-historial">
+            <div class="seg-hist-toolbar">
+                <span id="seg-hist-total" class="seg-hist-count"></span>
+                <span id="seg-hist-actualizado" class="seg-actualizado"></span>
+            </div>
+            <div id="seg-auditoria-lista" class="seg-hist-lista">
+                <p class="seg-sin-datos">Cargando historial…</p>
+            </div>
+        </div>
+
+    </div>
+
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/seguimiento.js') }}"></script>
+<script>lucide.createIcons();</script>
+{% endblock %}

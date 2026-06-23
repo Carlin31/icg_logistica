@@ -1,13 +1,24 @@
 """
 router/pdf_router.py
-Blueprint Flask para la generación de reportes PDF.
+Blueprint Flask para la generación de reportes PDF y la autorización de
+rutas hacia el portal del Conductor.
 
 Endpoints:
-  GET  /           → Vista de la sección (pdf/index.html)
-  POST /generar    → Genera y descarga el reporte PDF de pesos de la logística activa
+  GET  /                      → Vista de la sección (pdf/index.html)
+  POST /generar                → Genera y descarga el reporte PDF de la logística activa
+  GET  /estado-autorizacion    → Estado de autorización de la logística activa
+  POST /autorizar               → Autoriza TODAS las rutas de la logística activa
+  GET  /entregas-resumen        → # de entregas registradas (para advertir antes de cancelar)
+  POST /cancelar-autorizacion   → Retira la autorización (borra entregas asociadas)
 """
-from flask import Blueprint, render_template, request, send_file, jsonify, session, redirect, url_for
+from flask import Blueprint, render_template, send_file, jsonify, session, redirect, url_for
 from logic.pdf_logic import generar_pdf
+from logic.conductor_logic import (
+    obtener_estado_autorizacion,
+    autorizar_rutas,
+    cancelar_autorizacion,
+    contar_entregas_logistica,
+)
 
 pdf_bp = Blueprint('pdf', __name__)
 
@@ -49,10 +60,8 @@ def index_perfil(slug):
 @pdf_bp.route('/generar', methods=['POST'])
 def generar():
     """
-    Genera el reporte PDF de pesos usando:
-      - Datos de la logística activa en sesión (nombre, fechas).
-      - data/modificacion_rutas.json para las rutas y pesos.
-    Descarga el archivo generado directamente.
+    Genera el reporte PDF de pesos. Generar el PDF NO autoriza las rutas
+    automáticamente — eso requiere presionar "Autorizar" por separado.
     """
     logistica = _logistica_activa()
     if not logistica:
@@ -76,3 +85,39 @@ def generar():
         download_name=nombre_descarga,
         mimetype="application/pdf",
     )
+
+
+@pdf_bp.route('/estado-autorizacion', methods=['GET'])
+def get_estado_autorizacion():
+    logistica = _logistica_activa()
+    if not logistica:
+        return jsonify({"status": "error", "mensaje": "No hay ninguna logística activa."}), 400
+    return jsonify(obtener_estado_autorizacion(logistica["id"]))
+
+
+@pdf_bp.route('/autorizar', methods=['POST'])
+def post_autorizar():
+    logistica = _logistica_activa()
+    if not logistica:
+        return jsonify({"status": "error", "mensaje": "No hay ninguna logística activa."}), 400
+    resultado = autorizar_rutas(logistica["id"], session.get("usuario_id"), session.get("usuario_nombre", ""))
+    code = 200 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@pdf_bp.route('/entregas-resumen', methods=['GET'])
+def get_entregas_resumen():
+    logistica = _logistica_activa()
+    if not logistica:
+        return jsonify({"status": "error", "mensaje": "No hay ninguna logística activa."}), 400
+    return jsonify({"status": "ok", "entregas": contar_entregas_logistica(logistica["id"])})
+
+
+@pdf_bp.route('/cancelar-autorizacion', methods=['POST'])
+def post_cancelar_autorizacion():
+    logistica = _logistica_activa()
+    if not logistica:
+        return jsonify({"status": "error", "mensaje": "No hay ninguna logística activa."}), 400
+    resultado = cancelar_autorizacion(logistica["id"], session.get("usuario_id"), session.get("usuario_nombre", ""))
+    code = 200 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code

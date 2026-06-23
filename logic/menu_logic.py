@@ -104,18 +104,31 @@ def listar_logisticas() -> list:
     # Descartar documentos con _id inválido o nulo
     logisticas = [l for l in logisticas if l.get("_id") not in (None, "None", "")]
 
-    # Agregar indicadores de secciones completadas
+    # Agregar indicadores de secciones completadas + estado de autorización
     for log in logisticas:
         lid = _parse_oid(log["_id"])
         if not lid:
             log["secciones_completadas"] = {}
+            log["estado_autorizacion"] = "sin_autorizar"
             continue
         secciones = {}
         for col in COLECCIONES_SECCION:
             clave = _CLAVE_FRONTEND.get(col, col)
             try:
-                existe = db[col].find_one({"logistica_id": lid}, {"_id": 1})
-                secciones[clave] = existe is not None
+                if col == "modificaciones_rutas":
+                    doc = db[col].find_one({"logistica_id": lid}, {"autorizado": 1, "cancelado_en": 1})
+                    secciones[clave] = doc is not None
+                    if not doc:
+                        log["estado_autorizacion"] = "sin_autorizar"
+                    elif doc.get("autorizado"):
+                        log["estado_autorizacion"] = "autorizado"
+                    elif doc.get("cancelado_en"):
+                        log["estado_autorizacion"] = "cancelada"
+                    else:
+                        log["estado_autorizacion"] = "sin_autorizar"
+                else:
+                    existe = db[col].find_one({"logistica_id": lid}, {"_id": 1})
+                    secciones[clave] = existe is not None
             except Exception:
                 secciones[clave] = False
         log["secciones_completadas"] = secciones

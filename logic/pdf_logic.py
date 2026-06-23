@@ -492,6 +492,7 @@ def _rutas_desde_asignaciones(db, oid) -> list:
     rutas: list = []
     rutas_base: list = []
     detalle = doc.get("detalle_por_dia", {})
+    chofer_overrides = doc.get("chofer_overrides", {}) or {}
     for dia, rutas_dia in detalle.items():
         if not isinstance(rutas_dia, dict):
             continue
@@ -526,6 +527,7 @@ def _rutas_desde_asignaciones(db, oid) -> list:
                 "capacidad_ton":    float(info.get("capacidad_ton") or 0),
                 "peso_kg":          float(info.get("peso_total_kg") or 0),
                 "pct_utilizacion":  float(info.get("porcentaje_utilizacion") or 0),
+                "chofer_override":  chofer_overrides.get(ruta_id),
                 "sucursales":       suc_list,
                 "mayoristas":       [],
             })
@@ -695,24 +697,29 @@ def generar_pdf(datos_sesion: dict) -> str:
     except Exception as e:
         print(f"[generar_pdf] Error al leer choferes: {e}")
 
+    # Agrupar por (vehículo, chofer efectivo): una ruta con chofer
+    # personalizado (cambiado solo para ese día/ruta en Modificación) recibe
+    # su propio bloque dentro del mismo vehículo, sin afectar las demás rutas.
     grupos: dict = {}
     for r in rutas:
         veh  = r.get("vehiculo_abrev") or "S/N"
         plac = r.get("vehiculo_placas") or "—"
-        if veh not in grupos:
-            veh_info  = chofer_por_placas.get(plac, {})
-            grupos[veh] = {
-                "placas": plac,
-                "chofer": veh_info.get("chofer", "") if isinstance(veh_info, dict) else "",
-                "ton":    veh_info.get("ton", 0.0)   if isinstance(veh_info, dict) else 0.0,
-                "rutas":  [],
+        veh_info = chofer_por_placas.get(plac, {})
+        chofer_default = veh_info.get("chofer", "") if isinstance(veh_info, dict) else ""
+        ton            = veh_info.get("ton", 0.0)   if isinstance(veh_info, dict) else 0.0
+        chofer_efectivo = r.get("chofer_override") or r.get("chofer") or chofer_default
+
+        clave = (veh, chofer_efectivo)
+        if clave not in grupos:
+            grupos[clave] = {
+                "veh": veh, "placas": plac, "chofer": chofer_efectivo, "ton": ton, "rutas": [],
             }
-        grupos[veh]["rutas"].append(r)
+        grupos[clave]["rutas"].append(r)
 
     elements = []
-    for veh in sorted(grupos, key=lambda v: v or ""):
-        info = grupos[veh]
-        elements.extend(_tabla_vehiculo(veh, info["placas"], info["rutas"], info["chofer"], info["ton"], db))
+    for clave in sorted(grupos, key=lambda k: (k[0] or "", k[1] or "")):
+        info = grupos[clave]
+        elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db))
 
     doc_pdf.build(elements)
     return filepath

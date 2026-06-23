@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Mis rutas · ICG Logistics</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/conductor.css') }}">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="cd-header">
+  <div class="cd-header-brand">
+    <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20">
+    <span>ICG Logistics</span>
+  </div>
+  <div class="cd-header-actions">
+    <a href="?vista=escritorio" class="cd-vista-toggle" title="Ver versión de escritorio">
+      <i data-lucide="monitor"></i>
+    </a>
+    <a href="{{ url_for('auth.logout') }}" class="cd-salir" title="Cerrar sesión">
+      <i data-lucide="log-out"></i>
+    </a>
+  </div>
+</header>
+
+<!-- ── Vista: lista de logísticas/rutas ── -->
+<main id="cd-vista-lista" class="cd-vista">
+  <div class="cd-saludo">
+    <span class="cd-saludo-hola">Hola, <strong>{{ usuario_nombre or "Conductor" }}</strong></span>
+    <span class="cd-saludo-sub">Estas son tus rutas asignadas</span>
+  </div>
+
+  <div id="cd-spinner" class="cd-spinner"><div class="cd-spin"></div> Cargando tus rutas…</div>
+  <div id="cd-vacio" class="cd-vacio hidden">
+    <i data-lucide="inbox"></i>
+    <p>No tienes rutas autorizadas todavía.</p>
+    <span>Aparecerán aquí en cuanto Logística genere el reporte de tu ruta.</span>
+  </div>
+
+  <!-- Rutas activas -->
+  <div id="cd-logisticas"></div>
+
+  <!-- Historial: logísticas donde el chofer procesó todas las paradas -->
+  <section id="cd-historial-section" class="hidden">
+    <button id="cd-historial-toggle" class="cd-historial-toggle" aria-expanded="false">
+      <i data-lucide="history"></i>
+      <span>Historial de rutas</span>
+      <i data-lucide="chevron-down" class="cd-historial-chevron"></i>
+    </button>
+    <div id="cd-historial-lista" class="cd-historial-lista hidden"></div>
+  </section>
+</main>
+
+<!-- ── Vista: detalle de ruta (mapa + paradas) ── -->
+<main id="cd-vista-ruta" class="cd-vista hidden">
+  <div class="cd-ruta-topbar">
+    <button id="cd-btn-volver" class="cd-btn-volver" aria-label="Volver">
+      <i data-lucide="arrow-left"></i>
+    </button>
+    <div class="cd-ruta-titulo">
+      <span id="cd-ruta-nombre">—</span>
+      <span id="cd-ruta-meta" class="cd-ruta-meta"></span>
+    </div>
+  </div>
+
+  <div class="cd-progreso-bar-wrap">
+    <div class="cd-progreso-track"><div id="cd-progreso-fill" class="cd-progreso-fill" style="width:0%"></div></div>
+    <span id="cd-progreso-label" class="cd-progreso-label">0 de 0 entregadas</span>
+  </div>
+
+  <div id="cd-lista-paradas" class="cd-lista-paradas"></div>
+
+  <div class="cd-mapa-titulo"><i data-lucide="map"></i> Mapa de la ruta</div>
+  <div id="cd-mapa" class="cd-mapa"></div>
+</main>
+
+<!-- ── Modal: confirmar entrega ── -->
+<div id="cd-confirm-overlay" class="cd-overlay hidden">
+  <div class="cd-confirm-box">
+    <i data-lucide="package-check" class="cd-confirm-icon"></i>
+    <h3 id="cd-confirm-titulo">Marcar como entregado</h3>
+    <p id="cd-confirm-msg">¿Confirmas la entrega en este punto?</p>
+    <div class="cd-confirm-acciones">
+      <button id="cd-confirm-cancelar" class="cd-btn cd-btn-secundario">Cancelar</button>
+      <button id="cd-confirm-aceptar" class="cd-btn cd-btn-primario">Confirmar entrega</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: cancelar entrega ── -->
+<div id="cd-cancelar-overlay" class="cd-overlay hidden">
+  <div class="cd-confirm-box">
+    <i data-lucide="x-circle" class="cd-confirm-icon cd-confirm-icon--rojo"></i>
+    <h3>Cancelar entrega</h3>
+    <p id="cd-cancelar-msg">¿Cancelar la entrega en este punto?</p>
+    <div class="cd-confirm-acciones">
+      <button id="cd-cancelar-no" class="cd-btn cd-btn-secundario">No, mantener</button>
+      <button id="cd-cancelar-aceptar" class="cd-btn cd-btn-rojo">Sí, cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="cd-toast" class="cd-toast hidden"></div>
+
+<script>window.__CD_ESTADO_INICIAL__ = {{ estado_inicial | tojson }};</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/conductor.js') }}"></script>
+</body>
+</html>

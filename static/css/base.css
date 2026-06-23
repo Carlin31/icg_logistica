@@ -93,6 +93,7 @@ body { zoom: 0.8; }
 
 /* ── Base ───────────────────────────────────────────────────────── */
 html {
+  height: 100%;
   scroll-behavior: smooth;
   /* Tipografía fluida: 10.5px en móvil → 11.6px en desktop.
      Equivalente visual a clamp(13,14.5px) × 0.8 sin usar zoom.
@@ -100,11 +101,16 @@ html {
   font-size: clamp(10.5px, 0.32vw + 8px, 11.6px);
 }
 
+/* Body en columna flex: el footer siempre queda anclado al fondo del
+   viewport (nunca "flota" arriba mientras el contenido aún está cargando),
+   sin importar cuánto contenido tenga #contenido en cada momento. */
 body {
   font-family: var(--font-body);
   background: var(--gris-bg);
   color: var(--texto-oscuro);
   min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -229,6 +235,23 @@ body {
   border-radius: 2px 2px 0 0;
 }
 
+/* Pestaña deshabilitada (ej. Seguimiento antes de autorizar) */
+.nav-item--disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+.nav-item--disabled:hover { background: none; color: rgba(255,255,255,.6); }
+.nav-link--disabled {
+  cursor: not-allowed;
+  opacity: .45;
+}
+
+/* Botón de solo ícono en header-actions (ej. Gestión de Usuarios) */
+.nav-item--icon {
+  padding: .45rem;
+  border-radius: 50%;
+}
+
 /* ── Íconos del header (filtro para SVGs blancos) ──────────────── */
 /*
   Las imágenes SVG de la carpeta static/img deben exportarse en
@@ -247,6 +270,20 @@ body {
 .nav-item.active .hdr-icon,
 .header-brand:hover .hdr-icon,
 .header-brand-icon .hdr-icon {
+  opacity: 1;
+}
+
+/* Íconos de Lucide (SVG inline con stroke="currentColor") en el header/nav-panel:
+   NO usan el filtro invert() de .hdr-icon (pensado para los <img> SVG oscuros) —
+   ya son blancos por herencia de color, igual que el texto del nav-item. */
+.hdr-icon-lucide {
+  color: inherit;
+  opacity: .75;
+  display: block;
+  flex-shrink: 0;
+}
+.nav-item:hover .hdr-icon-lucide,
+.nav-item.active .hdr-icon-lucide {
   opacity: 1;
 }
 
@@ -333,6 +370,53 @@ body {
 }
 @media (max-width: 640px) {
   .perfil-badge { display: none; }
+}
+
+/* ── Control de zoom de página ──────────────────────────────────── */
+.zoom-control {
+  display: inline-flex;
+  align-items: center;
+  gap: .35rem;
+  padding: .25rem .4rem;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 20px;
+}
+.zoom-control button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  background: rgba(255,255,255,.1);
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 50%;
+  color: rgba(255,255,255,.9);
+  font-size: .9rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.zoom-control button:hover {
+  background: rgba(255,255,255,.22);
+  border-color: rgba(255,255,255,.35);
+}
+.zoom-control button:disabled {
+  opacity: .35;
+  cursor: not-allowed;
+}
+.zoom-nivel {
+  font-size: .68rem;
+  font-weight: 600;
+  color: rgba(255,255,255,.8);
+  min-width: 32px;
+  text-align: center;
+  white-space: nowrap;
+}
+@media (max-width: 640px) {
+  .zoom-control { display: none; }
 }
 
 .usuario-badge {
@@ -510,6 +594,8 @@ body {
    CONTENIDO PRINCIPAL
    ════════════════════════════════════════════════════════════════ */
 #contenido {
+  flex: 1 0 auto;
+  width: 100%;
   max-width: 1200px;
   margin: 2rem auto;
   padding: 0 1.5rem 4rem;
@@ -670,6 +756,40 @@ p {
   color: rgba(255,255,255,.18);
   letter-spacing: .05em;
   text-transform: uppercase;
+}
+
+/* ── Footer del sistema ─────────────────────────────────────────── */
+.app-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+  gap: .4rem;
+  height: var(--header-h);
+  padding: 0 1.5rem;
+  background: var(--header-bg);
+  border-top: 1px solid var(--header-border);
+  font-size: .76rem;
+  color: rgba(255,255,255,.7);
+  /* Oculto por defecto: solo aparece tras hacer scroll (ver base.js) */
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .25s ease;
+}
+.app-footer.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-footer-brand {
+  font-weight: 700;
+  color: var(--blanco, #fff);
+}
+.app-footer-sep {
+  color: rgba(255,255,255,.3);
+}
+@media (max-width: 480px) {
+  .app-footer { font-size: .7rem; padding: 0 1rem; }
 }
 
 /* ════════════════════════════════════════════════════════════════

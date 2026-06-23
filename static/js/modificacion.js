@@ -10,6 +10,8 @@ let _rutasFiltradas  = [];
 let _pesos           = {};
 let _sucDisponibles  = [];
 let _vehiculos       = [];          // flota activa [{placas, abrev, capacidad_ton, ...}]
+let _choferesDisponibles = [];      // [{_id, nombre}] — catálogo de choferes (Configuración)
+let _ultimoVehiculoCreado = "";     // placas del último vehículo usado al crear una ruta manual (continuidad día a día)
 let _indiceActivo    = 0;
 let _tiempos         = {};
 let _confirmadas     = {};
@@ -237,16 +239,18 @@ function bindEventos() {
   });
   document.getElementById("crear-dia")?.addEventListener("change", (e) => {
     _crearRuta.dia = e.target.value;
-    // Si el vehículo seleccionado ya no está disponible en el nuevo día, deseleccionarlo
+    // Si el vehículo seleccionado ya no está disponible en el nuevo día,
+    // intentar continuar con el vehículo de continuidad para ese día.
     const vehActual = _vehiculos.find(v => v.placas === _crearRuta.vehiculo);
     if (vehActual && (vehActual.ocupacion || {})[_crearRuta.dia]) {
-      _crearRuta.vehiculo = "";
+      _crearRuta.vehiculo = _vehiculoDeContinuidad(_crearRuta.dia);
     }
     renderVehiculosCrearRuta();
     actualizarEstadoCrearRuta();
   });
   document.getElementById("crear-vehiculo")?.addEventListener("change", (e) => {
     _crearRuta.vehiculo = e.target.value;
+    actualizarChoferInfoCrearRuta();
     actualizarEstadoCrearRuta();
   });
   document.getElementById("modal-crear-ruta")?.addEventListener("click", (e) => {
@@ -288,8 +292,9 @@ async function cargarDatos() {
     const sucPromise      = fetchWithRetries("/modificacion/sucursales", {}, timeoutMs, retries).catch(e => ({ error: e }));
     const vehPromise      = fetchWithRetries("/modificacion/vehiculos", {}, timeoutMs, retries).catch(e => ({ error: e }));
     const horariosPromise = fetch("/modificacion/horarios-config").catch(() => null);
+    const choferesPromise = fetch("/configuracion/choferes").catch(() => null);
 
-    const [rutasRes, pesosRes, sucRes, vehRes, horariosRes] = await Promise.all([rutasPromise, pesosPromise, sucPromise, vehPromise, horariosPromise]);
+    const [rutasRes, pesosRes, sucRes, vehRes, horariosRes, choferesRes] = await Promise.all([rutasPromise, pesosPromise, sucPromise, vehPromise, horariosPromise, choferesPromise]);
 
     if (rutasRes && rutasRes.error) throw rutasRes.error;
     if (pesosRes && pesosRes.error) throw pesosRes.error;
@@ -306,6 +311,7 @@ async function cargarDatos() {
     _sucDisponibles = await sucRes.json();
     _vehiculos      = vehRes.ok ? await vehRes.json() : [];
     try { _configDias = (horariosRes?.ok) ? await horariosRes.json() : {}; } catch (_) { _configDias = {}; }
+    try { _choferesDisponibles = (choferesRes?.ok) ? await choferesRes.json() : []; } catch (_) { _choferesDisponibles = []; }
 
     _rutas          = rutasData.rutas || [];
     _logisticaId    = rutasData.logistica_id || _logisticaId || "";
@@ -1066,6 +1072,7 @@ async function seleccionarRuta(idx) {
   }
 
   renderSelectorVehiculo(ruta);
+  renderSelectorChofer(ruta);
   renderSelectorDia(ruta);
   renderParadas(ruta);
 
@@ -1294,10 +1301,71 @@ function cambiarVehiculo(ruta, nuevasPlacas) {
     }),
   }).catch(err => console.warn("[actualizar-vehiculo]", err));
 
+  // El chofer por defecto depende del vehículo; si no hay override para esta
+  // ruta, el chofer mostrado sigue al nuevo vehículo.
+  ruta.chofer_default    = vehiculo.chofer || "";
+  ruta.chofer_default_id = vehiculo.chofer_id || null;
+  if (!ruta.chofer_personalizado) {
+    ruta.chofer    = ruta.chofer_default;
+    ruta.chofer_id = ruta.chofer_default_id;
+  }
+
   renderSelectorVehiculo(ruta);
+  renderSelectorChofer(ruta);
   renderIndicadores(ruta);
   renderNavRutas();
   mostrarToastMod(`Vehículo cambiado a ${vehiculo.abrev || vehiculo.placas}`, "ok");
+}
+
+// ── Selector de chofer (override por ruta/día) ──────────────────
+function renderSelectorChofer(ruta) {
+  const zona = document.getElementById("zona-chofer");
+  if (!zona) return;
+
+  const choferActual = ruta.chofer || "";
+  const esPersonalizado = !!ruta.chofer_personalizado;
+  const defaultLabel = ruta.chofer_default
+    ? `Predeterminado del vehículo (${ruta.chofer_default})`
+    : "Predeterminado del vehículo (sin asignar)";
+
+  const opciones = _choferesDisponibles.map(c => {
+    const sel = esPersonalizado && c.nombre === choferActual ? "selected" : "";
+    return `<option value="${h(c.nombre)}" data-chofer-id="${c._id}" ${sel}>${h(c.nombre)}</option>`;
+  }).join("");
+
+  zona.innerHTML = `
+    <div class="chofer-selector-row">
+      <i data-lucide="user"></i>
+      <select id="select-chofer-ruta">
+        <option value="" ${!esPersonalizado ? "selected" : ""}>${h(defaultLabel)}</option>
+        ${opciones}
+      </select>
+    </div>
+    ${esPersonalizado ? `<span class="chofer-badge-personalizado">Solo esta ruta</span>` : ""}`;
+
+  document.getElementById("select-chofer-ruta").addEventListener("change", e => {
+    const choferId = e.target.selectedOptions[0]?.dataset.choferId || null;
+    cambiarChofer(ruta, e.target.value, choferId);
+  });
+  lucide.createIcons();
+}
+
+function cambiarChofer(ruta, nuevoChofer, nuevoChoferId = null) {
+  ruta.chofer_personalizado = !!nuevoChofer;
+  ruta.chofer    = nuevoChofer || ruta.chofer_default || "";
+  ruta.chofer_id = nuevoChofer ? nuevoChoferId : (ruta.chofer_default_id || null);
+
+  fetch("/modificacion/actualizar-chofer", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ ruta_id: ruta.id, dia: ruta.dia, chofer: nuevoChofer, chofer_id: nuevoChoferId }),
+  }).catch(err => console.warn("[actualizar-chofer]", err));
+
+  renderSelectorChofer(ruta);
+  mostrarToastMod(
+    nuevoChofer ? `Chofer de esta ruta: ${nuevoChofer}` : "Chofer restablecido al predeterminado del vehículo",
+    "ok"
+  );
 }
 
 /**
@@ -1388,6 +1456,7 @@ function _actualizarIndicadoresPeso(ruta) {
     lucide.createIcons();
   }
   renderSelectorVehiculo(ruta);
+  renderSelectorChofer(ruta);
   renderIndicadores(ruta);
   renderResumenTiempos(ruta);
 }
@@ -1531,6 +1600,7 @@ function setupDragAndDropParadas(container, ruta) {
 
       // Sincronizar de vuelta a sucursales y mayoristas
       _sincronizarParadas(ruta, paradas);
+      persistirOrdenParadas(ruta);
 
       delete _tiempos[ruta.id];
       renderParadas(ruta);
@@ -1555,6 +1625,24 @@ function _sincronizarParadas(ruta, paradasOrdenadas) {
   ruta.mayoristas = paradasOrdenadas
     .filter(p => p.tipo === "mayorista")
     .map((p, i) => ({ ...p, orden: p.orden ?? i + 1 }));
+}
+
+/**
+ * Persiste la secuencia exacta (sucursales + mayoristas entrelazados) de una
+ * ruta para que sobreviva a una recarga de página. Se llama tras cualquier
+ * cambio de orden: drag & drop, agregar o quitar una parada.
+ */
+function persistirOrdenParadas(ruta) {
+  const ordenParadas = _paradasDeRuta(ruta).map(p => ({
+    tipo:  p.tipo,
+    key:   p.tipo === "mayorista" ? _docKey(p) : p.num_tienda,
+    orden: p.orden,
+  }));
+  fetch("/modificacion/actualizar-orden", {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ ruta_id: ruta.id, dia: ruta.dia, orden_paradas: ordenParadas }),
+  }).catch(err => console.warn("[actualizar-orden]", err));
 }
 
 /**
@@ -1634,6 +1722,7 @@ function quitarParada(ruta, idx) {
     paradas.splice(idx, 1);
     paradas.forEach((p, i) => { p.orden = i + 1; });
     _sincronizarParadas(ruta, paradas);
+    persistirOrdenParadas(ruta);
     ruta.num_sucursales = ruta.sucursales.length;
 
     delete _tiempos[ruta.id];
@@ -1689,6 +1778,36 @@ function _liberarOcupacionVehiculo(ruta) {
   }
 }
 
+/**
+ * Vehículo con el que debería continuar la nueva ruta, para que la
+ * asignación "siga donde se quedó" la ruta anterior:
+ *   1) El último vehículo usado al crear una ruta en esta sesión (sin
+ *      importar el día — así continúa también al pasar al día siguiente).
+ *   2) Si aún no se ha creado ninguna ruta en esta sesión, el vehículo de
+ *      la última ruta del día hábil inmediatamente anterior con rutas.
+ * Solo se sugiere si el vehículo sigue disponible (no ocupado) ese día.
+ */
+function _vehiculoDeContinuidad(dia) {
+  const estaDisponible = (placas) => {
+    if (!placas) return false;
+    const veh = _vehiculoPorPlacas(placas);
+    return !!veh && !(veh.ocupacion || {})[dia];
+  };
+
+  if (estaDisponible(_ultimoVehiculoCreado)) return _ultimoVehiculoCreado;
+
+  const idx = DIAS_ORDEN.findIndex(d => d.key === dia);
+  for (let i = idx - 1; i >= 0; i--) {
+    const diaAnterior = DIAS_ORDEN[i].key;
+    const rutasDia = _rutas.filter(r => r.dia === diaAnterior);
+    if (rutasDia.length === 0) continue;
+    const placas = rutasDia[rutasDia.length - 1].vehiculo_placas;
+    if (estaDisponible(placas)) return placas;
+    break; // ya encontramos el día anterior con rutas; no seguir retrocediendo
+  }
+  return "";
+}
+
 function abrirModalCrearRuta() {
   if (!_vehiculos || _vehiculos.length === 0) {
     mostrarToastMod("No hay vehículos disponibles para asignar.", "warn");
@@ -1697,7 +1816,8 @@ function abrirModalCrearRuta() {
   const diaDefault = _diaActivo !== "__todos__"
     ? _diaActivo
     : (DIAS_ORDEN.find(d => _rutas.some(r => r.dia === d.key))?.key || DIAS_ORDEN[0].key);
-  _crearRuta = { dia: diaDefault, vehiculo: "", sucursales: [], mayoristas: [], query: "", queryMayoristas: "", verTodasSuc: false, verTodosMay: false };
+  const vehiculoDefault = _vehiculoDeContinuidad(diaDefault);
+  _crearRuta = { dia: diaDefault, vehiculo: vehiculoDefault, sucursales: [], mayoristas: [], query: "", queryMayoristas: "", verTodasSuc: false, verTodosMay: false };
   renderModalCrearRuta();
   document.getElementById("modal-crear-ruta")?.classList.remove("hidden");
   setTimeout(() => document.getElementById("buscar-sucursal-crear")?.focus(), 100);
@@ -1739,6 +1859,25 @@ function renderVehiculosCrearRuta() {
 
   vehSel.innerHTML = opciones.join("");
   vehSel.value = _crearRuta.vehiculo;
+  actualizarChoferInfoCrearRuta();
+}
+
+/** Muestra el chofer predeterminado del vehículo elegido al crear una ruta manual. */
+function actualizarChoferInfoCrearRuta() {
+  const info = document.getElementById("crear-chofer-info");
+  if (!info) return;
+  const vehiculo = _vehiculos.find(v => v.placas === _crearRuta.vehiculo);
+  const chofer = vehiculo?.chofer || "";
+  if (!vehiculo) {
+    info.classList.add("hidden");
+    info.textContent = "";
+    return;
+  }
+  info.classList.remove("hidden");
+  info.innerHTML = chofer
+    ? `<i data-lucide="user"></i> Chofer predeterminado: <strong>${h(chofer)}</strong>`
+    : `<i data-lucide="user-x"></i> Este vehículo no tiene chofer asignado`;
+  lucide.createIcons();
 }
 
 function renderModalCrearRuta() {
@@ -1987,6 +2126,8 @@ async function crearRutaManual() {
 
     _rutas.push(data.ruta);
     _ordenarRutas();
+    _ultimoVehiculoCreado = data.ruta.vehiculo_placas || _ultimoVehiculoCreado;
+    persistirOrdenParadas(data.ruta);
     if (data.sucursales_pendientes) _aplicarPendientes(data.sucursales_pendientes);
     _marcarOcupacionVehiculo(data.ruta);
     _actualizarConteoRutas();
@@ -2216,6 +2357,7 @@ function agregarSucursal(ruta, suc) {
   paradas.sort((a, b) => (a.orden ?? 9999) - (b.orden ?? 9999));
   paradas.forEach((p, i) => { p.orden = i + 1; });
   _sincronizarParadas(ruta, paradas);
+  persistirOrdenParadas(ruta);
   ruta.num_sucursales = ruta.sucursales.length;
   delete _tiempos[ruta.id];
   renderParadas(ruta);
@@ -2336,6 +2478,7 @@ async function agregarMayorista(ruta, may) {
       );
     }
 
+    persistirOrdenParadas(ruta);
     delete _tiempos[ruta.id];
     renderParadas(ruta);
     renderMayoristasLibresLayer();
@@ -2364,10 +2507,17 @@ function _cambiarVehiculoEnMemoria(ruta, nuevoVeh) {
     vNuevo.ocupacion[ruta.dia] = { ruta_id: ruta.id, ruta_nombre: ruta.nombre };
     _recalcularMetricasVehiculo(vNuevo);
   }
-  ruta.vehiculo_placas = nuevoVeh.placas;
-  ruta.vehiculo_abrev  = nuevoVeh.abrev;
-  ruta.capacidad_ton   = nuevoVeh.capacidad_ton;
+  ruta.vehiculo_placas    = nuevoVeh.placas;
+  ruta.vehiculo_abrev     = nuevoVeh.abrev;
+  ruta.capacidad_ton      = nuevoVeh.capacidad_ton;
+  ruta.chofer_default     = nuevoVeh.chofer || "";
+  ruta.chofer_default_id  = nuevoVeh.chofer_id || null;
+  if (!ruta.chofer_personalizado) {
+    ruta.chofer    = ruta.chofer_default;
+    ruta.chofer_id = ruta.chofer_default_id;
+  }
   renderSelectorVehiculo(ruta);
+  renderSelectorChofer(ruta);
   renderIndicadores(ruta);
 }
 
@@ -2526,6 +2676,9 @@ async function guardarTodo(redirigir = false) {
         dia:                ruta.dia,
         vehiculo_abrev:     ruta.vehiculo_abrev,
         vehiculo_placas:    ruta.vehiculo_placas,
+        chofer:             ruta.chofer || "",
+        chofer_id:          ruta.chofer_id || null,
+        chofer_personalizado: !!ruta.chofer_personalizado,
         capacidad_ton:      capTon,
         peso_kg:            pesoKg,
         peso_ton:           parseFloat((pesoKg / 1000).toFixed(3)),
@@ -2763,8 +2916,22 @@ async function refrescarVehiculos() {
     const nuevos = await res.json();
     const antes = _vehiculos.length;
     _vehiculos = nuevos;
+    try {
+      const resChof = await fetch("/configuracion/choferes");
+      if (resChof.ok) _choferesDisponibles = await resChof.json();
+    } catch (_) { /* mantiene el catálogo previo si falla */ }
     const ruta = _rutasFiltradas[_indiceActivo];
-    if (ruta) renderSelectorVehiculo(ruta);
+    if (ruta) {
+      const vehActual = _vehiculoPorPlacas(ruta.vehiculo_placas || "");
+      ruta.chofer_default    = vehActual?.chofer || "";
+      ruta.chofer_default_id = vehActual?.chofer_id || null;
+      if (!ruta.chofer_personalizado) {
+        ruta.chofer    = ruta.chofer_default;
+        ruta.chofer_id = ruta.chofer_default_id;
+      }
+      renderSelectorVehiculo(ruta);
+      renderSelectorChofer(ruta);
+    }
     if (nuevos.length !== antes) {
       mostrarToastMod("Flota actualizada automáticamente", "ok");
     }

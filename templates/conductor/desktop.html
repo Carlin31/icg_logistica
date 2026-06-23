@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mis rutas · ICG Logistics</title>
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/conductor_desktop.css') }}">
+</head>
+<body>
+
+<!-- ── Barra superior ── -->
+<header class="cdd-header">
+  <div class="cdd-brand">
+    <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="22" height="22">
+    <div class="cdd-brand-text">
+      <span class="cdd-brand-name">ICG Logistics</span>
+      <span class="cdd-brand-sub">Portal del Conductor</span>
+    </div>
+  </div>
+
+  <div class="cdd-saludo">Hola, <strong>{{ usuario_nombre or "Conductor" }}</strong></div>
+
+  <div class="cdd-header-actions">
+    <a href="?vista=movil" class="cdd-btn-ghost" title="Ver versión móvil">
+      <i data-lucide="smartphone"></i> Versión móvil
+    </a>
+    <a href="{{ url_for('auth.logout') }}" class="cdd-btn-ghost" title="Cerrar sesión">
+      <i data-lucide="log-out"></i> Salir
+    </a>
+  </div>
+</header>
+
+<!-- ── Layout principal: sidebar | mapa | panel de detalle ── -->
+<div class="cdd-layout">
+
+  <!-- ── Columna izquierda: logísticas → días → rutas ── -->
+  <aside class="cdd-sidebar">
+    <div class="cdd-sidebar-filtros">
+      <button class="cdd-filtro active" data-filtro="todas">Todas</button>
+      <button class="cdd-filtro" data-filtro="pendientes">Pendientes</button>
+      <button class="cdd-filtro" data-filtro="curso">En curso</button>
+      <button class="cdd-filtro" data-filtro="completadas">Completadas</button>
+    </div>
+    <div id="cdd-spinner" class="cdd-spinner"><div class="cdd-spin"></div> Cargando tus rutas…</div>
+    <div id="cdd-vacio" class="cdd-vacio hidden">
+      <i data-lucide="inbox"></i>
+      <p>No tienes rutas autorizadas todavía.</p>
+    </div>
+    <div id="cdd-logisticas" class="cdd-logisticas"></div>
+  </aside>
+
+  <!-- ── Columna central: mapa ── -->
+  <main class="cdd-mapa-col">
+    <div id="cdd-mapa-toolbar" class="cdd-mapa-toolbar hidden">
+      <div class="cdd-mapa-toolbar-info">
+        <span id="cdd-ruta-nombre" class="cdd-ruta-nombre">—</span>
+        <span id="cdd-ruta-meta" class="cdd-ruta-meta"></span>
+      </div>
+      <div class="cdd-progreso-bar-wrap">
+        <div class="cdd-progreso-track"><div id="cdd-progreso-fill" class="cdd-progreso-fill" style="width:0%"></div></div>
+        <span id="cdd-progreso-label" class="cdd-progreso-label">0 de 0 entregadas</span>
+      </div>
+    </div>
+    <div id="cdd-mapa-vacio" class="cdd-mapa-vacio">
+      <i data-lucide="map"></i>
+      <p>Selecciona una ruta de la izquierda para ver su mapa de entrega.</p>
+    </div>
+    <div id="cdd-mapa" class="cdd-mapa hidden"></div>
+  </main>
+
+  <!-- ── Columna derecha: detalle de paradas ── -->
+  <aside class="cdd-detalle">
+    <div id="cdd-detalle-vacio" class="cdd-detalle-vacio">
+      <i data-lucide="list-checks"></i>
+      <p>El detalle de las paradas aparecerá aquí.</p>
+    </div>
+    <div id="cdd-detalle-lista" class="cdd-detalle-lista hidden"></div>
+  </aside>
+
+</div>
+
+<!-- ── Modal: confirmar entrega ── -->
+<div id="cdd-confirm-overlay" class="cdd-overlay hidden">
+  <div class="cdd-confirm-box">
+    <i data-lucide="package-check" class="cdd-confirm-icon"></i>
+    <h3 id="cdd-confirm-titulo">Marcar como entregado</h3>
+    <p id="cdd-confirm-msg">¿Confirmas la entrega en este punto?</p>
+    <div class="cdd-confirm-acciones">
+      <button id="cdd-confirm-cancelar" class="cdd-btn cdd-btn-secundario">Cancelar</button>
+      <button id="cdd-confirm-aceptar" class="cdd-btn cdd-btn-primario">Confirmar entrega</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: cancelar entrega ── -->
+<div id="cdd-cancelar-overlay" class="cdd-overlay hidden">
+  <div class="cdd-confirm-box">
+    <i data-lucide="x-circle" class="cdd-confirm-icon cdd-confirm-icon--rojo"></i>
+    <h3>Cancelar entrega</h3>
+    <p id="cdd-cancelar-msg">¿Cancelar la entrega en este punto?</p>
+    <div class="cdd-confirm-acciones">
+      <button id="cdd-cancelar-no" class="cdd-btn cdd-btn-secundario">No, mantener</button>
+      <button id="cdd-cancelar-aceptar" class="cdd-btn cdd-btn-rojo">Sí, cancelar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast ── -->
+<div id="cdd-toast" class="cdd-toast hidden"></div>
+
+<script>window.__CD_ESTADO_INICIAL__ = {{ estado_inicial | tojson }};</script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+<script src="{{ url_for('static', filename='js/conductor_desktop.js') }}"></script>
+</body>
+</html>
