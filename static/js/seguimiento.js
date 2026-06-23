@@ -8,12 +8,16 @@ const ESTADO_LABEL_SEG = { sin_iniciar: "Sin iniciar", en_curso: "En curso", com
 const ACCION_LABEL_SEG = {
   autorizar_rutas:       "Rutas autorizadas",
   cancelar_autorizacion: "Autorización cancelada",
+  iniciar_ruta:          "Ruta iniciada",
+  entrega_realizada:     "Entrega realizada",
   cancelar_entrega:      "Entrega cancelada",
   reautorizar_entrega:   "Entrega re-autorizada",
 };
 const ACCION_CLASE_SEG = {
   autorizar_rutas:       "seg-accion--autorizar",
   cancelar_autorizacion: "seg-accion--cancelar",
+  iniciar_ruta:          "seg-accion--iniciar",
+  entrega_realizada:     "seg-accion--entrega",
   cancelar_entrega:      "seg-accion--cancelar-ent",
   reautorizar_entrega:   "seg-accion--reautorizar",
 };
@@ -21,6 +25,8 @@ const ACCION_CLASE_SEG = {
 const ACCION_ICON_SEG = {
   autorizar_rutas:       "check-circle-2",
   cancelar_autorizacion: "x-circle",
+  iniciar_ruta:          "play-circle",
+  entrega_realizada:     "package-check",
   cancelar_entrega:      "ban",
   reautorizar_entrega:   "refresh-cw",
 };

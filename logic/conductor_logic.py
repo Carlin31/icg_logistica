@@ -275,6 +275,10 @@ def marcar_entrega(
         "observacion":    (observacion or "").strip(),
     }
 
+    # Verificar antes de modificar si el chofer aún no ha registrado ninguna
+    # acción en esta ruta (primera entrega = inicio de ruta).
+    es_primera_accion = db["entregas"].count_documents({"ruta_id": ruta_id}) == 0
+
     if estado == ESTADO_ENTREGADO:
         # Detectar re-entrega (había sido cancelada) para auditoría.
         existente   = db["entregas"].find_one(filtro)
@@ -296,12 +300,24 @@ def marcar_entrega(
             },
             upsert=True,
         )
+        tipo_label    = "Sucursal" if parada_tipo == "sucursal" else "Mayorista"
+        nombre_parada = _nombre_parada_en_ruta(ruta, parada_tipo, parada_key)
+
+        if es_primera_accion:
+            registrar_auditoria(
+                usuario_id, nombre_chofer, "iniciar_ruta", logistica_id,
+                f"Ruta iniciada: {ruta.get('nombre', '')}",
+            )
+
         if es_reentrega:
-            tipo_label    = "Sucursal" if parada_tipo == "sucursal" else "Mayorista"
-            nombre_parada = _nombre_parada_en_ruta(ruta, parada_tipo, parada_key)
             registrar_auditoria(
                 usuario_id, nombre_chofer, "reautorizar_entrega", logistica_id,
                 f"{tipo_label} re-entregada: {nombre_parada} · Ruta: {ruta.get('nombre', '')}",
+            )
+        else:
+            registrar_auditoria(
+                usuario_id, nombre_chofer, "entrega_realizada", logistica_id,
+                f"{tipo_label} entregada: {nombre_parada} · Ruta: {ruta.get('nombre', '')}",
             )
 
     else:  # ESTADO_CANCELADO

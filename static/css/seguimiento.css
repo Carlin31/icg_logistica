@@ -322,6 +322,8 @@
 .seg-audit-ev-icono svg { width: 13px; height: 13px; }
 .seg-audit-ev-icono--autorizar_rutas       { background: #dcfce7; color: #16a34a; }
 .seg-audit-ev-icono--cancelar_autorizacion { background: #fee2e2; color: #dc2626; }
+.seg-audit-ev-icono--iniciar_ruta          { background: #ede9fe; color: #6d28d9; }
+.seg-audit-ev-icono--entrega_realizada     { background: #ccfbf1; color: #0f766e; }
 .seg-audit-ev-icono--cancelar_entrega      { background: #ffedd5; color: #ea580c; }
 .seg-audit-ev-icono--reautorizar_entrega   { background: #dbeafe; color: #2563eb; }
 
@@ -367,6 +369,8 @@
 }
 .seg-accion--autorizar    { background: #dcfce7; color: #166534; }
 .seg-accion--cancelar     { background: #fee2e2; color: #991b1b; }
+.seg-accion--iniciar      { background: #ede9fe; color: #6d28d9; }
+.seg-accion--entrega      { background: #ccfbf1; color: #0f766e; }
 .seg-accion--reautorizar  { background: #dbeafe; color: #1e40af; }
 .seg-accion--cancelar-ent { background: #ffedd5; color: #9a3412; }
 
