@@ -91,16 +91,16 @@
 </div>
 
 <!-- ── Modal de confirmación: cancelar autorización ── -->
-<div id="modal-cancelar-autorizacion" class="modal-overlay hidden">
+<div id="modal-cancelar-autorizacion" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-cancelar-lbl">
   <div class="modal-box">
-    <h3>Cancelar autorización</h3>
+    <h3 id="modal-cancelar-lbl">Cancelar autorización</h3>
     <p id="modal-cancelar-msg">¿Está seguro de que desea cancelar la autorización de esta ruta?</p>
     <div id="modal-cancelar-aviso-entregas" class="alerta-warning" style="display:none; margin-top:.8rem;">
         <i data-lucide="triangle-alert" class="pdf-icon" aria-hidden="true"></i>
         <span id="modal-cancelar-aviso-texto"></span>
     </div>
     <div class="modal-footer">
-      <button id="modal-cancelar-no" class="btn-secondary">No, mantener autorización</button>
+      <button id="modal-cancelar-no" class="btn btn-secondary">No, mantener autorización</button>
       <button id="modal-cancelar-si" class="btn-cancelar-autorizacion">Sí, cancelar autorización</button>
     </div>
   </div>

@@ -215,7 +215,7 @@
 </div>
 
 <!-- Modal de confirmación de estado de vehículo -->
-<div id="confirm-overlay" class="modal-overlay hidden">
+<div id="confirm-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
   <div class="confirm-box">
     <div class="confirm-icon" id="confirm-icon"></div>
     <h3 id="confirm-title"></h3>
@@ -281,7 +281,7 @@
 </section>
 
 <!-- ── Modal mapa de rutas históricas ── -->
-<div id="hist-mapa-overlay" class="hist-mapa-overlay hidden">
+<div id="hist-mapa-overlay" class="hist-mapa-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="hist-mapa-titulo">
   <div class="hist-mapa-box">
 
     <!-- Área principal: mapa -->
@@ -323,7 +323,7 @@
 </div>
 
 <!-- Modal genérico -->
-<div id="modal-overlay" class="modal-overlay hidden">
+<div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
   <div class="modal-box">
     <h3 id="modal-title"></h3>
     <form id="modal-form" onsubmit="event.preventDefault();"></form>
@@ -336,9 +336,9 @@
 </div>
 
 <!-- Mini modal: gestión de choferes -->
-<div id="modal-choferes-overlay" class="modal-overlay hidden">
+<div id="modal-choferes-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-choferes-lbl">
   <div class="modal-box modal-box-sm">
-    <h3>Choferes</h3>
+    <h3 id="modal-choferes-lbl">Choferes</h3>
     <form id="form-nuevo-chofer" class="choferes-add-form" onsubmit="event.preventDefault();">
       <input type="text" id="input-nuevo-chofer" class="form-control" placeholder="Nombre del chofer" maxlength="80">
       <button type="submit" class="btn btn-primary btn-sm">Agregar</button>

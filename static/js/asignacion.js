@@ -291,8 +291,8 @@ function renderRutaCard(ruta) {
     : "";
 
   return `
-    <div class="sel-route-card ${estadoClass}" data-rutaid="${h(id)}"
-         title="${esEntregada ? "Clic para restaurar la ruta" : "Clic para marcar como entregada"}">
+    <button type="button" class="sel-route-card ${estadoClass}" data-rutaid="${h(id)}"
+            aria-label="${esEntregada ? `Restaurar ruta: ${h(ruta.nombre)}` : `Marcar como entregada: ${h(ruta.nombre)}`}">
       <div class="sel-route-card__header">
         <span class="sel-route-card__name">${h(ruta.nombre)}</span>
         ${estadoBadge}
@@ -302,7 +302,7 @@ function renderRutaCard(ruta) {
         <span><i data-lucide="map-pin"></i> ${sucursales.length} parada${sucursales.length !== 1 ? "s" : ""}</span>
         ${footerPeso}
       </div>
-    </div>`;
+    </button>`;
 }
 
 // ── Orden canónico de días (Lun → Dom) ──────────────────────────────────────
@@ -1198,7 +1198,7 @@ function bindCardEventosTodos(grid, rutas) {
   grid.querySelectorAll(".btn-reprogramar").forEach(btn => {
     btn.addEventListener("click", () => {
       const rutaId = btn.dataset.rutaid;
-      const ruta   = _rutas.find(r => r._id === rutaId);
+      const ruta   = _rutas.find(r => String(r._id) === rutaId);
       if (!ruta) return;
       const siguienteDia = siguienteDiaHabilitado(ruta.dia_programado);
       if (siguienteDia === ruta.dia_programado) return;

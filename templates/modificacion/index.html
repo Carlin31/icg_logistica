@@ -150,7 +150,7 @@
 </div>
 
 <!-- Modal de confirmación para quitar parada -->
-<div id="modal-quitar-parada" class="modal-overlay hidden">
+<div id="modal-quitar-parada" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="quitar-title">
   <div class="confirm-box">
     <div class="confirm-icon" id="quitar-icon">
       <i data-lucide="trash-2"></i>
@@ -166,10 +166,10 @@
 </div>
 
 <!-- Modal agregar sucursal -->
-<div id="modal-agregar" class="modal hidden">
+<div id="modal-agregar" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-agregar-lbl">
   <div class="modal-content">
     <div class="modal-header">
-      <h3>Agregar sucursal a la ruta</h3>
+      <h3 id="modal-agregar-lbl">Agregar sucursal a la ruta</h3>
       <button id="modal-agregar-close" class="modal-close">&times;</button>
     </div>
     <div class="modal-body">

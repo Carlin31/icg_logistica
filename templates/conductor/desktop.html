@@ -82,7 +82,7 @@
 </div>
 
 <!-- ── Modal: confirmar entrega ── -->
-<div id="cdd-confirm-overlay" class="cdd-overlay hidden">
+<div id="cdd-confirm-overlay" class="cdd-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cdd-confirm-titulo">
   <div class="cdd-confirm-box">
     <i data-lucide="package-check" class="cdd-confirm-icon"></i>
     <h3 id="cdd-confirm-titulo">Marcar como entregado</h3>
@@ -95,10 +95,10 @@
 </div>
 
 <!-- ── Modal: cancelar entrega ── -->
-<div id="cdd-cancelar-overlay" class="cdd-overlay hidden">
+<div id="cdd-cancelar-overlay" class="cdd-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="cdd-cancelar-lbl">
   <div class="cdd-confirm-box">
-    <i data-lucide="x-circle" class="cdd-confirm-icon cdd-confirm-icon--rojo"></i>
-    <h3>Cancelar entrega</h3>
+    <i data-lucide="x-circle" class="cdd-confirm-icon cdd-confirm-icon--rojo" aria-hidden="true"></i>
+    <h3 id="cdd-cancelar-lbl">Cancelar entrega</h3>
     <p id="cdd-cancelar-msg">¿Cancelar la entrega en este punto?</p>
     <div class="cdd-confirm-acciones">
       <button id="cdd-cancelar-no" class="cdd-btn cdd-btn-secundario">No, mantener</button>

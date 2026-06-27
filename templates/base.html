@@ -6,9 +6,12 @@
     <title>{% block title %}ICG Logistics{% endblock %} · ICG Logistics</title>
     {% block favicon %}<link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='img/favicon-brand.svg') }}">{% endblock %}
     <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/shared.css') }}">
     {% block extra_css %}{% endblock %}
 </head>
 <body>
+
+<a href="#contenido" class="skip-link">Saltar al contenido principal</a>
 
 <!-- ═══════════════════════════════════════════════════════════════
      HEADER / NAVBAR
@@ -252,6 +255,8 @@
             overlay.classList.add('visible');
             toggleBtn.setAttribute('aria-expanded', 'true');
             panel.setAttribute('aria-hidden', 'false');
+            const primer = panel.querySelector('a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])');
+            if (primer) setTimeout(() => primer.focus(), 50);
         }
 
         function closeNav() {
@@ -259,6 +264,7 @@
             overlay.classList.remove('visible');
             toggleBtn.setAttribute('aria-expanded', 'false');
             panel.setAttribute('aria-hidden', 'true');
+            toggleBtn.focus();
         }
 
         if (toggleBtn) {

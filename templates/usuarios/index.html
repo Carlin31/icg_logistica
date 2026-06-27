@@ -38,7 +38,7 @@
 </div>
 
 <!-- ── Modal crear/editar usuario ── -->
-<div id="modal-usuario" class="modal-overlay hidden">
+<div id="modal-usuario" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-usuario-titulo">
   <div class="modal-box">
     <h3 id="modal-usuario-titulo">Nuevo usuario</h3>
     <form id="form-usuario" onsubmit="event.preventDefault();">
@@ -75,9 +75,9 @@
 </div>
 
 <!-- ── Modal confirmar eliminación ── -->
-<div id="modal-eliminar-usuario" class="modal-overlay hidden">
+<div id="modal-eliminar-usuario" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-eliminar-lbl">
   <div class="modal-box modal-box-sm">
-    <h3>Eliminar usuario</h3>
+    <h3 id="modal-eliminar-lbl">Eliminar usuario</h3>
     <p id="modal-eliminar-msg">¿Eliminar este usuario? Esta acción no se puede deshacer.</p>
     <div class="modal-footer">
       <button id="btn-cancelar-eliminar" class="btn btn-secondary">Cancelar</button>

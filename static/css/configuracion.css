@@ -62,73 +62,11 @@
   background: #dcfce7; padding: 2px 6px; border-radius: 4px; font-weight: 700;
 }
 
-/* ── Search ── */
-.input-search {
-  width: 100%;
-  max-width: 340px;
-  padding: 7px 12px;
-  border: 1px solid var(--gris-borde);
-  border-radius: var(--radio-btn);
-  margin-bottom: 14px;
-  font-size: var(--text-base);
-  outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.input-search:focus { border-color: var(--azul); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+/* .input-search, .data-table, .table-responsive, .btn, .modal-overlay,
+   .modal-box, .modal-footer, .form-group, .form-control → shared.css */
 
-/* ── Tables ── */
-.data-table { width: 100%; border-collapse: collapse; font-size: var(--text-base); }
-.data-table th, .data-table td { padding: 9px 12px; border: 1px solid var(--gris-borde); text-align: left; }
-.data-table thead th { background: var(--gris-bg-alt); font-weight: 700; color: var(--gris-texto); font-size: var(--text-xs); text-transform: uppercase; letter-spacing: .04em; }
-.data-table tbody tr:nth-child(even) { background: var(--gris-bg-alt); }
-.data-table tbody tr:hover { background: var(--azul-bg); }
-
-/* ── Buttons ── */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 14px;
-  border: none;
-  border-radius: var(--radio-btn);
-  cursor: pointer;
-  font-size: var(--text-base);
-  font-weight: 600;
-  transition: background .15s, opacity .15s, transform .1s;
-}
-.btn svg { width: 14px; height: 14px; flex-shrink: 0; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn-primary   { background: var(--azul);     color: var(--blanco); }
-.btn-primary:hover:not(:disabled)   { background: var(--azul-dark); }
-.btn-success   { background: var(--verde);    color: var(--blanco); }
-.btn-success:hover:not(:disabled)   { background: var(--verde-dark); }
-.btn-warning   { background: var(--acento);   color: var(--blanco); }
-.btn-warning:hover:not(:disabled)   { background: var(--acento-hover); }
-.btn-danger    { background: var(--rojo);     color: var(--blanco); }
-.btn-danger:hover:not(:disabled)    { background: var(--rojo-dark); }
-.btn-secondary { background: var(--gris-icono); color: var(--blanco); }
-.btn-secondary:hover:not(:disabled) { background: #4b5563; }
-.btn-sm { padding: 4px 10px; font-size: var(--text-sm); }
-
-/* ── Modal ── */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-overlay.hidden { display: none; }
-.modal-box { background: var(--blanco); border-radius: var(--radio-sm); padding: 28px; width: 520px; max-height: 85vh; overflow-y: auto; box-shadow: var(--sombra-xl); }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
-
-/* ── Form ── */
-.form-group { margin-bottom: 12px; }
-.form-group label { display: block; font-size: var(--text-sm); color: var(--gris-texto); margin-bottom: 4px; font-weight: 500; }
-.form-control {
-  width: 100%;
-  padding: 7px 10px;
-  border: 1px solid var(--gris-borde);
-  border-radius: var(--radio-btn);
-  font-size: var(--text-base);
-  outline: none;
-  transition: border-color .15s, box-shadow .15s;
-}
-.form-control:focus { border-color: var(--azul); box-shadow: 0 0 0 3px rgba(37,99,235,.1); }
+/* Override de ancho de modal para formularios de configuración */
+#modal-overlay .modal-box { width: 520px; }
 
 /* ── Filtros combinados ── */
 .filter-container {
@@ -159,20 +97,8 @@ th.sortable::after {
 th.sortable.asc::after  { opacity: 1; content: '\25B2'; }
 th.sortable.desc::after { opacity: 1; content: '\25BC'; }
 
-/* Soporte para tablas anchas */
-.table-responsive {
-  width: 100%;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  margin-bottom: 1rem;
-}
-
-.data-table { 
-  width: 100%; 
-  border-collapse: collapse; 
-  font-size: 0.88rem; 
-  white-space: nowrap;
-}
+/* Tablas de configuración: sin salto de línea (columnas con datos largos) */
+#configuracion-container .data-table { white-space: nowrap; }
 
 /* ── TAB GENERAL ── */
 .config-fieldset {
@@ -263,33 +189,9 @@ th.sortable.desc::after { opacity: 1; content: '\25BC'; }
   border-color: var(--gris-borde);
 }
 
-/* ── Toggle switch ── */
-.switch {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-}
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider {
-  position: absolute;
-  cursor: pointer;
-  inset: 0;
-  background: var(--gris-medio);
-  border-radius: var(--radio-full);
-  transition: background .3s;
-}
-.slider:before {
-  content: "";
-  position: absolute;
-  height: 14px; width: 14px;
-  left: 3px; top: 3px;
-  background: var(--blanco);
-  border-radius: 50%;
-  transition: transform .3s;
-}
-input:checked + .slider { background: var(--verde); }
-input:checked + .slider:before { transform: translateX(16px); }
+/* Toggle switch: tamaño compacto y verde (override de shared.css) */
+.dia-row .switch { width: 36px; height: 20px; }
+.dia-row .switch input:checked + .slider { background: var(--verde); }
 
 /* ── Modal de Confirmación ── */
 .confirm-box {
@@ -359,18 +261,7 @@ input:checked + .slider:before { transform: translateX(16px); }
 }
 .btn-confirm-ok { min-width: 120px; font-weight: 600; }
 
-/* ── Error dentro del modal ── */
-.modal-error {
-  background: var(--rojo-bg);
-  border: 1px solid var(--rojo-borde);
-  border-radius: var(--radio-btn);
-  color: var(--rojo-dark);
-  padding: 10px 14px;
-  font-size: var(--text-sm);
-  font-weight: 500;
-  margin-top: 12px;
-}
-.modal-error.hidden { display: none; }
+/* .modal-error → shared.css */
 
 /* ── Toast de notificación ── */
 .cfg-toast-container {

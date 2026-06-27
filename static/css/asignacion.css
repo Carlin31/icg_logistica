@@ -410,19 +410,7 @@
 }
 .dia-btn.activo .dia-badge { background: rgba(255,255,255,0.35); }
 
-/* Botones genéricos */
-.btn { padding: 7px 14px; border: none; border-radius: 6px; cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: background 0.15s, box-shadow 0.15s; display: inline-flex; align-items: center; gap: 5px; }
-.btn-primary   { background: var(--azul);     color: #fff; }
-.btn-primary:hover  { background: var(--azul-dark); }
-.btn-success   { background: var(--verde);    color: #fff; }
-.btn-success:hover  { background: #15803d; }
-.btn-warning   { background: var(--amarillo); color: #fff; }
-.btn-warning:hover  { background: #b45309; }
-.btn-danger    { background: var(--rojo);     color: #fff; }
-.btn-danger:hover   { background: #b91c1c; }
-.btn-secondary { background: #6b7280;         color: #fff; }
-.btn-secondary:hover { background: #4b5563; }
-.btn-sm        { padding: 4px 9px; font-size: 0.78rem; }
+/* .btn y variantes → shared.css */
 
 /* ── Indicadores globales del día ── */
 .indicadores-dia {
@@ -583,11 +571,13 @@
   z-index: 9999;
 }
 [data-tooltip]:hover::after,
+[data-tooltip]:focus-visible::after,
 [data-tooltip].tooltip-activo::after {
   opacity: 1;
   transform: translateX(-50%) translateY(0);
 }
 [data-tooltip]:hover::before,
+[data-tooltip]:focus-visible::before,
 [data-tooltip].tooltip-activo::before {
   opacity: 1;
 }
@@ -605,6 +595,7 @@
   border-bottom-color: #1e293b;
 }
 [data-tooltip].tooltip-abajo:hover::after,
+[data-tooltip].tooltip-abajo:focus-visible::after,
 [data-tooltip].tooltip-abajo.tooltip-activo::after {
   transform: translateX(-50%) translateY(0);
 }
@@ -724,15 +715,8 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ── Modal ── */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
-.modal-overlay.hidden { display: none; }
-.modal-box { background: #fff; border-radius: 10px; padding: 28px; width: 540px; max-height: 88vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.2); }
+/* .modal-overlay, .modal-box, .modal-footer, .form-group, .form-control → shared.css */
 .modal-title { font-size: 1.1rem; font-weight: 700; color: var(--texto); margin-bottom: 18px; }
-.modal-footer { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
-.form-group { margin-bottom: 14px; }
-.form-group label { display: block; font-size: 0.8rem; font-weight: 600; color: var(--texto-sub); margin-bottom: 4px; }
-.form-control { width: 100%; padding: 7px 10px; border: 1px solid var(--borde); border-radius: 4px; font-size: 0.85rem; box-sizing: border-box; }
 
 /* ── Config días ── */
 .dia-config-row {
@@ -747,12 +731,9 @@
 .dia-config-row label { font-size: 0.82rem; font-weight: 600; color: var(--texto); }
 .dia-config-row input[type="time"] { padding: 5px 8px; border: 1px solid var(--borde); border-radius: 4px; font-size: 0.82rem; width: 100%; }
 .dia-toggle { display: flex; align-items: center; }
-.switch { position: relative; display: inline-block; width: 36px; height: 20px; }
-.switch input { opacity: 0; width: 0; height: 0; }
-.slider { position: absolute; cursor: pointer; inset: 0; background: #cbd5e1; border-radius: 20px; transition: 0.3s; }
-.slider:before { content: ""; position: absolute; height: 14px; width: 14px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: 0.3s; }
-input:checked + .slider { background: var(--verde); }
-input:checked + .slider:before { transform: translateX(16px); }
+/* Toggle de días: tamaño compacto y verde (override de shared.css) */
+.dia-toggle .switch { width: 36px; height: 20px; }
+.dia-toggle .switch input:checked + .slider { background: var(--verde); }
 
 /* ── Alerta de tiempo ── */
 .alerta-tiempo {
@@ -1066,6 +1047,10 @@ input:checked + .slider:before { transform: translateX(16px); }
 
 /* ── Tarjeta de ruta ── */
 .sel-route-card {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
   background: #fff;
   border: 2px solid var(--borde);
   border-radius: 8px;

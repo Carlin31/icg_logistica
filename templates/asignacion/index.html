@@ -240,9 +240,9 @@
 </div>
 
 <!-- Modal: Configurar días -->
-<div id="modal-config-dias" class="modal-overlay hidden">
+<div id="modal-config-dias" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-config-dias-lbl">
   <div class="modal-box">
-    <div class="modal-title"><i data-lucide="settings"></i> Configuración de días de operación</div>
+    <div class="modal-title" id="modal-config-dias-lbl"><i data-lucide="settings" aria-hidden="true"></i> Configuración de días de operación</div>
     <div id="config-dias-form"></div>
     <div class="modal-footer">
       <button id="modal-dias-cancel" class="btn btn-secondary">Cancelar</button>
@@ -252,10 +252,10 @@
 </div>
 
 <!-- Modal: Reacomodamiento -->
-<div id="modal-reacomo" class="modal-overlay hidden">
+<div id="modal-reacomo" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-reacomo-lbl">
   <div class="modal-box modal-box--wide">
-    <div class="modal-title">
-      <i data-lucide="truck"></i> Reacomodamiento — Configuración
+    <div class="modal-title" id="modal-reacomo-lbl">
+      <i data-lucide="truck" aria-hidden="true"></i> Reacomodamiento — Configuración
     </div>
 
     <div class="reacomo-desc">

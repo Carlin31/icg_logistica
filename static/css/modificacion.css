@@ -153,27 +153,10 @@
   animation: spin 0.7s linear infinite;
 }
 
-/* ── Botones ─────────────────────────────────────────────── */
-.btn {
-  border: none;
-  border-radius: 6px;
-  padding: 7px 13px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-sm { padding: 4px 9px; font-size: 0.72rem; }
-.btn-secondary { background: var(--gris-icono); color: var(--blanco); }
-.btn-secondary:hover:not(:disabled) { background: #4b5563; }
-.btn-danger { background: var(--rojo); color: var(--blanco); }
-.btn-danger:hover:not(:disabled) { background: var(--rojo-dark); }
+/* .btn, .btn-sm, .btn-secondary, .btn-danger → shared.css */
 
-.btn-guardar { background: var(--primario, #2563eb); color: #fff; }
+/* Variantes semánticas propias del módulo de modificación */
+.btn-guardar { background: var(--azul); color: #fff; }
 .btn-guardar:hover:not(:disabled) { background: #1d4ed8; }
 
 .btn-crear-ruta {
@@ -1325,18 +1308,9 @@
 }
 .btn-mod-dia-apply:hover { background: #bfdbfe; }
 
-/* ── Modal de confirmación para quitar parada ── */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-.modal-overlay.hidden { display: none; }
+/* .modal-overlay → shared.css */
 
+/* ── Modal de confirmación para quitar parada ── */
 .confirm-box {
   background: #fff;
   border-radius: 14px;

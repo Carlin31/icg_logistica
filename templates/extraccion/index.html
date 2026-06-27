@@ -413,7 +413,7 @@
 </div><!-- /#extraccion-container -->
 
 <!-- Modal: Agregar manualmente -->
-<div id="modal-manual" class="ext-modal-overlay hidden">
+<div id="modal-manual" class="ext-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modal-manual-titulo">
   <div class="ext-modal-box">
     <div class="ext-modal-header">
       <div>
@@ -450,10 +450,10 @@
 </div>
 
 <!-- Confirm overlay: quitar mayorista de la lista -->
-<div id="ext-confirm-overlay" class="ext-confirm-overlay hidden">
+<div id="ext-confirm-overlay" class="ext-confirm-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ext-confirm-lbl">
   <div class="ext-confirm-box">
-    <div class="ext-confirm-icon"><i data-lucide="trash-2"></i></div>
-    <h3>¿Quitar mayorista?</h3>
+    <div class="ext-confirm-icon" aria-hidden="true"><i data-lucide="trash-2"></i></div>
+    <h3 id="ext-confirm-lbl">¿Quitar mayorista?</h3>
     <p id="ext-confirm-msg"></p>
     <div class="ext-confirm-footer">
       <button id="ext-confirm-cancel" class="ext-btn-secondary">Cancelar</button>
@@ -463,7 +463,7 @@
 </div>
 
 <!-- Confirm overlay genérico: captura manual -->
-<div id="ext-confirm-gen-overlay" class="ext-confirm-overlay hidden">
+<div id="ext-confirm-gen-overlay" class="ext-confirm-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="ext-confirm-gen-titulo">
   <div class="ext-confirm-box">
     <div class="ext-confirm-icon ext-confirm-icon--warn">
       <i data-lucide="alert-triangle"></i>
