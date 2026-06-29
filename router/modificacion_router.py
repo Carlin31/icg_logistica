@@ -5,6 +5,7 @@ Pasa logistica_id a todas las funciones de lógica.
 """
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for, Response
 from logic.historico_logic import exportar_csv_rutas, guardar_en_historico
+from logic.asignacion_logic import obtener_volumenes
 from logic.modificacion_logic import (
     MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT,
     obtener_rutas_para_modificar,
@@ -118,6 +119,17 @@ def get_pesos():
         return err
     try:
         return jsonify(obtener_pesos(lid))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@modificacion_bp.route("/volumenes", methods=["GET"])
+def get_volumenes():
+    lid, err = _requiere_logistica()
+    if err:
+        return err
+    try:
+        return jsonify(obtener_volumenes(lid))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

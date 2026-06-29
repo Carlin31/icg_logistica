@@ -18,6 +18,7 @@
     <li class="active"><a href="#tab-general"    data-tab="general">General</a></li>
     <li><a href="#tab-icg"                 data-tab="icg">ICG</a></li>
     <li><a href="#tab-proalmex"            data-tab="proalmex">Proalmex</a></li>
+    <li><a href="#tab-bimbo"              data-tab="bimbo">Bimbo</a></li>
     <li><a href="#tab-sucursales"          data-tab="sucursales">Sucursales</a></li>
     <li><a href="#tab-vehiculos"           data-tab="vehiculos">Vehículos</a></li>
     <li><a href="#tab-clientes-mayoristas" data-tab="clientes-mayoristas">Clientes Mayoristas</a></li>
@@ -104,6 +105,36 @@
             <th class="sortable">Tamaño</th>
             <th class="sortable col-num">Costo</th>
             <th class="sortable col-num">Peso (kg)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB BIMBO ── -->
+  <section id="tab-bimbo" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Base de Datos Bimbo</h2>
+      <button id="btn-nuevo-producto-bimbo" class="btn btn-success">+ Nuevo producto Bimbo</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-producto_bimbo-nombre" placeholder="Buscar producto Bimbo…" class="input-search">
+      <input type="date" id="buscar-producto_bimbo-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-productos-bimbo" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Código de Barra</th>
+            <th class="sortable">Descripción</th>
+            <th class="sortable col-num">Peso (kg)</th>
+            <th class="sortable col-num">Altura (cm)</th>
+            <th class="sortable col-num">Ancho (cm)</th>
+            <th class="sortable col-num">Largo (cm)</th>
+            <th class="sortable col-num">Volumen (m³)</th>
             <th class="sortable">Última Modificación</th>
             <th>Acciones</th>
           </tr>

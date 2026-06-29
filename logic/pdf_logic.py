@@ -39,9 +39,9 @@ ESPACIO_ENTRE_COLS = 10
 ANCHO_COL          = (PW - MARGEN * 2 - ESPACIO_ENTRE_COLS) / 2
 
 # ── Anchos de columna (suman ANCHO_COL) ──────────────────────
-CW = [38, 28, 20, 147, 26, 27]
-iDIA, iAPOYO, iSEC, iSUC, iPESO, iPCT_R = range(6)
-NCOLS = 6
+CW = [38, 28, 20, 125, 26, 22, 27]
+iDIA, iAPOYO, iSEC, iSUC, iPESO, iVOL, iPCT_R = range(7)
+NCOLS = 7
 
 # ── Fuentes ───────────────────────────────────────────────────
 SZ_ENC = 8.0
@@ -261,19 +261,41 @@ def _agrupar_may_por_poblacion(paradas: list, pob_map: dict) -> list:
     return result
 
 
+def _volumenes_suc(db, oid: ObjectId) -> dict:
+    """Returns {num_tienda_int: total_m3} from extraccion.datos_volumen."""
+    resultado: dict = {}
+    try:
+        ext = db["extraccion"].find_one({"logistica_id": oid})
+        if ext:
+            for _, valores in ext.get("datos_volumen", {}).items():
+                id_suc = valores.get("id_sucursal")
+                vol_m3 = valores.get("total_m3", 0)
+                if id_suc is not None:
+                    try:
+                        resultado[int(id_suc)] = float(vol_m3)
+                    except (TypeError, ValueError):
+                        pass
+    except Exception as e:
+        print(f"[_volumenes_suc] {e}")
+    return resultado
+
+
 # ── Tabla de un vehículo ──────────────────────────────────────
 def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
-                    veh_chofer: str = "", veh_ton: float = 0.0, db=None) -> list:
+                    veh_chofer: str = "", veh_ton: float = 0.0, db=None,
+                    vol_map: dict | None = None) -> list:
     rutas_ord = sorted(rutas, key=lambda r: ORDEN_DIA.get(r.get("dia", "").lower(), 99))
 
     conductor = veh_chofer or veh_placas
     ton_txt   = f" ({veh_ton:g} ton)" if veh_ton else ""
     enc_txt   = f"{veh_abrev}   ·   {conductor}{ton_txt}"
     fila_enc = [_pc(enc_txt, sz=SZ_ENC, bold=True, color=C_BLANCO)] + [""] * (NCOLS - 1)
+    vol_map = vol_map or {}
     fila_hdr = [
         _hdr("DIA"), _hdr("APOYO"), _hdr("SEC."), _hdr("PARADA"),
         _pc("PESO\n(KG)", sz=SZ_HDR, bold=True, color=C_NAVY),
-        _pc("%\nRUTA",   sz=SZ_HDR, bold=True, color=C_NAVY),
+        _pc("VOL\n(m³)",  sz=SZ_HDR, bold=True, color=C_NAVY),
+        _pc("%\nRUTA",    sz=SZ_HDR, bold=True, color=C_NAVY),
     ]
 
     data_rows   = []
@@ -336,8 +358,13 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
             if es_may:
                 nombre = str(p.get("_display_nombre") or p.get("documento") or p.get("nombre", "-"))
+                p_vol  = 0.0
             else:
                 nombre = str(p.get("nombre", "-"))
+                nt     = p.get("num_tienda")
+                p_vol  = vol_map.get(int(nt), 0.0) if nt is not None else 0.0
+
+            vol_txt = f"{p_vol:.3f}" if p_vol > 0 else "—"
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
@@ -348,6 +375,8 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                    color=C_MAY_TEXT if es_may else colors.black,
                    bold=es_may),
                 _pr(f"{int(p_kg):,}", sz=SZ_DAT,
+                    color=C_MAY_TEXT if es_may else colors.black),
+                _pr(vol_txt, sz=SZ_DAT,
                     color=C_MAY_TEXT if es_may else colors.black),
                 _pc(f"{pct_r:.0f}%", sz=SZ_DAT,
                     color=C_MAY_TEXT if es_may else colors.black),
@@ -375,11 +404,19 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
             lbl_partes.append(f"{n_may} may.")
         total_lbl = f"TOTAL {dia_lbl}  ·  " + "  +  ".join(lbl_partes)
 
+        vol_ruta = sum(
+            vol_map.get(int(p.get("num_tienda")), 0.0)
+            for p in paradas
+            if p["_tipo"] == "sucursal" and p.get("num_tienda") is not None
+        )
+        vol_ruta_txt = f"{vol_ruta:.3f}" if vol_ruta > 0 else "—"
+
         sob = pct_util > 100
         data_rows.append([
             "", "", "",
             _p(total_lbl, sz=SZ_TOT, bold=True),
             _pr(f"{int(peso_ruta):,}", sz=SZ_TOT, bold=True),
+            _pr(vol_ruta_txt, sz=SZ_TOT, bold=True),
             _pc(f"{pct_util:.1f}%", sz=SZ_TOT, bold=True,
                 color=C_ALERTA if sob else C_NAVY),
         ])
@@ -412,8 +449,9 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         ("GRID",          (0, 0),   (-1, -1), 0.4, C_BORDE),
         ("FONTSIZE",      (0, 1),   (-1, -1), SZ_HDR),
         ("ALIGN",         (0, 1),   (-1, -1), "CENTER"),
-        ("ALIGN",         (iSUC, 2), (iSUC, -1), "LEFT"),
-        ("ALIGN",         (iPESO, 2),(iPESO,-1), "RIGHT"),
+        ("ALIGN",         (iSUC, 2),  (iSUC, -1),  "LEFT"),
+        ("ALIGN",         (iPESO, 2), (iPESO, -1), "RIGHT"),
+        ("ALIGN",         (iVOL, 2),  (iVOL, -1),  "RIGHT"),
         ("VALIGN",        (0, 0),   (-1, -1), "MIDDLE"),
         ("TOPPADDING",    (0, 1),   (-1, -1), 3),
         ("BOTTOMPADDING", (0, 1),   (-1, -1), 3),
@@ -646,6 +684,8 @@ def generar_pdf(datos_sesion: dict) -> str:
 
     _filtrar_mayoristas_con_pedidos(rutas)
 
+    vol_map = _volumenes_suc(db, oid)
+
     nombre_log = datos_sesion.get("nombre", "Logística")
     f_ini      = datos_sesion.get("fecha_inicio", "")
     f_fin      = datos_sesion.get("fecha_fin", "")
@@ -719,7 +759,7 @@ def generar_pdf(datos_sesion: dict) -> str:
     elements = []
     for clave in sorted(grupos, key=lambda k: (k[0] or "", k[1] or "")):
         info = grupos[clave]
-        elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db))
+        elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db, vol_map))
 
     doc_pdf.build(elements)
     return filepath

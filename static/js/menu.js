@@ -22,6 +22,56 @@
   actualizarVisibilidad();
 })();
 
+// ── Zoom de página, guardado por usuario en el servidor ──────────────────────
+(function () {
+    const ZOOM_MIN     = 80;
+    const ZOOM_MAX     = 130;
+    const ZOOM_STEP    = 5;
+    const ZOOM_DEFAULT = 100;
+
+    const control = document.getElementById('zoom-control');
+    if (!control) return;
+
+    const btnOut  = document.getElementById('btn-zoom-out');
+    const btnIn   = document.getElementById('btn-zoom-in');
+    const nivelEl = document.getElementById('zoom-nivel');
+
+    let _zoom = ZOOM_DEFAULT;
+    let _timer = null;
+
+    function aplicarZoom(pct) {
+        document.documentElement.style.zoom = pct + '%';
+        if (nivelEl) nivelEl.textContent = pct + '%';
+        if (btnOut)  btnOut.disabled = pct <= ZOOM_MIN;
+        if (btnIn)   btnIn.disabled  = pct >= ZOOM_MAX;
+    }
+
+    function guardarZoom(pct) {
+        clearTimeout(_timer);
+        _timer = setTimeout(() => {
+            fetch('/auth/zoom', {
+                method:  'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body:    JSON.stringify({ zoom: pct }),
+            }).catch(err => console.warn('[zoom]', err));
+        }, 300);
+    }
+
+    function cambiarZoom(delta) {
+        _zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, _zoom + delta));
+        aplicarZoom(_zoom);
+        guardarZoom(_zoom);
+    }
+
+    if (btnOut) btnOut.addEventListener('click', () => cambiarZoom(-ZOOM_STEP));
+    if (btnIn)  btnIn.addEventListener('click',  () => cambiarZoom(+ZOOM_STEP));
+
+    fetch('/auth/zoom')
+        .then(res => res.ok ? res.json() : { zoom: ZOOM_DEFAULT })
+        .then(data => { _zoom = Number(data.zoom) || ZOOM_DEFAULT; aplicarZoom(_zoom); })
+        .catch(() => aplicarZoom(ZOOM_DEFAULT));
+})();
+
 // ── Estado global ────────────────────────────────────────────────────────────
 let _todasLogisticas = [];
 let _logisticaActivaId   = null;
@@ -164,7 +214,7 @@ async function crearLogistica() {
   btn.textContent = "Creando…";
 
   try {
-    const res  = await fetch("/api/crear", {
+    const res  = await fetch("/menu/api/crear", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fecha_inicio: fi, fecha_fin: ff }),
@@ -189,7 +239,7 @@ async function crearLogistica() {
 // ── Cargar banner de logística activa ─────────────────────────────────────────
 async function cargarActiva() {
   try {
-    const res  = await fetch("/api/activa");
+    const res  = await fetch("/menu/api/activa");
     const data = await res.json();
     if (data.status === "ok") {
       _logisticaActivaId   = data.id;
@@ -218,7 +268,7 @@ async function cargarLogisticas() {
   grid.innerHTML = '<div class="loader-wrapper"><div class="spinner"></div></div>';
 
   try {
-    const res  = await fetch("/api/listar");
+    const res  = await fetch("/menu/api/listar");
     const data = await res.json();
     _todasLogisticas = data.logisticas || [];
     document.getElementById("badge-total").textContent = _todasLogisticas.length;
@@ -310,7 +360,7 @@ async function activarLogistica(id) {
   if (btn) { btn.disabled = true; btn.textContent = "Cargando…"; }
 
   try {
-    const res  = await fetch(`/api/activar/${id}`, { method: "POST" });
+    const res  = await fetch(`/menu/api/activar/${id}`, { method: "POST" });
     const data = await res.json();
 
     if (data.status === "ok") {
@@ -359,7 +409,7 @@ async function confirmarEliminar() {
   Loader.show("Eliminando Logística", MSG.eliminar);
 
   try {
-    const res  = await fetch(`/api/eliminar/${idAEliminar}`, { method: "DELETE" });
+    const res  = await fetch(`/menu/api/eliminar/${idAEliminar}`, { method: "DELETE" });
     const data = await res.json();
     if (data.status === "ok") {
       if (_logisticaActivaId === idAEliminar) {

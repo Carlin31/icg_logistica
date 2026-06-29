@@ -13,6 +13,7 @@ const DIAS_SEMANA = [
 function getEndpoint(tipo) {
   if (tipo === "producto")          return "productos";
   if (tipo === "producto_proalmex") return "productos-proalmex";
+  if (tipo === "producto_bimbo")    return "productos-bimbo";
   if (tipo === "sucursal")          return "sucursales";
   if (tipo === "cliente_mayorista") return "clientes-mayoristas";
   return tipo + "s";
@@ -64,6 +65,16 @@ const CAMPOS_VEHICULO = [
   { key: "volumen_m3",          label: "Volumen (m³)",         type: "number", readonly: true },
 ];
 
+const CAMPOS_PRODUCTO_BIMBO = [
+  { key: "codigo_barra", label: "Código de Barra", type: "text"   },
+  { key: "descripcion",  label: "Descripción",     type: "text"   },
+  { key: "peso",         label: "Peso (kg)",        type: "number", step: "any", min: "0" },
+  { key: "altura",       label: "Altura (cm)",      type: "number" },
+  { key: "ancho",        label: "Ancho (cm)",       type: "number" },
+  { key: "largo",        label: "Largo (cm)",       type: "number" },
+  { key: "volumen",      label: "Volumen (m³)",     type: "number", readonly: true },
+];
+
 const CAMPOS_CLIENTE_MAYORISTA = [
   { key: "id_cliente", label: "ID Cliente", type: "number" },
   { key: "nombre",     label: "Nombre",     type: "text"   },
@@ -100,6 +111,7 @@ const MSG_CFG = {
 const _TIPO_LABEL = {
   producto:          "Producto ICG",
   producto_proalmex: "Producto Proalmex",
+  producto_bimbo:    "Producto Bimbo",
   sucursal:          "Sucursal",
   vehiculo:          "Vehículo",
   cliente_mayorista: "Cliente Mayorista",
@@ -336,6 +348,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   await cargarChoferes();
   cargarDatos("producto");
   cargarDatos("producto_proalmex");
+  cargarDatos("producto_bimbo");
   cargarDatos("sucursal");
   cargarDatos("vehiculo");
   cargarDatos("cliente_mayorista");
@@ -352,13 +365,14 @@ document.addEventListener("DOMContentLoaded", async () => {
 
   document.getElementById("btn-nuevo-producto-icg").addEventListener("click", () => abrirModal("create", "producto"));
   document.getElementById("btn-nuevo-producto-proalmex").addEventListener("click", () => abrirModal("create", "producto_proalmex"));
+  document.getElementById("btn-nuevo-producto-bimbo").addEventListener("click", () => abrirModal("create", "producto_bimbo"));
   document.getElementById("btn-nueva-sucursal").addEventListener("click", () => abrirModal("create", "sucursal"));
   document.getElementById("btn-nuevo-vehiculo").addEventListener("click", () => abrirModal("create", "vehiculo"));
   document.getElementById("btn-nuevo-cliente-mayorista").addEventListener("click", () => abrirModal("create", "cliente_mayorista"));
   document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
   document.getElementById("modal-save").addEventListener("click", guardarModal);
 
-  ["producto", "producto_proalmex", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
+  ["producto", "producto_proalmex", "producto_bimbo", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
     const tableEl = document.querySelector(`#tabla-${getEndpoint(tipo)} tbody`);
     if (tableEl) {
       tableEl.addEventListener("click", e => {
@@ -571,7 +585,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 11, producto_proalmex: 7, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
+      const cols = { producto: 11, producto_proalmex: 7, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -602,6 +616,22 @@ async function cargarDatos(tipo) {
           <td>${h(p.tamano)}</td>
           <td>$${Number(p.costo || 0).toFixed(2)}</td>
           <td>${p.peso != null ? p.peso + " kg" : ""}</td>
+          <td>${p.ultima_modificacion ?? "-"}</td>
+          <td>
+            <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
+            <button class="btn btn-sm btn-danger"  data-id="${p._id}" data-accion="eliminar">Eliminar</button>
+          </td>
+        </tr>`).join("");
+    } else if (tipo === "producto_bimbo") {
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${h(p.codigo_barra)}</td>
+          <td>${h(p.descripcion)}</td>
+          <td>${p.peso != null ? p.peso + " kg" : ""}</td>
+          <td>${p.altura ?? ""}</td>
+          <td>${p.ancho  ?? ""}</td>
+          <td>${p.largo  ?? ""}</td>
+          <td>${p.volumen != null && p.volumen !== 0 ? Number(p.volumen).toFixed(6) : "—"}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
@@ -700,6 +730,7 @@ async function abrirModal(mode, tipo, docId = null) {
   modalMode = mode; modalTipo = tipo; modalDocId = docId;
   const campos = tipo === "producto"          ? CAMPOS_PRODUCTO_ICG
                : tipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
+               : tipo === "producto_bimbo"    ? CAMPOS_PRODUCTO_BIMBO
                : tipo === "sucursal"          ? CAMPOS_SUCURSAL
                : tipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
                : CAMPOS_VEHICULO;
@@ -738,6 +769,14 @@ async function abrirModal(mode, tipo, docId = null) {
     _actualizarVolumenModal();
   }
 
+  if (tipo === "producto_bimbo") {
+    ['largo', 'ancho', 'altura'].forEach(k => {
+      const el = document.getElementById(`modal-field-${k}`);
+      if (el) el.addEventListener('input', _actualizarVolumenBimboModal);
+    });
+    _actualizarVolumenBimboModal();
+  }
+
   if (tipo === "vehiculo") {
     ['largo_volumetria', 'ancho_volumetria', 'alto_volumetria'].forEach(k => {
       const el = document.getElementById(`modal-field-${k}`);
@@ -755,6 +794,14 @@ function _actualizarVolumenModal() {
   const alto  = parseFloat(document.getElementById('modal-field-alto')?.value)  || 0;
   const volEl = document.getElementById('modal-field-volumen');
   if (volEl) volEl.value = ((largo * ancho * alto) / 1_000_000).toFixed(6);
+}
+
+function _actualizarVolumenBimboModal() {
+  const largo  = parseFloat(document.getElementById('modal-field-largo')?.value)  || 0;
+  const ancho  = parseFloat(document.getElementById('modal-field-ancho')?.value)  || 0;
+  const altura = parseFloat(document.getElementById('modal-field-altura')?.value) || 0;
+  const volEl  = document.getElementById('modal-field-volumen');
+  if (volEl) volEl.value = ((largo * ancho * altura) / 1_000_000).toFixed(6);
 }
 
 function _actualizarVolumenVehiculoModal() {
@@ -776,10 +823,11 @@ async function guardarModal(e) {
     if (e) e.preventDefault(); 
 
     const campos = modalTipo === "producto"          ? CAMPOS_PRODUCTO_ICG
-           : modalTipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
-                 : modalTipo === "sucursal"          ? CAMPOS_SUCURSAL
-                 : modalTipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
-                 : CAMPOS_VEHICULO;
+               : modalTipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
+               : modalTipo === "producto_bimbo"    ? CAMPOS_PRODUCTO_BIMBO
+               : modalTipo === "sucursal"          ? CAMPOS_SUCURSAL
+               : modalTipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
+               : CAMPOS_VEHICULO;
 
     const payload = {};
     campos.forEach(({ key, type }) => {

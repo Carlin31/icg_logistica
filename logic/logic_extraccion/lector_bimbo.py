@@ -1,37 +1,76 @@
 import pandas as pd
 
+
 class LectorBimbo:
     @staticmethod
-    def leer_y_normalizar(archivo) -> pd.DataFrame:
+    def leer_y_normalizar(archivo, columna_inicio: str = '') -> pd.DataFrame:
         try:
-            # header=1 toma el segundo registro como cabecera
-            df = pd.read_excel(archivo, header=1) 
+            # La fila 2 del Excel (índice 1) contiene los encabezados reales
+            df = pd.read_excel(archivo, header=1)
 
-            if '#' not in df.columns:
+            if 'Codigos de Barra' not in df.columns:
                 return pd.DataFrame()
 
-            max_col = min(112, len(df.columns))
-            
-            # Definimos las columnas que no deben ser interpretadas como sucursales
-            columnas_excluir = ['Costo', 'Importe', 'Total Cajas', 'cap','PEDIDO']
-            
-            # Filtramos para obtener solo las sucursales reales
+            # Filtrar filas que no son productos (pie de tabla): '#' o barcode vacíos
+            df = df[pd.to_numeric(df['#'], errors='coerce').notna()].copy()
+            df = df[df['Codigos de Barra'].notna()].copy()
+
+            if df.empty:
+                return pd.DataFrame()
+
+            # ── Localizar columna ancla (case-insensitive) ───────────────────
+            # El primer nombre_bimbo registrado en sucursales marca el inicio
+            # de los mayoristas; todo lo que viene después son también mayoristas.
+            cols_norm_lower = [str(col).strip().lower() for col in df.columns]
+            ancla_lower     = columna_inicio.strip().lower()
+
+            try:
+                idx_inicio = cols_norm_lower.index(ancla_lower)
+            except ValueError:
+                print(f"LectorBimbo: columna ancla '{columna_inicio}' no encontrada en el archivo")
+                return pd.DataFrame()
+
+            # ── Columnas de mayoristas ───────────────────────────────────────
+            columnas_excluir_lower = {'costo', 'importe', 'total cajas', 'cap', 'pedido', 'total'}
             cols_sucursales = [
-                col for col in df.columns[11:max_col] 
-                if str(col).strip() not in columnas_excluir
+                col for col in df.columns[idx_inicio:]
+                if str(col).strip().lower() not in columnas_excluir_lower
             ]
 
-            df_subset = df[['#'] + list(cols_sucursales)]
-            df_melted = df_subset.melt(id_vars=['#'], value_vars=cols_sucursales, var_name='Sucursal', value_name='Piezas')
+            if not cols_sucursales:
+                return pd.DataFrame()
 
-            df_melted = df_melted.rename(columns={'#': 'clave_sae'})
-            df_melted['clave_sae'] = pd.to_numeric(df_melted['clave_sae'], errors='coerce').fillna(0).astype(int)
-            df_melted['Piezas'] = pd.to_numeric(df_melted['Piezas'], errors='coerce').fillna(0)
-            df_melted['Sucursal'] = df_melted['Sucursal'].astype(str).str.strip()
+            # ── Melt: una fila por (producto, sucursal) ──────────────────────
+            df_subset = df[['Codigos de Barra'] + list(cols_sucursales)]
+            df_melted = df_subset.melt(
+                id_vars=['Codigos de Barra'],
+                value_vars=cols_sucursales,
+                var_name='Sucursal',
+                value_name='Piezas',
+            )
 
-            df_final = df_melted[df_melted['Piezas'] > 0].copy()
-            return df_final[['Sucursal', 'clave_sae', 'Piezas']]
-            
+            # Convertir barcode float → string entero limpio (7501030490920.0 → '7501030490920')
+            def _normalizar_barcode(val) -> str:
+                if pd.isna(val) or str(val).strip() in ('', 'nan'):
+                    return ''
+                try:
+                    return str(int(float(val)))
+                except (ValueError, TypeError):
+                    return str(val).strip()
+
+            df_melted = df_melted.rename(columns={'Codigos de Barra': 'codigo_barra'})
+            df_melted['codigo_barra'] = df_melted['codigo_barra'].apply(_normalizar_barcode)
+            df_melted['Piezas']       = pd.to_numeric(df_melted['Piezas'], errors='coerce').fillna(0)
+            df_melted['Sucursal']     = df_melted['Sucursal'].astype(str).str.strip()
+
+            # Solo filas con barcode válido y piezas > 0
+            df_final = df_melted[
+                (df_melted['codigo_barra'] != '') &
+                (df_melted['Piezas'] > 0)
+            ].copy()
+
+            return df_final[['Sucursal', 'codigo_barra', 'Piezas']]
+
         except Exception as e:
             print(f"Error procesando Bimbo: {e}")
             return pd.DataFrame()

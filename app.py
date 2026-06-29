@@ -28,7 +28,7 @@ from logic.auth_logic import ROL_CONDUCTOR
 from logic.conductor_logic import obtener_estado_autorizacion
 
 # Endpoints accesibles sin sesión iniciada.
-_ENDPOINTS_PUBLICOS = {"auth.login", "auth.logout", "auth.seleccionar", "static"}
+_ENDPOINTS_PUBLICOS = {"root", "auth.login", "auth.logout", "auth.seleccionar", "static"}
 
 
 def create_app():
@@ -40,7 +40,7 @@ def create_app():
 
     # ── Blueprints ─────────────────────────────────────────────────────────
     app.register_blueprint(auth_bp,           url_prefix="/auth")
-    app.register_blueprint(menu_bp,           url_prefix="/")
+    app.register_blueprint(menu_bp,           url_prefix="/menu")
     app.register_blueprint(configuracion_bp,  url_prefix="/configuracion")
     app.register_blueprint(extraccion_bp,     url_prefix="/extraccion")
     app.register_blueprint(asignacion_bp,     url_prefix="/asignacion")
@@ -67,7 +67,7 @@ def create_app():
             # (un redirect rompería un fetch() que espera JSON).
             if es_api:
                 return jsonify({"status": "error", "mensaje": "Sesión no iniciada o expirada"}), 401
-            return redirect(url_for("auth.login", next=request.path))
+            return redirect(url_for("auth.seleccionar"))
 
         # Separación por rol: un conductor solo puede usar /conductor/*,
         # y el panel de Logística no es accesible para conductores (ni viceversa).
@@ -126,6 +126,15 @@ def create_app():
             "usuario_es_admin":   bool(session.get("usuario_admin")),
             "anio_actual":        datetime.now().year,
         }
+
+    # ── Ruta raíz: siempre redirige a selección de perfil o al panel según sesión ─
+    @app.route("/")
+    def root():
+        if not session.get("usuario_id"):
+            return redirect(url_for("auth.seleccionar"))
+        if session.get("rol") == ROL_CONDUCTOR:
+            return redirect(url_for("conductor.index"))
+        return redirect(url_for("menu.index"))
 
     # ── Cierre de conexión MongoDB al final de cada contexto ───────────────
     app.teardown_appcontext(close_db)

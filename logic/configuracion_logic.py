@@ -8,12 +8,17 @@ ID_CAMPO = {
     "productos":           "clave_sae",
     "sucursales":          "num_tienda",
     "clientes_mayoristas": "id_cliente",
+    "productos_bimbo":     "codigo_barra",
 }
+
+# Colecciones cuyo campo ID se almacena como entero (las demás se tratan como string)
+_ID_NUMERICO = {"productos", "sucursales", "clientes_mayoristas"}
 
 def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | None:
     """
-    Devuelve un mensaje de error si el campo ID numérico ya existe en otra doc.
+    Devuelve un mensaje de error si el campo ID ya existe en otra doc.
     Retorna None si la validación pasa (incluye cuando el campo es nulo/vacío).
+    Soporta IDs numéricos (colecciones en _ID_NUMERICO) y string (resto).
     """
     campo = ID_CAMPO.get(coleccion)
     if not campo:
@@ -25,19 +30,21 @@ def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | 
     if valor is None or valor == "" or valor != valor:  # NaN check
         return None
 
-    # Solo validar si es un entero real
-    try:
-        valor_int = int(valor)
-    except (ValueError, TypeError):
-        return None
+    if coleccion in _ID_NUMERICO:
+        try:
+            valor_norm = int(valor)
+        except (ValueError, TypeError):
+            return None
+    else:
+        valor_norm = str(valor).strip()
 
     db = get_db()
-    query = {campo: valor_int}
+    query = {campo: valor_norm}
     if excluir_oid:
         query["_id"] = {"$ne": excluir_oid}
 
     if db[coleccion].find_one(query):
-        return f"Ya existe un registro con {campo} = {valor_int}"
+        return f"Ya existe un registro con {campo} = {valor_norm}"
     return None
 
 def _serialize(doc: dict) -> dict:
@@ -85,6 +92,16 @@ def _calcular_volumen_producto(datos: dict) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+def _calcular_volumen_bimbo(datos: dict) -> float:
+    """Calcula volumen (m³) a partir de largo, ancho, altura en cm."""
+    try:
+        largo  = float(datos.get('largo')  or 0)
+        ancho  = float(datos.get('ancho')  or 0)
+        altura = float(datos.get('altura') or 0)
+        return round((largo * ancho * altura) / 1_000_000, 6)
+    except (TypeError, ValueError):
+        return 0.0
+
 def _calcular_volumen_vehiculo(datos: dict) -> float:
     """Calcula volumen_m3 = largo_volumetria × ancho_volumetria × alto_volumetria (en metros)."""
     try:
@@ -129,17 +146,19 @@ def _agregar(coleccion: str, datos: dict) -> dict:
     datos = dict(datos)
     datos.pop("_id", None)
 
-    # Normalizar campo ID: eliminar si está vacío, o asegurar que sea entero
+    # Normalizar campo ID: eliminar si vacío; convertir a int (numérico) o string (resto)
     campo = ID_CAMPO.get(coleccion)
     if campo:
         valor = datos.get(campo)
         if valor == "" or valor is None:
-            datos.pop(campo, None) # Removemos la llave para que no se guarde como null
-        else:
+            datos.pop(campo, None)
+        elif coleccion in _ID_NUMERICO:
             try:
                 datos[campo] = int(valor)
             except ValueError:
                 pass
+        else:
+            datos[campo] = str(valor).strip()
 
     error = _verificar_id_unico(coleccion, datos)
     if error:
@@ -147,6 +166,8 @@ def _agregar(coleccion: str, datos: dict) -> dict:
 
     if coleccion == "productos":
         datos['volumen'] = _calcular_volumen_producto(datos)
+    elif coleccion == "productos_bimbo":
+        datos['volumen'] = _calcular_volumen_bimbo(datos)
     elif coleccion == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         datos.setdefault("activo", True)
@@ -164,27 +185,31 @@ def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
     datos = dict(datos)
     datos.pop("_id", None)
 
-    # Normalizar campo ID: eliminar si está vacío, o asegurar que sea entero
+    # Normalizar campo ID: eliminar si vacío; convertir a int (numérico) o string (resto)
     campo = ID_CAMPO.get(coleccion)
     if campo:
         valor = datos.get(campo)
         if valor == "" or valor is None:
-            datos.pop(campo, None) # Removemos la llave para que no se guarde como null
-        else:
+            datos.pop(campo, None)
+        elif coleccion in _ID_NUMERICO:
             try:
                 datos[campo] = int(valor)
             except ValueError:
                 pass
+        else:
+            datos[campo] = str(valor).strip()
 
     error = _verificar_id_unico(coleccion, datos, excluir_oid=oid)
     if error:
         return {"status": "error", "mensaje": error}
 
     datos["ultima_modificacion"] = _fecha_completa()
-    # Si la llave se eliminó con pop(), no se sobrescribirá si ya existía. 
+    # Si la llave se eliminó con pop(), no se sobrescribirá si ya existía.
     # Para limpiar un ID existente a vacío, usamos $unset
     if coleccion == "productos":
         datos['volumen'] = _calcular_volumen_producto(datos)
+    elif coleccion == "productos_bimbo":
+        datos['volumen'] = _calcular_volumen_bimbo(datos)
     elif coleccion == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         if "chofer_id" in datos:
@@ -222,6 +247,12 @@ def obtener_producto_proalmex(producto_id: str): return _obtener("productos_proa
 def agregar_producto_proalmex(datos: dict): return _agregar("productos_proalmex", datos)
 def editar_producto_proalmex(producto_id: str, datos: dict): return _editar("productos_proalmex", producto_id, datos)
 def eliminar_producto_proalmex(producto_id: str): return _eliminar("productos_proalmex", producto_id)
+
+def listar_productos_bimbo(nombre: str = "", fecha: str = ""): return _listar("productos_bimbo", ["descripcion", "codigo_barra"], nombre, fecha, "codigo_barra")
+def obtener_producto_bimbo(producto_id: str): return _obtener("productos_bimbo", producto_id)
+def agregar_producto_bimbo(datos: dict): return _agregar("productos_bimbo", datos)
+def editar_producto_bimbo(producto_id: str, datos: dict): return _editar("productos_bimbo", producto_id, datos)
+def eliminar_producto_bimbo(producto_id: str): return _eliminar("productos_bimbo", producto_id)
 
 def listar_sucursales(nombre: str = "", fecha: str = ""): return _listar("sucursales", ["nombre_base", "nombre_icg-proalmex", "nombre_bimbo"], nombre, fecha, "num_tienda")
 def obtener_sucursal(sucursal_id: str): return _obtener("sucursales", sucursal_id)

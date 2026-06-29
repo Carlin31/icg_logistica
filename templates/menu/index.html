@@ -60,6 +60,11 @@
   <!-- ── Derecha: Botón de navegación ─────────────────────────── -->
   <div class="header-actions">
     {% if session.get('usuario_nombre') %}
+    <div class="zoom-control" id="zoom-control" title="Zoom de la página">
+      <button type="button" id="btn-zoom-out" aria-label="Reducir zoom">−</button>
+      <span class="zoom-nivel" id="zoom-nivel">100%</span>
+      <button type="button" id="btn-zoom-in" aria-label="Aumentar zoom">+</button>
+    </div>
     <a href="{{ url_for('auth.logout') }}" class="usuario-badge" title="Cerrar sesión ({{ session.get('usuario_nombre') }})">
         <span class="usuario-badge-nombre">{{ session.get('usuario_nombre') }}</span>
         <span class="usuario-badge-salir">Salir</span>
@@ -177,7 +182,7 @@
     </div>
     <div class="banner-activa-acciones">
       <button class="btn-banner btn-ir" onclick="irAExtraccion()">Continuar en Extracción</button>
-      <form action="/salir" method="POST" style="margin:0;">
+      <form action="{{ url_for('menu.salir') }}" method="POST" style="margin:0;">
         <button type="submit" class="btn-banner btn-salir">Deseleccionar</button>
       </form>
     </div>
@@ -333,29 +338,46 @@
      Controlado por Loader.show() / Loader.hide() en menu.js
      ═══════════════════════════════════════════════════════════════ -->
 <div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
-  <div class="fl-brand">
+
+  <!-- Fondo animado -->
+  <div class="fl-bg" aria-hidden="true">
+    <div class="fl-orb fl-orb--1"></div>
+    <div class="fl-orb fl-orb--2"></div>
+    <div class="fl-orb fl-orb--3"></div>
+  </div>
+
+  <!-- Marca -->
+  <div class="fl-brand" aria-hidden="true">
     <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
     ICG Logistics
   </div>
 
+  <!-- Spinner -->
   <div class="fl-spinner">
+    <div class="fl-glow"></div>
     <div class="fl-ring-outer"></div>
     <div class="fl-ring"></div>
+    <div class="fl-ring-inner"></div>
     <div class="fl-core">
       <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20" class="hdr-icon">
     </div>
   </div>
 
-  <div class="fl-dots">
+  <!-- Texto -->
+  <div class="fl-title" id="fl-title">Procesando…</div>
+  <div class="fl-msg"   id="fl-msg">Por favor, espera un momento…</div>
+
+  <!-- Puntos de progreso -->
+  <div class="fl-dots" aria-hidden="true">
     <div class="fl-dot"></div>
     <div class="fl-dot"></div>
     <div class="fl-dot"></div>
   </div>
 
-  <div class="fl-title"  id="fl-title">Procesando…</div>
-  <div class="fl-msg"    id="fl-msg">Por favor, espera un momento…</div>
+  <!-- Footer y barra shimmer -->
+  <div class="fl-footer" aria-hidden="true">Integradora Comercial del Golfo</div>
+  <div class="fl-progress" aria-hidden="true"><div class="fl-progress-bar"></div></div>
 
-  <div class="fl-footer">Integradora Comercial del Golfo</div>
 </div>
 
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>

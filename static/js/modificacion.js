@@ -8,6 +8,7 @@
 let _rutas           = [];
 let _rutasFiltradas  = [];
 let _pesos           = {};
+let _volumenes       = {};
 let _sucDisponibles  = [];
 let _vehiculos       = [];          // flota activa [{placas, abrev, capacidad_ton, ...}]
 let _choferesDisponibles = [];      // [{_id, nombre}] — catálogo de choferes (Configuración)
@@ -287,14 +288,15 @@ async function cargarDatos() {
     // Usar fetch con reintentos y timeout para evitar bloqueo indefinido
     const retries = 3;
     const timeoutMs = 10000;
-    const rutasPromise    = fetchWithRetries("/modificacion/rutas", {}, timeoutMs, retries).catch(e => ({ error: e }));
-    const pesosPromise    = fetchWithRetries("/modificacion/pesos", {}, timeoutMs, retries).catch(e => ({ error: e }));
-    const sucPromise      = fetchWithRetries("/modificacion/sucursales", {}, timeoutMs, retries).catch(e => ({ error: e }));
-    const vehPromise      = fetchWithRetries("/modificacion/vehiculos", {}, timeoutMs, retries).catch(e => ({ error: e }));
-    const horariosPromise = fetch("/modificacion/horarios-config").catch(() => null);
-    const choferesPromise = fetch("/configuracion/choferes").catch(() => null);
+    const rutasPromise      = fetchWithRetries("/modificacion/rutas", {}, timeoutMs, retries).catch(e => ({ error: e }));
+    const pesosPromise      = fetchWithRetries("/modificacion/pesos", {}, timeoutMs, retries).catch(e => ({ error: e }));
+    const volumenesPromise  = fetchWithRetries("/modificacion/volumenes", {}, timeoutMs, retries).catch(e => ({ error: e }));
+    const sucPromise        = fetchWithRetries("/modificacion/sucursales", {}, timeoutMs, retries).catch(e => ({ error: e }));
+    const vehPromise        = fetchWithRetries("/modificacion/vehiculos", {}, timeoutMs, retries).catch(e => ({ error: e }));
+    const horariosPromise   = fetch("/modificacion/horarios-config").catch(() => null);
+    const choferesPromise   = fetch("/configuracion/choferes").catch(() => null);
 
-    const [rutasRes, pesosRes, sucRes, vehRes, horariosRes, choferesRes] = await Promise.all([rutasPromise, pesosPromise, sucPromise, vehPromise, horariosPromise, choferesPromise]);
+    const [rutasRes, pesosRes, volumenesRes, sucRes, vehRes, horariosRes, choferesRes] = await Promise.all([rutasPromise, pesosPromise, volumenesPromise, sucPromise, vehPromise, horariosPromise, choferesPromise]);
 
     if (rutasRes && rutasRes.error) throw rutasRes.error;
     if (pesosRes && pesosRes.error) throw pesosRes.error;
@@ -308,6 +310,7 @@ async function cargarDatos() {
 
     const rutasData = await rutasRes.json();
     _pesos          = await pesosRes.json();
+    _volumenes      = (volumenesRes && !volumenesRes.error && volumenesRes.ok) ? await volumenesRes.json() : {};
     _sucDisponibles = await sucRes.json();
     _vehiculos      = vehRes.ok ? await vehRes.json() : [];
     try { _configDias = (horariosRes?.ok) ? await horariosRes.json() : {}; } catch (_) { _configDias = {}; }
@@ -1050,9 +1053,11 @@ async function seleccionarRuta(idx) {
 
   document.getElementById("titulo-ruta").textContent = ruta.nombre;
   const pesoTotal = calcularPesoRuta(ruta);
+  const volTotal  = calcularVolumenRuta(ruta);
   document.getElementById("meta-ruta").innerHTML = `
     <span class="meta-item"><i data-lucide="calendar-days" style="width:12px;height:12px"></i> ${capitalizar(ruta.dia)}</span>
     <span class="meta-item"><i data-lucide="package" style="width:12px;height:12px"></i> ${pesoTotal.toLocaleString("es-MX")} kg</span>
+    ${volTotal > 0 ? `<span class="meta-item"><i data-lucide="box" style="width:12px;height:12px"></i> ${volTotal.toFixed(3)} m³</span>` : ""}
     ${ruta.parte ? `<span class="meta-item">Parte ${ruta.parte} de ${ruta.total_partes}</span>` : ""}
   `;
 
@@ -1420,6 +1425,21 @@ function renderIndicadores(ruta) {
   const capTonEff = _capacidadEfectivaTon(capTon);
   const pct      = capTonEff > 0 ? (pesoKg / 1000 / capTonEff) * 100 : 0;
   const barClass = pct <= 100 ? "verde" : pct <= 120 ? "naranja" : "rojo";
+
+  const volM3    = calcularVolumenRuta(ruta);
+  const vehObj   = _vehiculos.find(v => v.abreviatura === ruta.vehiculo || v.placas === ruta.placas) || null;
+  const capVol   = vehObj?.volumen_m3 ?? 0;
+  const pctVol   = capVol > 0 ? (volM3 / capVol) * 100 : 0;
+  const barVolCls = pctVol <= 100 ? "verde" : pctVol <= 120 ? "naranja" : "rojo";
+  const volBarHTML = volM3 > 0 ? `
+    <div class="cap-bar-wrap">
+      <div class="cap-bar-label">
+        <span>Volumen: ${capVol > 0 ? pctVol.toFixed(1) + "%" : "—"}</span>
+        <span>${volM3.toFixed(3)}${capVol > 0 ? " / " + capVol.toFixed(2) + " m³" : " m³"}</span>
+      </div>
+      <div class="cap-bar"><div class="cap-bar-fill ${barVolCls}" style="width:${capVol > 0 ? Math.min(pctVol, 100) : 0}%"></div></div>
+    </div>` : "";
+
   const horaReg    = esP ? (cust.hora_regreso || "—") : (base.hora_regreso || ruta.hora_regreso || "—");
   const horaSalida = _horaSalidaDeRuta(ruta);
   const horaLimite = _horaLimiteDeRuta(ruta);
@@ -1430,11 +1450,12 @@ function renderIndicadores(ruta) {
   zona.innerHTML = `
     <div class="cap-bar-wrap">
       <div class="cap-bar-label">
-        <span>Utilización: ${pct.toFixed(1)}%</span>
+        <span>Peso: ${pct.toFixed(1)}%</span>
         <span>${(pesoKg / 1000).toFixed(2)} / ${capTonEff} ton</span>
       </div>
       <div class="cap-bar"><div class="cap-bar-fill ${barClass}" style="width:${Math.min(pct,100)}%"></div></div>
     </div>
+    ${volBarHTML}
     <div class="hora-regreso">
       <span>Salida: ${horaSalida} · Regreso estimado:</span>
       <span class="badge-hora ${cumple ? "ok" : "tarde"}">${horaReg}</span>
@@ -1446,11 +1467,13 @@ function renderIndicadores(ruta) {
 
 function _actualizarIndicadoresPeso(ruta) {
   const pesoTotal = calcularPesoRuta(ruta);
+  const volTotal  = calcularVolumenRuta(ruta);
   const metaEl = document.getElementById("meta-ruta");
   if (metaEl) {
     metaEl.innerHTML = `
       <span class="meta-item"><i data-lucide="calendar-days" style="width:12px;height:12px"></i> ${capitalizar(ruta.dia)}</span>
       <span class="meta-item"><i data-lucide="package" style="width:12px;height:12px"></i> ${pesoTotal.toLocaleString("es-MX")} kg</span>
+      ${volTotal > 0 ? `<span class="meta-item"><i data-lucide="box" style="width:12px;height:12px"></i> ${volTotal.toFixed(3)} m³</span>` : ""}
       ${ruta.parte ? `<span class="meta-item">Parte ${ruta.parte} de ${ruta.total_partes}</span>` : ""}
     `;
     lucide.createIcons();
@@ -2813,6 +2836,11 @@ function calcularPesoRuta(ruta) {
     sum + (_pesos[String(s.num_tienda)] || s.peso_kg || 0), 0);
   const pesoMays = (ruta.mayoristas  || []).reduce((sum, m) => sum + (m.peso_kg || 0), 0);
   return pesoSucs + pesoMays;
+}
+
+function calcularVolumenRuta(ruta) {
+  return (ruta.sucursales || []).reduce((sum, s) =>
+    sum + (_volumenes[String(s.num_tienda)] || 0), 0);
 }
 
 function formatMin(min) {

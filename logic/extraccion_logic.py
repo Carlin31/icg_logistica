@@ -19,7 +19,7 @@ from logic.logic_extraccion.lector_bimbo      import LectorBimbo
 from logic.logic_extraccion.lector_proalmex   import LectorProalmex
 from logic.logic_extraccion.lector_mayoristas import LectorMayoristas
 from logic.logic_extraccion.calculadora       import calcular_peso, calcular_volumen
-from logic.configuracion_logic                import listar_productos, listar_productos_proalmex, listar_sucursales
+from logic.configuracion_logic                import listar_productos, listar_productos_proalmex, listar_productos_bimbo, listar_sucursales
 
 
 def procesar_archivos_extraccion(archivos: dict) -> dict:
@@ -42,16 +42,28 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
         }
     """
     dfs_procesados = []
-    claves_proalmex_total: set[str] = set()
+    claves_proalmex_total: set[str]    = set()
     claves_proalmex_no_encontradas: set[str] = set()
+    codigos_bimbo_total: set[str]      = set()
+    codigos_bimbo_no_encontrados: set[str]   = set()
 
     # ── 1. Catálogos de la BD ────────────────────────────────────────────────
     productos_db          = listar_productos()
     productos_proalmex_db = listar_productos_proalmex()
+    productos_bimbo_db    = listar_productos_bimbo()
     sucursales_db         = listar_sucursales()
 
     if not productos_db:
         return {'status': 'error', 'mensaje': 'No hay productos cargados en el sistema.'}
+
+    # Mapa de productos Bimbo: codigo_barra → {peso, volumen}
+    map_productos_bimbo: dict[str, dict] = {
+        str(p.get('codigo_barra', '')).strip(): {
+            'peso':    float(p.get('peso',    0) or 0),
+            'volumen': float(p.get('volumen', 0) or 0),
+        }
+        for p in productos_bimbo_db if p.get('codigo_barra')
+    }
 
     # Mapa de peso Proalmex: (linea, tamano) → peso_kg
     # Normalización: strip + lower para tolerancia a diferencias de mayúsculas/espacios
@@ -90,9 +102,9 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
         str(s.get('nombre_icg-proalmex', '')).strip(): s.get('nombre_base', 'Desconocida')
         for s in sucursales_db if s.get('nombre_icg-proalmex')
     }
-    # nombre_bimbo → nombre_base  (para archivos Bimbo)
+    # nombre_bimbo → nombre_base  (para archivos Bimbo, comparación case-insensitive)
     map_bimbo = {
-        str(s.get('nombre_bimbo', '')).strip(): s.get('nombre_base', 'Desconocida')
+        str(s.get('nombre_bimbo', '')).strip().lower(): s.get('nombre_base', 'Desconocida')
         for s in sucursales_db if s.get('nombre_bimbo')
     }
     map_id_sucursal = {}
@@ -113,10 +125,43 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
             dfs_procesados.append(df_icg)
 
     if archivos.get('bimbo'):
-        df_bimbo = LectorBimbo.leer_y_normalizar(archivos['bimbo'])
+        # Determinar la columna ancla: primer nombre_bimbo registrado (orden por num_tienda)
+        primer_nombre_bimbo = next(
+            (str(s.get('nombre_bimbo', '')).strip()
+             for s in sorted(sucursales_db, key=lambda s: s.get('num_tienda') or 0)
+             if s.get('nombre_bimbo')),
+            '',
+        )
+        df_bimbo = LectorBimbo.leer_y_normalizar(archivos['bimbo'], primer_nombre_bimbo)
         if not df_bimbo.empty:
             df_bimbo['Proveedor'] = 'Bimbo'
-            df_bimbo['Sucursal']  = df_bimbo['Sucursal'].apply(clean_name).map(map_bimbo).fillna(df_bimbo['Sucursal'])
+            # Match case-insensitive: las columnas del Excel vienen en minúsculas
+            sucursal_orig = df_bimbo['Sucursal'].apply(clean_name)
+            df_bimbo['Sucursal'] = sucursal_orig.str.lower().map(map_bimbo).fillna(sucursal_orig)
+
+            # Pre-calcular peso y volumen usando codigo_barra → productos_bimbo
+            def _peso_total_bimbo(row) -> float:
+                codigo = str(row.get('codigo_barra', '')).strip()
+                if not codigo or codigo.lower() == 'nan':
+                    return 0.0
+                codigos_bimbo_total.add(codigo)
+                prod = map_productos_bimbo.get(codigo)
+                if prod is None:
+                    codigos_bimbo_no_encontrados.add(codigo)
+                    return 0.0
+                return prod['peso'] * float(row['Piezas'])
+
+            def _volumen_total_bimbo(row) -> float:
+                codigo = str(row.get('codigo_barra', '')).strip()
+                if not codigo or codigo.lower() == 'nan':
+                    return 0.0
+                prod = map_productos_bimbo.get(codigo)
+                if prod is None:
+                    return 0.0
+                return prod['volumen'] * float(row['Piezas'])
+
+            df_bimbo['bimbo_peso_precalc']    = df_bimbo.apply(_peso_total_bimbo,    axis=1)
+            df_bimbo['bimbo_volumen_precalc']  = df_bimbo.apply(_volumen_total_bimbo, axis=1)
             dfs_procesados.append(df_bimbo)
 
     if archivos.get('proalmex'):
@@ -186,6 +231,13 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
             df_enrich.loc[mask_proalmex, 'peso_precalc'].fillna(0)
         )
 
+    # Para filas Bimbo usamos los valores pre-calculados por codigo_barra
+    # ya que productos_bimbo no comparte clave_sae con el catálogo ICG
+    if 'bimbo_peso_precalc' in df_enrich.columns:
+        mask_bimbo = df_enrich['Proveedor'] == 'Bimbo'
+        df_enrich.loc[mask_bimbo, 'peso_total_fila']    = df_enrich.loc[mask_bimbo, 'bimbo_peso_precalc'].fillna(0)
+        df_enrich.loc[mask_bimbo, 'volumen_total_fila'] = df_enrich.loc[mask_bimbo, 'bimbo_volumen_precalc'].fillna(0)
+
     # ── 6. Agrupar por Sucursal + Proveedor ──────────────────────────────────
     df_agrupado_peso = df_enrich.groupby(['Sucursal', 'Proveedor']).agg(
         total_peso=('peso_total_fila', 'sum')
@@ -206,10 +258,12 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
         'datos_volumen':    datos_volumen,
         'desglose_volumen': desglose_volumen,
         'advertencias': {
-            'claves_no_encontradas_icg':      claves_icg_no_encontradas,
-            'total_claves_icg':               total_claves_icg,
-            'claves_no_encontradas_proalmex': sorted(claves_proalmex_no_encontradas),
-            'total_claves_proalmex':          len(claves_proalmex_total),
+            'claves_no_encontradas_icg':        claves_icg_no_encontradas,
+            'total_claves_icg':                 total_claves_icg,
+            'claves_no_encontradas_proalmex':   sorted(claves_proalmex_no_encontradas),
+            'total_claves_proalmex':            len(claves_proalmex_total),
+            'codigos_no_encontrados_bimbo':     sorted(codigos_bimbo_no_encontrados),
+            'total_codigos_bimbo':              len(codigos_bimbo_total),
         },
     }
 

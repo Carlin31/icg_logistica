@@ -174,3 +174,522 @@
   font-weight: 600;
 }
 .auth-cambiar-tipo:hover { text-decoration: underline; }
+
+
+/* ================================================================
+   PANTALLA DE SELECCIÓN v2  —  clases .sel-*  · TEMA CLARO
+   Las clases .auth-* del login permanecen sin cambios.
+   ================================================================ */
+
+/* ── Body ── */
+.sel-body {
+  zoom: 1;
+  min-height: 100vh;
+  background: linear-gradient(145deg, #f0f5ff 0%, #e8effd 45%, #f3f0ff 100%);
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: stretch;
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
+
+/* ── Orbs animados de fondo (suaves, pastel) ── */
+.sel-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+.sel-orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(90px);
+}
+.sel-orb--1 {
+  width: 700px; height: 700px;
+  top: -280px; left: -200px;
+  background: radial-gradient(circle, rgba(147,197,253,0.55) 0%, transparent 65%);
+  animation: sel-drift-a 20s ease-in-out infinite alternate;
+}
+.sel-orb--2 {
+  width: 550px; height: 550px;
+  bottom: -220px; right: -130px;
+  background: radial-gradient(circle, rgba(165,180,252,0.48) 0%, transparent 65%);
+  animation: sel-drift-b 25s ease-in-out infinite alternate;
+}
+.sel-orb--3 {
+  width: 420px; height: 420px;
+  top: calc(50% - 210px);
+  left: calc(50% - 210px);
+  background: radial-gradient(circle, rgba(196,181,253,0.32) 0%, transparent 65%);
+  animation: sel-drift-c 17s ease-in-out infinite alternate;
+}
+@keyframes sel-drift-a {
+  from { transform: translate(0, 0)       scale(1);    }
+  to   { transform: translate(40px, 30px) scale(1.1);  }
+}
+@keyframes sel-drift-b {
+  from { transform: translate(0, 0)         scale(1);    }
+  to   { transform: translate(-30px, -25px) scale(1.08); }
+}
+@keyframes sel-drift-c {
+  from { transform: scale(1); }
+  to   { transform: scale(1.15) translate(18px, 14px); }
+}
+
+/* ── Layout principal ── */
+.sel-layout {
+  display: flex;
+  width: 100%;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+
+/* ══════════════════════════════════════════════════════
+   PANEL IZQUIERDO — fondo blanco limpio
+   ══════════════════════════════════════════════════════ */
+.sel-panel-left {
+  flex: 0 0 auto;
+  width: min(460px, 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 36px;
+  background: rgba(255,255,255,0.78);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-right: 1px solid #e2e8f0;
+  position: relative;
+  z-index: 2;
+}
+
+/* Línea de acento vertical en el borde derecho */
+.sel-panel-left::after {
+  content: '';
+  position: absolute;
+  right: -1px; top: 15%; bottom: 15%;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, rgba(59,130,246,0.45), transparent);
+}
+
+/* ── Tarjeta de contenido ── */
+.sel-card {
+  width: 100%;
+  max-width: 380px;
+  animation: sel-fade-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes sel-fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Brand ── */
+.sel-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 28px;
+}
+.sel-brand-icon {
+  flex-shrink: 0;
+  width: 44px; height: 44px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 14px rgba(29,78,216,0.28);
+}
+.sel-brand-name {
+  display: block;
+  font-size: 0.9rem; font-weight: 800;
+  color: #0f172a; letter-spacing: 0.01em;
+}
+.sel-brand-sub {
+  display: block;
+  font-size: 0.65rem; color: #64748b;
+  line-height: 1.35; margin-top: 2px;
+}
+
+/* ── Divisor ── */
+.sel-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(59,130,246,0.3), #e2e8f0 50%, transparent);
+  margin-bottom: 28px;
+}
+
+/* ── Encabezado ── */
+.sel-headline { margin-bottom: 28px; }
+.sel-h1 {
+  font-size: 1.6rem; font-weight: 800;
+  color: #0f172a; line-height: 1.2;
+  margin: 0 0 7px; letter-spacing: -0.02em;
+}
+.sel-sub {
+  font-size: 0.8rem; color: #64748b;
+  margin: 0; line-height: 1.5;
+}
+
+/* ── Opciones de acceso ── */
+.sel-opciones {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-bottom: 30px;
+}
+
+.sel-opcion {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 22px;
+  border-radius: 16px;
+  text-decoration: none;
+  border: 1.5px solid #e2e8f0;
+  background: #ffffff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04);
+  transition: transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+              box-shadow 0.22s ease,
+              border-color 0.22s ease;
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Capa de acento suave en hover */
+.sel-opcion::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transition: opacity 0.22s;
+  border-radius: inherit;
+}
+.sel-opcion--log::before {
+  background: linear-gradient(135deg, #eff6ff 0%, rgba(239,246,255,0) 100%);
+}
+.sel-opcion--cond::before {
+  background: linear-gradient(135deg, #f0fdf4 0%, rgba(240,253,244,0) 100%);
+}
+
+.sel-opcion:hover { transform: translateY(-3px); }
+.sel-opcion:hover::before { opacity: 1; }
+.sel-opcion--log:hover  {
+  border-color: rgba(59,130,246,0.45);
+  box-shadow: 0 8px 28px rgba(59,130,246,0.12);
+}
+.sel-opcion--cond:hover {
+  border-color: rgba(16,185,129,0.45);
+  box-shadow: 0 8px 28px rgba(16,185,129,0.1);
+}
+.sel-opcion:hover .sel-opcion-arrow {
+  transform: translateX(5px);
+  opacity: 1;
+}
+
+/* Icono de la opción */
+.sel-opcion-ico {
+  flex-shrink: 0;
+  width: 46px; height: 46px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  position: relative; z-index: 1;
+  transition: background 0.22s;
+}
+.sel-opcion--log  .sel-opcion-ico { background: #eff6ff; color: #2563eb; }
+.sel-opcion--cond .sel-opcion-ico { background: #f0fdf4; color: #059669; }
+.sel-opcion--log:hover  .sel-opcion-ico { background: #dbeafe; }
+.sel-opcion--cond:hover .sel-opcion-ico { background: #dcfce7; }
+
+/* Cuerpo texto */
+.sel-opcion-body {
+  flex: 1;
+  display: flex; flex-direction: column; gap: 4px;
+  position: relative; z-index: 1;
+}
+.sel-opcion-nombre {
+  display: block;
+  font-size: 0.95rem; font-weight: 700;
+  color: #0f172a;
+}
+.sel-opcion-desc {
+  display: block;
+  font-size: 0.72rem; color: #64748b;
+  line-height: 1.4;
+}
+
+/* Flecha */
+.sel-opcion-arrow {
+  flex-shrink: 0;
+  color: #cbd5e1;
+  transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), opacity 0.22s;
+  opacity: 0.7;
+  position: relative; z-index: 1;
+}
+
+/* ── Pie de página ── */
+.sel-footer-txt {
+  font-size: 0.68rem;
+  color: #94a3b8;
+  text-align: center;
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ══════════════════════════════════════════════════════
+   PANEL DERECHO — Carrusel fotográfico
+   ══════════════════════════════════════════════════════ */
+.sel-panel-right {
+  flex: 1;
+  display: flex;
+  align-items: stretch;
+  background: linear-gradient(150deg, #1e3a8a 0%, #1d4ed8 55%, #2563eb 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Grid de puntos sutil (z-index 1, encima del carrusel) */
+.sel-panel-right::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background-image:
+    linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+  background-size: 52px 52px;
+  pointer-events: none;
+}
+
+/* ── Carrusel: diapositivas de fondo ── */
+.sel-carousel {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+}
+.sel-slide {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  opacity: 0;
+  transition: opacity 1.8s ease-in-out;
+  will-change: opacity, transform;
+}
+.sel-slide.active {
+  opacity: 1;
+  animation: sel-kenburns 10s ease-in-out forwards;
+}
+@keyframes sel-kenburns {
+  from { transform: scale(1.06) translate(0.4%, 0.4%); }
+  to   { transform: scale(1)    translate(-0.4%, 0);   }
+}
+
+/* ── Overlay multicapa para fusión con el entorno ── */
+.sel-carousel-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    /* Borde izquierdo: fusiona con el panel blanco a través del azul del panel */
+    linear-gradient(90deg,  #1e3a8a 0%, rgba(30,58,138,0.6) 22%, transparent 54%),
+    /* Base inferior: garantiza legibilidad de chips y dots */
+    linear-gradient(0deg,   rgba(12,22,70,0.96) 0%, rgba(12,22,70,0.38) 28%, transparent 55%),
+    /* Velo superior: integra el tagline */
+    linear-gradient(180deg, rgba(30,58,138,0.68) 0%, transparent 30%),
+    /* Borde derecho sutil */
+    linear-gradient(270deg, rgba(30,58,138,0.32) 0%, transparent 20%),
+    /* Tinte azul global para cohesión cromática con el panel */
+    rgba(12,22,70,0.36);
+}
+
+/* ── Contenido sobre el carrusel ── */
+.sel-ilus {
+  position: relative;
+  z-index: 3;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 52px 40px 44px;
+}
+
+/* Tagline superior */
+.sel-tagline {
+  text-align: center;
+  animation: sel-fade-up 0.55s 0.1s cubic-bezier(0.22,1,0.36,1) both;
+}
+.sel-tagline-h2 {
+  font-size: 2rem; font-weight: 800;
+  color: rgba(255,255,255,0.96);
+  margin: 0 0 10px; letter-spacing: -0.03em;
+  text-shadow: 0 2px 18px rgba(0,0,0,0.35);
+}
+.sel-tagline-p {
+  font-size: 0.78rem; color: rgba(255,255,255,0.55);
+  margin: 0; letter-spacing: 0.03em;
+  text-shadow: 0 1px 8px rgba(0,0,0,0.3);
+}
+
+/* ── Indicadores del carrusel (dots) ── */
+.sel-dots {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  animation: sel-fade-up 0.6s 0.2s cubic-bezier(0.22,1,0.36,1) both;
+}
+.sel-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.3);
+  border: none; cursor: pointer; padding: 0;
+  transition: background 0.35s, width 0.35s, border-radius 0.35s;
+}
+.sel-dot.active {
+  width: 22px;
+  border-radius: 4px;
+  background: rgba(255,255,255,0.9);
+}
+.sel-dot:hover:not(.active) { background: rgba(255,255,255,0.58); }
+
+/* ── Grupo inferior: chips + dots juntos al fondo ── */
+.sel-bottom-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+/* ── Chips de características (zona inferior) ── */
+.sel-features {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  animation: sel-fade-up 0.7s 0.25s cubic-bezier(0.22,1,0.36,1) both;
+}
+.sel-feat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 15px;
+  border-radius: 100px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.72);
+  font-size: 0.71rem; font-weight: 600;
+  letter-spacing: 0.01em;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+  cursor: default;
+}
+.sel-feat:hover {
+  background: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.38);
+  color: rgba(255,255,255,0.96);
+}
+.sel-feat svg { flex-shrink: 0; }
+
+/* ══════════════════════════════════════════════════════
+   RESPONSIVE
+   ══════════════════════════════════════════════════════ */
+@media (max-width: 900px) {
+  .sel-panel-left  { width: min(400px, 100%); padding: 40px 28px; }
+  .sel-tagline-h2  { font-size: 1.65rem; }
+  .sel-ilus        { padding: 44px 28px 36px; }
+}
+
+@media (max-width: 720px) {
+  .sel-body       { overflow-y: auto; }
+  .sel-layout     { flex-direction: column; min-height: 100vh; }
+  .sel-panel-left {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 36px 20px;
+  }
+  .sel-panel-left::after { display: none; }
+  .sel-panel-right       { min-height: 360px; }
+  .sel-ilus              { padding: 36px 20px 32px; }
+  .sel-tagline-h2        { font-size: 1.4rem; }
+  .sel-tagline-p         { font-size: 0.72rem; }
+  .sel-features          { gap: 8px; }
+}
+
+@media (max-width: 420px) {
+  .sel-h1            { font-size: 1.35rem; }
+  .sel-opcion        { padding: 16px 18px; gap: 13px; }
+  .sel-opcion-ico    { width: 40px; height: 40px; border-radius: 10px; }
+  .sel-opcion-nombre { font-size: 0.9rem; }
+  .sel-feat          { padding: 6px 11px; font-size: 0.68rem; }
+  .sel-panel-right   { min-height: 300px; }
+  .sel-tagline-h2    { font-size: 1.25rem; }
+}
+
+/* ================================================================
+   LOGIN — fondo claro (auth-body--login + auth-card--dark)
+   "dark" es el nombre heredado; la tarjeta ahora es blanca/clara.
+   ================================================================ */
+.auth-body--login {
+  background: linear-gradient(145deg, #f0f5ff 0%, #e8effd 45%, #f3f0ff 100%);
+  position: relative;
+}
+
+.auth-card--dark {
+  background: rgba(255,255,255,0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1.5px solid #e2e8f0;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.07), 0 4px 16px rgba(0,0,0,0.04);
+}
+
+/* Brand */
+.auth-card--dark .auth-brand-name { color: #0f172a; }
+.auth-card--dark .auth-brand-sub  { color: #64748b; }
+
+/* Título y subtítulo */
+.auth-card--dark .auth-titulo    { color: #0f172a; }
+.auth-card--dark .auth-subtitulo { color: #64748b; }
+
+/* Label */
+.auth-card--dark .auth-label { color: #475569; }
+
+/* Inputs */
+.auth-card--dark .auth-input {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+.auth-card--dark .auth-input::placeholder { color: #94a3b8; }
+.auth-card--dark .auth-input:focus {
+  border-color: #3b82f6;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(59,130,246,0.1);
+  outline: none;
+}
+.auth-card--dark .auth-input:disabled  { background: #f1f5f9; opacity: .7; }
+.auth-card--dark .auth-input-icon      { color: #94a3b8; }
+.auth-card--dark .auth-toggle-pw       { color: #94a3b8; }
+.auth-card--dark .auth-toggle-pw:hover { color: #475569; }
+
+/* Botón submit */
+.auth-card--dark .auth-btn-submit {
+  background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
+  box-shadow: 0 4px 14px rgba(29,78,216,0.28);
+  transition: filter 0.18s, box-shadow 0.18s, transform 0.15s;
+}
+.auth-card--dark .auth-btn-submit:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 6px 20px rgba(29,78,216,0.38);
+  transform: translateY(-1px);
+}
+.auth-card--dark .auth-btn-submit:active:not(:disabled) { transform: translateY(0); }
+
+/* Footer y enlace */
+.auth-card--dark .auth-footer      { color: #94a3b8; }
+.auth-card--dark .auth-cambiar-tipo { color: #2563eb; font-weight: 600; }
+.auth-card--dark .auth-cambiar-tipo:hover { color: #1d4ed8; text-decoration: underline; }

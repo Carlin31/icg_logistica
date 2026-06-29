@@ -286,8 +286,12 @@ function renderRutaCard(ruta) {
     return `<span class="sel-card-suc">${etiqueta}</span>`;
   }).join("");
 
+  const volM3      = calcularVolumenRuta(ruta);
   const footerPeso = pesoKg > 0
     ? `<span><i data-lucide="scale"></i> ${(pesoKg / 1000).toFixed(2)} t</span>`
+    : "";
+  const footerVol  = volM3 > 0
+    ? `<span><i data-lucide="box"></i> ${volM3.toFixed(3)} m³</span>`
     : "";
 
   return `
@@ -301,6 +305,7 @@ function renderRutaCard(ruta) {
       <div class="sel-route-card__footer">
         <span><i data-lucide="map-pin"></i> ${sucursales.length} parada${sucursales.length !== 1 ? "s" : ""}</span>
         ${footerPeso}
+        ${footerVol}
       </div>
     </button>`;
 }
@@ -352,6 +357,7 @@ function _renderDayColumn(diaKey, rutas) {
   const nEnt      = rutas.filter(r => _entregadas.has(String(r._id))).length;
   const nTotal    = rutas.length;
   const pesoTotal = rutas.reduce((acc, r) => acc + calcularPesoRuta(r), 0);
+  const volTotal  = rutas.reduce((acc, r) => acc + calcularVolumenRuta(r), 0);
 
   // Rutas operativas (no entregadas): determinar si el día está activo o desactivado
   const rutasOperativas = rutas.filter(r => !_entregadas.has(String(r._id)));
@@ -384,6 +390,7 @@ function _renderDayColumn(diaKey, rutas) {
             ${nTotal} ruta${nTotal !== 1 ? "s" : ""}
             ${nEnt > 0 ? `<span class="sel-day-ent-count">· ${nEnt} ent.</span>` : ""}
             ${pesoTotal > 0 ? `· ${(pesoTotal / 1000).toFixed(1)} t` : ""}
+            ${volTotal > 0 ? `· ${volTotal.toFixed(2)} m³` : ""}
           </span>
         </div>
         ${btnToggle}
@@ -2241,13 +2248,15 @@ function h(s) {
     // Tabla (sin columnas de historial ni desviación)
     const tbody = document.getElementById("vrp-tabla-body");
     tbody.innerHTML = reporte.map(r => {
-      const uso = r["uso_%"] != null ? r["uso_%"] + "%" : "—";
-      const est = _vrpEstado(r);
+      const uso    = r["uso_%"] != null ? r["uso_%"] + "%" : "—";
+      const m3txt  = r.m3_total != null ? r.m3_total.toFixed(3) + " m³" : "—";
+      const est    = _vrpEstado(r);
       return `<tr>
         <td>${h(r.vehiculo)}</td>
         <td>${h(r.dia_semana)}</td>
         <td>${r.sucursales}</td>
         <td>${r.kg_total.toLocaleString()}</td>
+        <td>${m3txt}</td>
         <td>${uso}</td>
         <td><span class="vrp-estado-badge ${est.badgeCls}" data-tooltip="${est.tooltip}">${est.badgeLabel}</span></td>
       </tr>`;

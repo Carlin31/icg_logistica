@@ -16,6 +16,8 @@ from logic.configuracion_logic import (
     listar_productos,  obtener_producto,  agregar_producto,  editar_producto,  eliminar_producto,
     listar_productos_proalmex, obtener_producto_proalmex, agregar_producto_proalmex,
     editar_producto_proalmex, eliminar_producto_proalmex,
+    listar_productos_bimbo, obtener_producto_bimbo, agregar_producto_bimbo,
+    editar_producto_bimbo, eliminar_producto_bimbo,
     listar_sucursales, obtener_sucursal, agregar_sucursal, editar_sucursal, eliminar_sucursal,
     listar_vehiculos,  obtener_vehiculo,  agregar_vehiculo,  editar_vehiculo,  eliminar_vehiculo,
     toggle_activo_vehiculo, actualizar_chofer_vehiculo,
@@ -135,6 +137,44 @@ def put_producto_proalmex(producto_id):
 @configuracion_bp.route("/productos-proalmex/<producto_id>", methods=["DELETE"])
 def delete_producto_proalmex(producto_id):
     return _respuesta(eliminar_producto_proalmex(producto_id))
+
+
+# ── Productos Bimbo ───────────────────────────────────────────
+@configuracion_bp.route("/productos-bimbo", methods=["GET"])
+def get_productos_bimbo():
+    return jsonify(listar_productos_bimbo(
+        request.args.get("nombre", ""),
+        request.args.get("fecha",  ""),
+    ))
+
+
+@configuracion_bp.route("/productos-bimbo/<producto_id>", methods=["GET"])
+def get_producto_bimbo(producto_id):
+    doc = obtener_producto_bimbo(producto_id)
+    return jsonify(doc) if doc else (jsonify({"error": "No encontrado"}), 404)
+
+
+@configuracion_bp.route("/productos-bimbo", methods=["POST"])
+def post_producto_bimbo():
+    datos, err = _json_o_400()
+    if err:
+        return err
+    resultado = agregar_producto_bimbo(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@configuracion_bp.route("/productos-bimbo/<producto_id>", methods=["PUT"])
+def put_producto_bimbo(producto_id):
+    datos, err = _json_o_400()
+    if err:
+        return err
+    return _respuesta(editar_producto_bimbo(producto_id, datos))
+
+
+@configuracion_bp.route("/productos-bimbo/<producto_id>", methods=["DELETE"])
+def delete_producto_bimbo(producto_id):
+    return _respuesta(eliminar_producto_bimbo(producto_id))
 
 
 # ── Sucursales ─────────────────────────────────────────────────

@@ -285,6 +285,16 @@ def generar_rutas_vrp(logistica_id: str) -> dict:
     if not pedidos_dict:
         return {"status": "error", "mensaje": "No hay sucursales con peso en la extracción."}
 
+    volumenes_dict: dict = {}
+    for _, valores in ext_doc.get("datos_volumen", {}).items():
+        id_suc = valores.get("id_sucursal")
+        vol    = float(valores.get("total_m3") or 0)
+        if id_suc is not None:
+            try:
+                volumenes_dict[int(id_suc)] = vol
+            except (TypeError, ValueError):
+                pass
+
     # ── 4. Coordenadas y nombres de sucursales ────────────────────────────────
     coords_dict = {}
     suc_nombres = {}
@@ -1128,6 +1138,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
         if total_kg > cap:
             notas_sb = f"Sobrecarga: {round(total_kg - cap)} kg sin ruta destino disponible"
 
+        total_m3   = sum(volumenes_dict.get(m["sid"], 0.0) for m in miembros)
         report_rows.append({
             "vehiculo":     veh,
             "dia_semana":   dia,
@@ -1135,6 +1146,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             "kg_total":     round(total_kg),
             "capacidad_kg": cap,
             "uso_%":        round(total_kg / cap * 100, 1) if cap > 0 else 0,
+            "m3_total":     round(total_m3, 4),
             "estado":       estado,
             "notas":        notas_sb,
         })

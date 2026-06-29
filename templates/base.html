@@ -220,25 +220,46 @@
      Controlado por Loader.show() / Loader.hide() en base.js
      ═══════════════════════════════════════════════════════════════ -->
 <div class="fl-overlay" id="fl-overlay" role="status" aria-live="polite" aria-label="Cargando">
-  <div class="fl-brand">
+
+  <!-- Fondo animado -->
+  <div class="fl-bg" aria-hidden="true">
+    <div class="fl-orb fl-orb--1"></div>
+    <div class="fl-orb fl-orb--2"></div>
+    <div class="fl-orb fl-orb--3"></div>
+  </div>
+
+  <!-- Marca -->
+  <div class="fl-brand" aria-hidden="true">
     <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="14" height="14" class="hdr-icon">
     ICG Logistics
   </div>
+
+  <!-- Spinner -->
   <div class="fl-spinner">
+    <div class="fl-glow"></div>
     <div class="fl-ring-outer"></div>
     <div class="fl-ring"></div>
+    <div class="fl-ring-inner"></div>
     <div class="fl-core">
       <img src="{{ url_for('static', filename='img/icon-brand.svg') }}" alt="" width="20" height="20" class="hdr-icon">
     </div>
   </div>
-  <div class="fl-dots">
+
+  <!-- Texto -->
+  <div class="fl-title" id="fl-title">Procesando…</div>
+  <div class="fl-msg"   id="fl-msg">Por favor, espera un momento…</div>
+
+  <!-- Puntos de progreso -->
+  <div class="fl-dots" aria-hidden="true">
     <div class="fl-dot"></div>
     <div class="fl-dot"></div>
     <div class="fl-dot"></div>
   </div>
-  <div class="fl-title" id="fl-title">Procesando…</div>
-  <div class="fl-msg"   id="fl-msg">Por favor, espera un momento…</div>
-  <div class="fl-footer">Integradora Comercial del Golfo</div>
+
+  <!-- Footer y barra shimmer -->
+  <div class="fl-footer" aria-hidden="true">Integradora Comercial del Golfo</div>
+  <div class="fl-progress" aria-hidden="true"><div class="fl-progress-bar"></div></div>
+
 </div>
 
 <script>window.__PERFIL_SLUG__ = {{ perfil_slug | tojson }};</script>
