@@ -129,7 +129,7 @@ function fetchWithRetries(url, opts = {}, timeout = 8000, retries = 3, backoffBa
 // ── Verificar sesión ───────────────────────────────────────────
 async function verificarSesionLogistica() {
   try {
-    const res  = await fetch('/api/activa');
+    const res  = await fetch('/menu/api/activa');
     const data = await res.json();
     if (data.status !== 'ok') { redirigirAlMenu('No hay ninguna logística activa.'); return false; }
     _logisticaId = data.id || "";

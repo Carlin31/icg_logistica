@@ -40,7 +40,7 @@ async function inicializar() {
 
 async function cargarLogisticaActiva() {
   try {
-    const res  = await fetch('/api/activa');
+    const res  = await fetch('/menu/api/activa');
     const data = await res.json();
     const infoCard     = document.getElementById('logistica-info');
     const sinLogistica = document.getElementById('sin-logistica');

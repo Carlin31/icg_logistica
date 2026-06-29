@@ -162,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Verificar sesión activa ───────────────────────────────────────────────────
 async function verificarLogisticaActiva() {
   try {
-    const res  = await fetch('/api/activa');
+    const res  = await fetch('/menu/api/activa');
     const data = await res.json();
     if (data.status !== 'ok') { mostrarAvisoSinLogistica(); return false; }
     return true;

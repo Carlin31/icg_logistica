@@ -95,7 +95,7 @@ document.addEventListener("DOMContentLoaded", async () => {
 
 async function verificarSesionLogistica() {
   try {
-    const res  = await fetch('/api/activa');
+    const res  = await fetch('/menu/api/activa');
     const data = await res.json();
     if (data.status !== 'ok') { redirigirAlMenu('No hay ninguna logística activa.'); return false; }
     return true;
