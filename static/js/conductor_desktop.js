@@ -388,9 +388,9 @@ async function confirmarEntregaPendiente() {
   const { tipo, key } = _paradaPendiente;
 
   cerrarConfirm();
-  mostrarOpLoader("Registrando entrega…");
 
   try {
+    mostrarOpLoader("Registrando entrega…");
     const res = await fetch("/conductor/api/marcar-entrega", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -440,9 +440,9 @@ async function confirmarCancelarPendiente() {
   const { tipo, key } = _paradaPendiente;
 
   cerrarConfirmCancelar();
-  mostrarOpLoader("Cancelando entrega…");
 
   try {
+    mostrarOpLoader("Cancelando entrega…");
     const res = await fetch("/conductor/api/marcar-entrega", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -474,11 +474,14 @@ async function confirmarCancelarPendiente() {
 
 // ── Loader de operación ──────────────────────────────────────────
 function mostrarOpLoader(texto) {
-  document.getElementById("cdd-op-loader-txt").textContent = texto || "Procesando…";
-  document.getElementById("cdd-op-loader").classList.remove("hidden");
+  const el  = document.getElementById("cdd-op-loader");
+  const txt = document.getElementById("cdd-op-loader-txt");
+  if (txt) txt.textContent = texto || "Procesando…";
+  if (el)  el.classList.remove("hidden");
 }
 function ocultarOpLoader() {
-  document.getElementById("cdd-op-loader").classList.add("hidden");
+  const el = document.getElementById("cdd-op-loader");
+  if (el) el.classList.add("hidden");
 }
 
 // ── Utilidades ───────────────────────────────────────────────────
