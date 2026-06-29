@@ -394,8 +394,9 @@ function cerrarConfirm() {
 async function confirmarEntregaPendiente() {
   if (!_paradaPendiente || !_rutaActiva) { cerrarConfirm(); return; }
   const { tipo, key } = _paradaPendiente;
-  const btnAceptar = document.getElementById("cd-confirm-aceptar");
-  btnAceptar.disabled = true;
+
+  cerrarConfirm();
+  mostrarOpLoader("Registrando entrega…");
 
   try {
     const res = await fetch("/conductor/api/marcar-entrega", {
@@ -423,8 +424,7 @@ async function confirmarEntregaPendiente() {
     console.error("[confirmarEntregaPendiente]", err);
     mostrarToastConductor("Error de conexión al registrar la entrega.", "error");
   } finally {
-    btnAceptar.disabled = false;
-    cerrarConfirm();
+    ocultarOpLoader();
   }
 }
 
@@ -445,8 +445,9 @@ function cerrarConfirmCancelar() {
 async function confirmarCancelarPendiente() {
   if (!_paradaPendiente || !_rutaActiva) { cerrarConfirmCancelar(); return; }
   const { tipo, key } = _paradaPendiente;
-  const btnAceptar = document.getElementById("cd-cancelar-aceptar");
-  btnAceptar.disabled = true;
+
+  cerrarConfirmCancelar();
+  mostrarOpLoader("Cancelando entrega…");
 
   try {
     const res = await fetch("/conductor/api/marcar-entrega", {
@@ -473,9 +474,17 @@ async function confirmarCancelarPendiente() {
     console.error("[confirmarCancelarPendiente]", err);
     mostrarToastConductor("Error de conexión al cancelar la entrega.", "error");
   } finally {
-    btnAceptar.disabled = false;
-    cerrarConfirmCancelar();
+    ocultarOpLoader();
   }
+}
+
+// ── Loader de operación ──────────────────────────────────────────
+function mostrarOpLoader(texto) {
+  document.getElementById("cd-op-loader-txt").textContent = texto || "Procesando…";
+  document.getElementById("cd-op-loader").classList.remove("hidden");
+}
+function ocultarOpLoader() {
+  document.getElementById("cd-op-loader").classList.add("hidden");
 }
 
 // ── Utilidades ───────────────────────────────────────────────────

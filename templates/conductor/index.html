@@ -106,6 +106,12 @@
 <!-- ── Toast ── -->
 <div id="cd-toast" class="cd-toast hidden"></div>
 
+<!-- ── Loader: procesando entrega ── -->
+<div id="cd-op-loader" class="cd-op-loader hidden" role="status" aria-label="Procesando">
+  <div class="cd-op-loader-ring"></div>
+  <span id="cd-op-loader-txt" class="cd-op-loader-txt">Procesando…</span>
+</div>
+
 <script>window.__CD_ESTADO_INICIAL__ = {{ estado_inicial | tojson }};</script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>

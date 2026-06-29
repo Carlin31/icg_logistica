@@ -213,6 +213,29 @@ html, body {
 .cd-toast--ok    { background: var(--cd-verde); }
 .cd-toast--error { background: var(--cd-rojo); }
 
+/* ── Loader de operación (confirmar / cancelar entrega) ── */
+.cd-op-loader {
+  position: fixed; inset: 0; z-index: 3000;
+  background: rgba(10,20,50,0.75);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 18px;
+}
+.cd-op-loader.hidden { display: none; }
+.cd-op-loader-ring {
+  width: 50px; height: 50px;
+  border: 4px solid rgba(255,255,255,0.22);
+  border-top-color: #ffffff;
+  border-radius: 50%;
+  animation: cd-spin 0.75s linear infinite;
+}
+.cd-op-loader-txt {
+  color: #ffffff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
 /* ── Historial de rutas completadas ── */
 #cd-historial-section { margin: 0 12px 20px; }
 
