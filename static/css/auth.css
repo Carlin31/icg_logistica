@@ -495,9 +495,9 @@
 }
 
 /* ════════════════════════════════════════════════════════════════
-   ESCRITORIO / LAPTOP (≥ 720px) — Dos paneles
+   ESCRITORIO / LAPTOP (≥ 1024px) — Dos paneles
    ════════════════════════════════════════════════════════════════ */
-@media (min-width: 720px) {
+@media (min-width: 1024px) {
   /* Fondo suave con orbs; sin overlay oscuro */
   .sel-body    { overflow: hidden; }
   .sel-overlay { display: none; }
@@ -667,9 +667,9 @@
   .sel-dots--desk .sel-dot:hover:not(.active) { background: rgba(255,255,255,0.58); }
 }
 
-/* Tablet intermedia */
-@media (min-width: 720px) and (max-width: 900px) {
-  .sel-panel-left { padding: 40px 28px; flex-basis: min(400px, 44%); }
+/* Laptop intermedia */
+@media (min-width: 1024px) and (max-width: 1280px) {
+  .sel-panel-left { padding: 40px 28px; flex-basis: min(420px, 40%); }
   .sel-tagline-h2 { font-size: 1.65rem; }
   .sel-ilus       { padding: 44px 28px 36px; }
 }
