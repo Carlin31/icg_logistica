@@ -241,9 +241,9 @@
   background: #0d1b3e; /* fondo oscuro antes de que cargue el carrusel */
 }
 
-/* ── Carrusel full-screen (fondo en móvil; visible en panel derecho en escritorio) ── */
+/* ── Carrusel: absolute dentro de sel-panel-right (que es fixed en móvil, relativo en escritorio) ── */
 .sel-carousel {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 0;
 }
@@ -283,9 +283,6 @@
    MÓVIL (base, < 720px) — Carrusel full-screen + tarjeta centrada
    ════════════════════════════════════════════════════════════════ */
 
-/* Orbs no se necesitan en móvil */
-.sel-bg { display: none; }
-
 /* Layout columna, ocupa toda la pantalla */
 .sel-layout {
   position: relative;
@@ -307,8 +304,14 @@
   padding: 36px 20px 40px;
 }
 
-/* Panel derecho: oculto en móvil */
-.sel-panel-right { display: none; }
+/* Panel derecho: fondo full-screen en móvil — el carrusel vive aquí */
+.sel-panel-right {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: block;
+  overflow: hidden;
+}
 
 /* Header flotante: oculto (brand se mueve dentro del recuadro blanco) */
 .sel-header { display: none; }
@@ -498,10 +501,9 @@
    ESCRITORIO / LAPTOP (≥ 1024px) — Dos paneles
    ════════════════════════════════════════════════════════════════ */
 @media (min-width: 1024px) {
-  /* Fondo suave con orbs; sin overlay oscuro */
+  /* Sin overlay oscuro en escritorio */
   .sel-body    { overflow: hidden; }
   .sel-overlay { display: none; }
-  .sel-bg      { display: block; }
 
   /* Layout en fila */
   .sel-layout {
@@ -510,25 +512,17 @@
     min-height: 100vh;
   }
 
-  /* Panel izquierdo: fondo blanco semitransparente que cubre el carrusel */
+  /* Panel izquierdo: blanco sólido, limpio y moderno */
   .sel-panel-left {
-    flex: 0 0 min(460px, 42%);
+    flex: 0 0 min(460px, 40%);
     min-height: auto;
     justify-content: center;
-    padding: 48px 36px;
-    background: rgba(255,255,255,0.80);
-    backdrop-filter: blur(22px);
-    -webkit-backdrop-filter: blur(22px);
-    border-right: 1px solid #e2e8f0;
+    padding: 48px 40px;
+    background: #ffffff;
+    border-right: 1px solid #e8ecf0;
+    box-shadow: 4px 0 32px rgba(0,0,0,0.09);
     position: relative;
     z-index: 2;
-  }
-  .sel-panel-left::after {
-    content: '';
-    position: absolute;
-    right: -1px; top: 15%; bottom: 15%;
-    width: 1px;
-    background: linear-gradient(180deg, transparent, rgba(59,130,246,0.45), transparent);
   }
 
   /* Elementos solo-móvil: ocultos en escritorio */
@@ -578,7 +572,7 @@
   .sel-opcion-nombre  { font-size: 0.95rem; }
   .sel-opcion-desc    { font-size: 0.72rem; }
 
-  /* Panel derecho: transparente, el carrusel fixed muestra detrás */
+  /* Panel derecho: en escritorio vuelve al flujo; el carrusel dentro ocupa todo el panel */
   .sel-panel-right {
     flex: 1;
     display: flex;
@@ -596,16 +590,15 @@
     pointer-events: none;
   }
 
-  /* Overlay del carrusel (fusión lateral + capas de contraste) */
+  /* Overlay del carrusel (capas de contraste; sin fusión lateral porque el panel izquierdo ya es blanco sólido) */
   .sel-carousel-overlay {
     position: absolute; inset: 0; z-index: 2;
     pointer-events: none;
     background:
-      linear-gradient(90deg, rgba(248,250,252,0.55) 0%, transparent 22%),
       linear-gradient(0deg, rgba(12,22,70,0.96) 0%, rgba(12,22,70,0.38) 28%, transparent 55%),
       linear-gradient(180deg, rgba(30,58,138,0.68) 0%, transparent 30%),
       linear-gradient(270deg, rgba(30,58,138,0.32) 0%, transparent 20%),
-      rgba(12,22,70,0.36);
+      rgba(12,22,70,0.30);
   }
 
   /* Contenido del panel derecho */

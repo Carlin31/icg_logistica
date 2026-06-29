@@ -11,32 +11,17 @@
 </head>
 <body class="sel-body">
 
-<!-- Carrusel de fondo: fixed full-screen en móvil; visible en panel derecho en escritorio -->
-<div class="sel-carousel" id="sel-carousel" aria-hidden="true">
-  <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=1920&q=80')"></div>
-  <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1587293852726-70cdb56c2866?auto=format&fit=crop&w=1920&q=80')"></div>
-  <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1920&q=80')"></div>
-  <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1920&q=80')"></div>
-</div>
-
-<!-- Overlay oscuro — solo activo en móvil -->
+<!-- Overlay oscuro — solo activo en móvil (sobre el panel-right fixed) -->
 <div class="sel-overlay" aria-hidden="true"></div>
-
-<!-- Orbs animados — solo visibles en escritorio (fondo panel izquierdo) -->
-<div class="sel-bg" aria-hidden="true">
-  <div class="sel-orb sel-orb--1"></div>
-  <div class="sel-orb sel-orb--2"></div>
-  <div class="sel-orb sel-orb--3"></div>
-</div>
 
 <div class="sel-layout">
 
   <!-- ══════════ PANEL IZQUIERDO / CONTENIDO MÓVIL ══════════ -->
   <div class="sel-panel-left">
 
-    <!-- Brand flotante sobre la imagen — solo móvil -->
+    <!-- Brand flotante — solo móvil (oculto en escritorio) -->
     <div class="sel-header">
-      <div class="sel-brand sel-brand--over">
+      <div class="sel-brand--over">
         <div class="sel-brand-icon">
           <img src="{{ url_for('static', filename='img/icon-brand.svg') }}"
                alt="" width="24" height="24" style="filter:brightness(0)invert(1)">
@@ -54,11 +39,11 @@
       <p class="sel-sub">Optimización de rutas · Gestión de flotas · Entregas confiables</p>
     </div>
 
-    <!-- Tarjeta de selección: blanca en móvil / contenedor transparente en escritorio -->
+    <!-- Tarjeta de selección: blanca en móvil / contenedor en escritorio -->
     <div class="sel-card" id="sel-card">
 
-      <!-- Brand dentro de la tarjeta — solo escritorio -->
-      <div class="sel-brand sel-brand--card">
+      <!-- Brand dentro de la tarjeta — visible en ambos layouts -->
+      <div class="sel-brand--card">
         <div class="sel-brand-icon">
           <img src="{{ url_for('static', filename='img/icon-brand.svg') }}"
                alt="" width="26" height="26" style="filter:brightness(0)invert(1)">
@@ -70,7 +55,7 @@
       </div>
       <div class="sel-divider"></div>
 
-      <!-- Encabezado de selección (compartido, escala entre layouts) -->
+      <!-- Encabezado de selección -->
       <div class="sel-headline">
         <h2 class="sel-headline-h">¿Cómo quieres ingresar?</h2>
         <p class="sel-headline-p">Selecciona tu perfil de acceso para continuar</p>
@@ -132,13 +117,21 @@
 
   </div>
 
-  <!-- ══════════ PANEL DERECHO — solo escritorio ══════════ -->
+  <!-- ══════════ PANEL DERECHO — carrusel + contenido escritorio ══════════ -->
   <div class="sel-panel-right" aria-hidden="true">
 
-    <!-- Overlay de fusión con el panel izquierdo -->
+    <!-- Carrusel: absolute dentro del panel (fixed en móvil, relativo en escritorio) -->
+    <div class="sel-carousel" id="sel-carousel">
+      <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1553413077-190dd305871c?auto=format&fit=crop&w=1920&q=80')"></div>
+      <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1587293852726-70cdb56c2866?auto=format&fit=crop&w=1920&q=80')"></div>
+      <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1601584115197-04ecc0da31d7?auto=format&fit=crop&w=1920&q=80')"></div>
+      <div class="sel-slide" style="background-image:url('https://images.unsplash.com/photo-1586528116311-ad8dd3c8310d?auto=format&fit=crop&w=1920&q=80')"></div>
+    </div>
+
+    <!-- Overlay de contraste -->
     <div class="sel-carousel-overlay"></div>
 
-    <!-- Contenido sobre el carrusel -->
+    <!-- Contenido sobre el carrusel — solo escritorio -->
     <div class="sel-ilus">
 
       <div class="sel-tagline">
@@ -201,7 +194,7 @@ lucide.createIcons();
 /* ── Carrusel automático con crossfade ── */
 (function () {
   const slides  = document.querySelectorAll('#sel-carousel .sel-slide');
-  const allDots = document.querySelectorAll('.sel-dot'); // móvil + escritorio
+  const allDots = document.querySelectorAll('.sel-dot');
   const DELAY   = 6000;
   const FADE    = 1800;
   let   current = 0;
