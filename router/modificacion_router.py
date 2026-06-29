@@ -14,11 +14,8 @@ from logic.modificacion_logic import (
     obtener_vehiculos,
     obtener_disponibilidad_vehiculos,
     calcular_tiempos_subruta,
-    calcular_alternativas_subruta,
     calcular_ruta_personalizada,
-    calcular_tiempos_lote,
     guardar_modificacion,
-    obtener_modificacion_previa,
     actualizar_vehiculo_en_asignacion,
     actualizar_chofer_en_asignacion,
     actualizar_orden_paradas,
@@ -234,32 +231,6 @@ def post_recalcular():
         return jsonify({"status": "error", "mensaje": str(e)}), 500
 
 
-@modificacion_bp.route("/alternativas-ruta", methods=["POST"])
-def post_alternativas_ruta():
-    lid, err = _requiere_logistica()
-    if err:
-        return err
-    datos, err2 = _json_o_400()
-    if err2:
-        return err2
-
-    paradas = datos.get("paradas") or datos.get("sucursales")
-    if not isinstance(paradas, list):
-        return jsonify({"status": "error", "mensaje": "Se esperaba { paradas: [...] }"}), 400
-
-    hora_salida = datos.get("hora_salida") or "08:00"
-    pesos = obtener_pesos(lid)
-    try:
-        alternativas = calcular_alternativas_subruta(paradas, pesos, hora_salida)
-        return jsonify({
-            "status": "ok",
-            "alternativas": alternativas,
-            "matriz": [MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT],
-        })
-    except Exception as e:
-        return jsonify({"status": "error", "mensaje": str(e)}), 500
-
-
 @modificacion_bp.route("/ruta-personalizada", methods=["POST"])
 def post_ruta_personalizada():
     lid, err = _requiere_logistica()
@@ -284,27 +255,6 @@ def post_ruta_personalizada():
         return jsonify({"status": "error", "mensaje": str(e)}), 500
 
 
-@modificacion_bp.route("/calcular-lote", methods=["POST"])
-def post_calcular_lote():
-    lid, err = _requiere_logistica()
-    if err:
-        return err
-    datos, err2 = _json_o_400()
-    if err2:
-        return err2
-
-    rutas = datos.get("rutas")
-    if not isinstance(rutas, list):
-        return jsonify({"status": "error", "mensaje": "Se esperaba { rutas: [...] }"}), 400
-
-    pesos = obtener_pesos(lid)
-    try:
-        resultados = calcular_tiempos_lote(rutas, pesos)
-        return jsonify({"status": "ok", "resultados": resultados})
-    except Exception as e:
-        return jsonify({"status": "error", "mensaje": str(e)}), 500
-
-
 @modificacion_bp.route("/guardar", methods=["POST"])
 def post_guardar():
     lid, err = _requiere_logistica()
@@ -316,17 +266,6 @@ def post_guardar():
     resultado = guardar_modificacion(datos, lid)
     code = 200 if resultado.get("status") == "ok" else 500
     return jsonify(resultado), code
-
-
-@modificacion_bp.route("/previa", methods=["GET"])
-def get_previa():
-    lid, err = _requiere_logistica()
-    if err:
-        return err
-    try:
-        return jsonify(obtener_modificacion_previa(lid))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @modificacion_bp.route("/rutas-confirmadas", methods=["POST"])

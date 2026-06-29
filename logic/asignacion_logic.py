@@ -38,6 +38,7 @@ Cambios v4 (conservados):
   - _dias_candidatos(): respeta dia_sugerido/dia_programado sin mover rutas.
   - Fallback sin vehículo: conserva el día configurado de la ruta.
 """
+import json as _json
 import math
 import time
 import unicodedata
@@ -76,9 +77,6 @@ UTIL_MAX_DEFAULT = 100  # %  ← corregido de 120 a 100
 #   "CONSERVADOR" → estima vol_m3 = capacidad_ton × FACTOR_VOLUMEN_POR_DEFECTO.
 ESTRATEGIA_VOLUMEN_NULO_DEFAULT   = "BLOQUEAR"
 FACTOR_VOLUMEN_POR_DEFECTO_DEFAULT = 2.5   # m³ por tonelada de capacidad
-
-# MAY-2: radio máximo para considerar mayoristas candidatos (configurable).
-RADIO_MAYORISTAS_KM_DEFAULT = 10.0
 
 # ══════════════════════════════════════════════════════════════════════
 # FASE 3 — REACOMODAMIENTO (Sección 5)
@@ -281,7 +279,7 @@ def consultar_osrm(coords: list) -> dict:
     if len(coords) < 2:
         return {"distancia_km": 0.0, "traslado_min": 0.0, "origen": "osrm"}
 
-    import json as _json
+
     waypoints    = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
     url          = f"{OSRM_BASE_URL}/{waypoints}?overview=false"
     ultimo_error = None
@@ -1538,7 +1536,7 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
           origen: "osrm" | "fallback_lineal" | "sin_datos",
         }
     """
-    import json as _json
+
 
     cfg        = _obtener_config_general()
     matriz_lat = MATRIZ_LAT_DEFAULT

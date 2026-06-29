@@ -152,12 +152,6 @@ def guardar():
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
 
 
-# ── Alias de compatibilidad ──────────────────────────────────────────────────
-@extraccion_bp.route('/guardar_json', methods=['POST'])
-def guardar_json():
-    """Alias del endpoint /guardar para compatibilidad con versiones anteriores."""
-    return guardar()
-
 
 # ══════════════════════════════════════════════════════════════════════════════
 # CLIENTES MAYORISTAS
@@ -274,8 +268,7 @@ def eliminar_fuente():
             )
 
         # Limpiar asignaciones y reportes VRP para forzar regeneración
-        for coleccion in ('asignaciones', 'vrp_reportes',
-                          'asignaciones_vrp_afinidad_preview', 'vrp_reportes_afinidad'):
+        for coleccion in ('asignaciones', 'vrp_reportes'):
             db[coleccion].delete_one({'logistica_id': oid})
 
         return jsonify({

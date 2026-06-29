@@ -272,18 +272,3 @@ def marcar_completada(logistica_id: str) -> dict:
     if result.matched_count == 0:
         return {"status": "error", "mensaje": "Logística no encontrada."}
     return {"status": "ok"}
-
-
-def _actualizar_timestamp(logistica_id: str) -> None:
-    """Actualiza ultima_modificacion en la logística padre."""
-    oid = _parse_oid(logistica_id)
-    if not oid:
-        return
-    try:
-        db = get_db()
-        db.logisticas.update_one(
-            {"_id": oid},
-            {"$set": {"ultima_modificacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}},
-        )
-    except Exception:
-        pass

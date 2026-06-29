@@ -5,7 +5,6 @@ Blueprint Flask para la Sección 3 — Asignación de Rutas.
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
 from logic.historico_logic import generar_rutas_vrp_afinidad, obtener_reporte_vrp, resumen_historial, sugerir_vehiculos_optimos
 from logic.asignacion_logic import (
-    asignar_rutas,
     obtener_rutas,
     obtener_vehiculos,
     obtener_pesos,
@@ -439,14 +438,3 @@ def get_historial_disponible():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-# ── Endpoint legacy ────────────────────────────────────────────
-@asignacion_bp.route("/asignar", methods=["POST"])
-def asignar():
-    lid, err = _requiere_logistica()
-    if err:
-        return err
-    datos, err2 = _json_o_400()
-    if err2:
-        return err2
-    return jsonify(asignar_rutas(datos, lid))

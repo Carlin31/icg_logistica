@@ -224,190 +224,6 @@ def obtener_historicos_como_dfs(tipo_registro: str | None = None) -> list:
 
 # ── Generación VRP desde historial ────────────────────────────────────────────
 
-def generar_rutas_vrp(logistica_id: str) -> dict:
-    """
-    Genera rutas VRP híbridas usando historial + datos de extracción actuales.
-
-    Flujo:
-    1. Lee historiales desde MongoDB → DataFrames
-    2. Construye template (vehiculo, dia, seq) por sucursal
-    3. Lee pedidos actuales desde extraccion[logistica_id]
-    4. Obtiene coordenadas desde colección sucursales
-    5. Ejecuta VRP hybrid
-    6. Guarda resultado en asignaciones[logistica_id] (detalle_por_dia)
-
-    Retorna dict con status, total_rutas, reporte VRP, consolidaciones.
-    """
-    oid = _parse_oid(logistica_id)
-    if not oid:
-        return {"status": "error", "mensaje": "logistica_id inválido"}
-
-    if not _PANDAS:
-        return {"status": "error", "mensaje": "pandas no está instalado"}
-
-    db = get_db()
-
-    # ── 1. Cargar historiales ─────────────────────────────────────────────────
-    dfs = obtener_historicos_como_dfs()
-    if not dfs:
-        return {
-            "status":  "error",
-            "mensaje": "No hay historial cargado. Ve a Configuración → Rutas Históricas y carga al menos un CSV.",
-        }
-
-    # ── 2. Construir template VRP ─────────────────────────────────────────────
-    n       = len(dfs)
-    weights = [float(i + 1) for i in range(n)]
-    template, kg_hist, route_stats, historial_rutas = build_template_from_history(dfs, weights)
-
-    # ── 3. Leer pedidos de la extracción ─────────────────────────────────────
-    ext_doc = db["extraccion"].find_one({"logistica_id": oid})
-    if not ext_doc:
-        return {
-            "status":  "error",
-            "mensaje": "No hay datos de extracción para esta logística. Completa la sección Extracción primero.",
-        }
-
-    datos        = ext_doc.get("datos", {})
-    pedidos_dict = {}
-    for _, valores in datos.items():
-        id_suc = valores.get("id_sucursal")
-        peso   = float(valores.get("total_kg") or 0)
-        if id_suc is None or peso <= 0:
-            continue
-        try:
-            pedidos_dict[int(id_suc)] = peso
-        except (TypeError, ValueError):
-            # id_sucursal no numérico (ej. 'N/A' cuando el nombre de la
-            # sucursal no se pudo mapear) → se descarta esta fila
-            continue
-
-    if not pedidos_dict:
-        return {"status": "error", "mensaje": "No hay sucursales con peso en la extracción."}
-
-    volumenes_dict: dict = {}
-    for _, valores in ext_doc.get("datos_volumen", {}).items():
-        id_suc = valores.get("id_sucursal")
-        vol    = float(valores.get("total_m3") or 0)
-        if id_suc is not None:
-            try:
-                volumenes_dict[int(id_suc)] = vol
-            except (TypeError, ValueError):
-                pass
-
-    # ── 4. Coordenadas y nombres de sucursales ────────────────────────────────
-    coords_dict = {}
-    suc_nombres = {}
-    for suc in db["sucursales"].find({}):
-        nt  = suc.get("num_tienda")
-        lat = suc.get("latitud")
-        lon = suc.get("longitud")
-        if nt is not None and lat is not None and lon is not None:
-            coords_dict[int(nt)] = (float(lat), float(lon))
-            suc_nombres[int(nt)] = (
-                suc.get("nombre_base")
-                or suc.get("nombre_icg-proalmex")
-                or suc.get("nombre_bimbo")
-                or str(nt)
-            )
-
-    # ── 5. Capacidades de vehículos ───────────────────────────────────────────
-    vehiculos_cap = obtener_capacidades_vehiculos()
-    info_vehiculos = obtener_info_vehiculos()
-
-    # ── 6. Ejecutar VRP ───────────────────────────────────────────────────────
-    rows, report_rows, consol_log = generate_routes_vrp(
-        pedidos_dict, coords_dict, template, kg_hist, route_stats, vehiculos_cap, historial_rutas
-    )
-
-    if not rows:
-        return {"status": "error", "mensaje": "No se generaron rutas. Verifica el historial y los pedidos."}
-
-    # ── 7. Construir detalle_por_dia para asignaciones ────────────────────────
-    grupos = defaultdict(list)
-    for r in rows:
-        grupos[(r["vehiculo"], r["dia_semana"])].append(r)
-
-    detalle_por_dia = {}
-    for (veh, dia), ruts in grupos.items():
-        dia_key = _normalizar_dia(dia)
-        if dia_key not in detalle_por_dia:
-            detalle_por_dia[dia_key] = {}
-
-        # ID sintético para la ruta VRP
-        ruta_id   = f"vrp_{veh.replace(' ', '_').lower()}_{dia.lower()}"
-        placas    = info_vehiculos.get(veh, {}).get("placas", "")
-        total_kg  = sum(r["kg_entrega"] for r in ruts)
-        cap_kg    = vehiculos_cap.get(veh, 3500)
-        pct       = round(total_kg / cap_kg * 100, 1) if cap_kg > 0 else 0
-
-        # Estado VRP para esta ruta
-        vrp_estado = next(
-            (rr["estado"] for rr in report_rows
-             if rr["vehiculo"] == veh and rr["dia_semana"] == dia),
-            "SIN_HIST"
-        )
-
-        sucursales = []
-        for r in sorted(ruts, key=lambda x: x["secuencia_visita"]):
-            nt = r["num_tienda"]
-            sucursales.append({
-                "num_tienda": nt,
-                "nombre":     suc_nombres.get(nt, str(nt)),
-                "orden":      r["secuencia_visita"],
-                "peso_kg":    r["kg_entrega"],
-            })
-
-        detalle_por_dia[dia_key][ruta_id] = {
-            "nombre_ruta":           f"{veh} — {dia.capitalize()}",
-            "vehiculo_placas":       placas,
-            "vehiculo_abreviatura":  veh,
-            "capacidad_ton":         cap_kg / 1000,
-            "peso_total_kg":         total_kg,
-            "porcentaje_utilizacion": pct,
-            "hora_salida":           "08:00",
-            "hora_regreso_estimada": "",
-            "cumple_horario":        True,
-            "sucursales":            sucursales,
-            "vrp_estado":            vrp_estado,
-        }
-
-    # ── 8. Guardar en colección asignaciones ──────────────────────────────────
-    asig_doc = {
-        "logistica_id":   oid,
-        "detalle_por_dia": detalle_por_dia,
-        "generado_por":   "vrp_historico",
-        "n_historicos":   n,
-        "guardado_en":    datetime.now().isoformat(),
-    }
-    db["asignaciones"].update_one(
-        {"logistica_id": oid},
-        {"$set": asig_doc},
-        upsert=True,
-    )
-
-    # ── 9. Guardar reporte VRP en colección separada ──────────────────────────
-    db["vrp_reportes"].update_one(
-        {"logistica_id": oid},
-        {"$set": {
-            "logistica_id": oid,
-            "reporte":      report_rows,
-            "consolidaciones": consol_log,
-            "generado_en":  datetime.now().isoformat(),
-        }},
-        upsert=True,
-    )
-
-    return {
-        "status":         "ok",
-        "total_rutas":    len(grupos),
-        "total_sucursales": len(pedidos_dict),
-        "n_historicos":   n,
-        "reporte":        report_rows,
-        "consolidaciones": consol_log,
-    }
-
-
 def obtener_reporte_vrp(logistica_id: str) -> dict:
     """Devuelve el último reporte VRP generado para la logística activa."""
     oid = _parse_oid(logistica_id)
@@ -1003,6 +819,16 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     if not pedidos_dict:
         return {"status": "error", "mensaje": "No hay sucursales con peso en la extracción."}
 
+    volumenes_dict: dict = {}
+    for _, valores in ext_doc.get("datos_volumen", {}).items():
+        id_suc = valores.get("id_sucursal")
+        vol    = float(valores.get("total_m3") or 0)
+        if id_suc is not None:
+            try:
+                volumenes_dict[int(id_suc)] = vol
+            except (TypeError, ValueError):
+                pass
+
     # Matriz de afinidad: la semana histórica cuyo peso total se parezca más
     # al pedido actual se usa como guía principal de agrupación y orden, por
     # encima de las demás (ver construir_afinidad → factor de similitud de peso).
@@ -1215,7 +1041,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             "vrp_estado":             vrp_estado,
         }
 
-    # ── 8. Guardar en producción y en colecciones _preview para comparar ─────
+    # ── 8. Guardar en producción ─────────────────────────────────────────────
     now_iso = datetime.now().isoformat()
     asig_doc = {
         "logistica_id":    oid,
@@ -1241,22 +1067,6 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
         }},
         upsert=True,
     )
-    # Copia en colecciones _preview para comparar con el algoritmo anterior
-    db["asignaciones_vrp_afinidad_preview"].update_one(
-        {"logistica_id": oid},
-        {"$set": {**asig_doc, "generado_por": "vrp_afinidad_preview"}},
-        upsert=True,
-    )
-    db["vrp_reportes_afinidad"].update_one(
-        {"logistica_id": oid},
-        {"$set": {
-            "logistica_id":    oid,
-            "reporte":         report_rows,
-            "lambda_afinidad": lambda_afinidad,
-            "generado_en":     now_iso,
-        }},
-        upsert=True,
-    )
 
     return {
         "status":            "ok",
@@ -1270,22 +1080,6 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
         "sucursales_copiadas_exactas": len(sids_copiados),
     }
 
-
-def obtener_preview_vrp_afinidad(logistica_id: str) -> dict:
-    """Devuelve el último preview de Clarke-Wright + afinidad (no afecta asignaciones reales)."""
-    oid = _parse_oid(logistica_id)
-    if not oid:
-        return {}
-    try:
-        db  = get_db()
-        doc = db["vrp_reportes_afinidad"].find_one({"logistica_id": oid})
-        if not doc:
-            return {}
-        doc.pop("_id", None)
-        doc["logistica_id"] = str(doc["logistica_id"])
-        return doc
-    except Exception:
-        return {}
 
 
 # ── CSV Export ────────────────────────────────────────────────────────────────

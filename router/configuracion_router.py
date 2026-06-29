@@ -338,50 +338,6 @@ def put_cliente_mayorista_activo(cliente_id):
     return _respuesta(toggle_activo_cliente_mayorista(cliente_id))
 
 
-# ── Utilidad para arreglar índices en la nube ──────────────────
-@configuracion_bp.route("/arreglar-indices-db", methods=["GET"])
-def arreglar_indices_db():
-    from db import get_db
-    db = get_db()
-    resultado = []
-    
-    # --- PRODUCTOS ---
-    try:
-        db.productos.drop_index("clave_sae_1")
-        resultado.append("✅ Índice estricto de productos eliminado.")
-    except Exception as e:
-        resultado.append(f"⚠️ No se pudo eliminar índice de productos. Detalle: {e}")
-
-    try:
-        db.productos.create_index(
-            "clave_sae",
-            unique=True,
-            partialFilterExpression={"clave_sae": {"$type": "number"}}
-        )
-        resultado.append("✅ Índice parcial de productos (clave_sae) creado.")
-    except Exception as e:
-        resultado.append(f"❌ Error al crear índice de productos: {e}")
-
-    # --- SUCURSALES ---
-    try:
-        db.sucursales.drop_index("num_tienda_1")
-        resultado.append("✅ Índice estricto de sucursales eliminado.")
-    except Exception as e:
-        resultado.append(f"⚠️ No se pudo eliminar índice de sucursales. Detalle: {e}")
-
-    try:
-        db.sucursales.create_index(
-            "num_tienda",
-            unique=True,
-            partialFilterExpression={"num_tienda": {"$type": "number"}}
-        )
-        resultado.append("✅ Índice parcial de sucursales creado.")
-    except Exception as e:
-        resultado.append(f"❌ Error al crear índice de sucursales: {e}")
-
-    return jsonify({"mensajes": resultado})
-
-
 # ── Rutas Históricas ───────────────────────────────────────────
 
 @configuracion_bp.route("/rutas-historicas", methods=["GET"])
