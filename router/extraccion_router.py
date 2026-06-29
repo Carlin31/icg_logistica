@@ -29,7 +29,7 @@ def index_perfil(slug):
 
     slug_calculado = logistica.get('slug') or _slugify(logistica['nombre'])
 
-    session['logistica_id']     = logistica['_id']
+    session['logistica_id']     = str(logistica['_id'])
     session['logistica_nombre'] = logistica['nombre']
     session['logistica_slug']   = slug_calculado
     session['logistica_inicio'] = logistica.get('fecha_inicio', '')

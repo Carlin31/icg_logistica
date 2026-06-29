@@ -69,7 +69,7 @@ def index_perfil(slug):
     if not logistica:
         return redirect(url_for("menu.index"))
     slug_calc = logistica.get("slug") or _slugify(logistica["nombre"])
-    session["logistica_id"]     = logistica["_id"]
+    session["logistica_id"]     = str(logistica["_id"])
     session["logistica_nombre"] = logistica["nombre"]
     session["logistica_slug"]   = slug_calc
     session["logistica_inicio"] = logistica.get("fecha_inicio", "")
