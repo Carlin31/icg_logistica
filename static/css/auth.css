@@ -177,11 +177,12 @@
 
 
 /* ================================================================
-   PANTALLA DE SELECCIÓN v3  —  Carrusel full-screen + tarjeta blanca
-   Clases .sel-*  ·  Diseño mobile-first responsive
+   PANTALLA DE SELECCIÓN v3  —  Adaptativo
+   · Móvil     (< 720px): carrusel full-screen + tarjeta blanca centrada
+   · Escritorio (≥ 720px): dos paneles, panel derecho con carrusel
    ================================================================ */
 
-/* ── Orbs animados — reutilizados en la pantalla de login ── */
+/* ── Orbs animados — también usados en la pantalla de login ── */
 .sel-bg {
   position: fixed;
   inset: 0;
@@ -239,7 +240,7 @@
   position: relative;
 }
 
-/* ── Carrusel full-screen (capa de fondo) ── */
+/* ── Carrusel full-screen (fondo en móvil; visible en panel derecho en escritorio) ── */
 .sel-carousel {
   position: fixed;
   inset: 0;
@@ -263,7 +264,7 @@
   to   { transform: scale(1)    translate(-0.4%, 0);   }
 }
 
-/* ── Overlay de legibilidad sobre la imagen ── */
+/* ── Overlay oscuro (solo activo en móvil) ── */
 .sel-overlay {
   position: fixed;
   inset: 0;
@@ -277,30 +278,49 @@
       rgba(10,20,50,0.86) 100%);
 }
 
-/* ── Layout: columna centrada sobre la imagen ── */
+/* ════════════════════════════════════════════════════════════════
+   MÓVIL (base, < 720px) — Carrusel full-screen + tarjeta centrada
+   ════════════════════════════════════════════════════════════════ */
+
+/* Orbs no se necesitan en móvil */
+.sel-bg { display: none; }
+
+/* Layout columna, ocupa toda la pantalla */
 .sel-layout {
   position: relative;
   z-index: 2;
   display: flex;
   flex-direction: column;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+/* Panel izquierdo: en móvil es el contenedor de todo, sin fondo */
+.sel-panel-left {
+  display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  flex: 1;
   min-height: 100vh;
   padding: 36px 20px 40px;
 }
 
-/* ── Brand header (parte superior) ── */
+/* Panel derecho: oculto en móvil */
+.sel-panel-right { display: none; }
+
+/* Brand flotante (blanco sobre la imagen) — solo móvil */
 .sel-header {
   width: 100%;
   max-width: 460px;
-  margin-bottom: 26px;
+  margin-bottom: 24px;
 }
-.sel-brand {
+.sel-brand--over {
   display: flex;
   align-items: center;
   gap: 13px;
 }
-.sel-brand-icon {
+.sel-brand--over .sel-brand-icon {
   flex-shrink: 0;
   width: 44px; height: 44px;
   border-radius: 11px;
@@ -308,20 +328,22 @@
   display: flex; align-items: center; justify-content: center;
   box-shadow: 0 4px 14px rgba(29,78,216,0.42);
 }
-.sel-brand-name {
+.sel-brand--over .sel-brand-name {
   display: block;
   font-size: 0.9rem; font-weight: 800;
-  color: rgba(255,255,255,0.96);
-  letter-spacing: 0.01em;
+  color: rgba(255,255,255,0.96); letter-spacing: 0.01em;
 }
-.sel-brand-sub {
+.sel-brand--over .sel-brand-sub {
   display: block;
-  font-size: 0.64rem;
-  color: rgba(255,255,255,0.52);
+  font-size: 0.64rem; color: rgba(255,255,255,0.52);
   line-height: 1.35; margin-top: 2px;
 }
 
-/* ── Hero / Tagline (título y subtítulo) ── */
+/* Brand dentro de la tarjeta y divisor: ocultos en móvil */
+.sel-brand--card { display: none; }
+.sel-divider     { display: none; }
+
+/* Tagline hero — solo móvil */
 .sel-hero {
   width: 100%;
   max-width: 460px;
@@ -337,13 +359,12 @@
   line-height: 1.15;
 }
 .sel-sub {
-  font-size: 0.79rem;
-  color: rgba(255,255,255,0.58);
+  font-size: 0.79rem; color: rgba(255,255,255,0.58);
   margin: 0; letter-spacing: 0.03em;
   text-shadow: 0 1px 8px rgba(0,0,0,0.38);
 }
 
-/* ── Tarjeta blanca de selección (centro) ── */
+/* Tarjeta blanca centrada — solo móvil */
 .sel-card {
   width: 100%;
   max-width: 440px;
@@ -364,17 +385,15 @@
   to   { opacity: 1; transform: translateY(0); }
 }
 
-.sel-card-title {
-  font-size: 1.22rem; font-weight: 800;
-  color: #0f172a;
-  margin: 0 0 5px; letter-spacing: -0.02em;
+/* Encabezado dentro de la tarjeta */
+.sel-headline   { margin-bottom: 20px; }
+.sel-headline-h {
+  font-size: 1.18rem; font-weight: 800;
+  color: #0f172a; margin: 0 0 5px; letter-spacing: -0.02em;
 }
-.sel-card-sub {
-  font-size: 0.76rem; color: #64748b;
-  margin: 0 0 20px; line-height: 1.5;
-}
+.sel-headline-p { font-size: 0.76rem; color: #64748b; margin: 0; line-height: 1.5; }
 
-/* ── Opciones de acceso ── */
+/* Opciones de acceso (base compartida entre layouts) */
 .sel-opciones {
   display: flex;
   flex-direction: column;
@@ -401,10 +420,8 @@
 }
 .sel-opcion::before {
   content: '';
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 0.22s;
+  position: absolute; inset: 0;
+  opacity: 0; transition: opacity 0.22s;
   border-radius: inherit;
 }
 .sel-opcion--log::before  { background: linear-gradient(135deg, #eff6ff 0%, rgba(239,246,255,0) 100%); }
@@ -417,11 +434,9 @@
 
 .sel-opcion-ico {
   flex-shrink: 0;
-  width: 46px; height: 46px;
-  border-radius: 12px;
+  width: 46px; height: 46px; border-radius: 12px;
   display: flex; align-items: center; justify-content: center;
-  position: relative; z-index: 1;
-  transition: background 0.22s;
+  position: relative; z-index: 1; transition: background 0.22s;
 }
 .sel-opcion--log  .sel-opcion-ico { background: #eff6ff; color: #2563eb; }
 .sel-opcion--cond .sel-opcion-ico { background: #f0fdf4; color: #059669; }
@@ -429,82 +444,260 @@
 .sel-opcion--cond:hover .sel-opcion-ico { background: #dcfce7; }
 
 .sel-opcion-body {
-  flex: 1;
-  display: flex; flex-direction: column; gap: 3px;
+  flex: 1; display: flex; flex-direction: column; gap: 3px;
   position: relative; z-index: 1;
 }
-.sel-opcion-nombre {
-  display: block;
-  font-size: 0.94rem; font-weight: 700;
-  color: #0f172a;
-}
-.sel-opcion-desc {
-  display: block;
-  font-size: 0.71rem; color: #64748b;
-  line-height: 1.4;
-}
-.sel-opcion-arrow {
-  flex-shrink: 0;
-  color: #cbd5e1;
+.sel-opcion-nombre { display: block; font-size: 0.94rem; font-weight: 700; color: #0f172a; }
+.sel-opcion-desc   { display: block; font-size: 0.71rem; color: #64748b; line-height: 1.4; }
+.sel-opcion-arrow  {
+  flex-shrink: 0; color: #cbd5e1;
   transition: transform 0.22s cubic-bezier(0.22,1,0.36,1), opacity 0.22s;
-  opacity: 0.7;
-  position: relative; z-index: 1;
+  opacity: 0.7; position: relative; z-index: 1;
 }
 
-/* ── Pie de la tarjeta ── */
 .sel-footer-txt {
-  font-size: 0.67rem;
-  color: #94a3b8;
-  text-align: center;
-  line-height: 1.5;
-  margin: 0;
+  font-size: 0.67rem; color: #94a3b8;
+  text-align: center; line-height: 1.5; margin: 0;
 }
 
-/* ── Indicadores del carrusel ── */
-.sel-dots {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+/* Dots base */
+.sel-dots { display: flex; gap: 8px; align-items: center; }
+.sel-dots--mob {
   margin-top: 22px;
   animation: sel-fade-up 0.6s 0.25s cubic-bezier(0.22,1,0.36,1) both;
 }
+.sel-dots--desk { display: none; }
 .sel-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
+  width: 7px; height: 7px; border-radius: 50%;
   background: rgba(255,255,255,0.36);
   border: none; cursor: pointer; padding: 0;
   transition: background 0.35s, width 0.35s, border-radius 0.35s;
 }
-.sel-dot.active {
-  width: 22px;
-  border-radius: 4px;
-  background: rgba(255,255,255,0.92);
-}
+.sel-dot.active { width: 22px; border-radius: 4px; background: rgba(255,255,255,0.92); }
 .sel-dot:hover:not(.active) { background: rgba(255,255,255,0.60); }
 
-/* ════════════════════════════════════
-   RESPONSIVE
-   ════════════════════════════════════ */
+/* Ajustes móvil pequeño */
 @media (max-width: 480px) {
-  .sel-layout      { padding: 26px 16px 30px; }
-  .sel-header      { margin-bottom: 20px; }
-  .sel-hero        { margin-bottom: 22px; }
-  .sel-h1          { font-size: 1.7rem; }
-  .sel-sub         { font-size: 0.74rem; }
-  .sel-card        { padding: 22px 18px 20px; border-radius: 18px; }
-  .sel-card-title  { font-size: 1.1rem; }
-  .sel-card-sub    { margin-bottom: 16px; font-size: 0.73rem; }
-  .sel-opcion      { padding: 15px 16px; gap: 12px; }
-  .sel-opcion-ico  { width: 42px; height: 42px; border-radius: 10px; }
+  .sel-panel-left { padding: 26px 16px 30px; }
+  .sel-header     { margin-bottom: 20px; }
+  .sel-hero       { margin-bottom: 22px; }
+  .sel-h1         { font-size: 1.7rem; }
+  .sel-card       { padding: 22px 18px 20px; border-radius: 18px; }
+  .sel-headline   { margin-bottom: 16px; }
+  .sel-headline-h { font-size: 1.08rem; }
+  .sel-opcion     { padding: 15px 16px; gap: 12px; }
+  .sel-opcion-ico { width: 42px; height: 42px; border-radius: 10px; }
   .sel-opcion-nombre { font-size: 0.9rem; }
   .sel-opcion-desc   { font-size: 0.69rem; }
 }
 @media (max-width: 360px) {
-  .sel-layout      { padding: 20px 12px 24px; }
-  .sel-h1          { font-size: 1.45rem; }
-  .sel-card        { padding: 18px 14px 18px; border-radius: 16px; }
-  .sel-opcion      { padding: 13px 14px; gap: 10px; }
-  .sel-opcion-ico  { width: 38px; height: 38px; }
+  .sel-panel-left { padding: 20px 12px 24px; }
+  .sel-h1         { font-size: 1.45rem; }
+  .sel-card       { padding: 18px 14px 18px; border-radius: 16px; }
+  .sel-opcion     { padding: 13px 14px; gap: 10px; }
+  .sel-opcion-ico { width: 38px; height: 38px; }
+}
+
+/* ════════════════════════════════════════════════════════════════
+   ESCRITORIO / LAPTOP (≥ 720px) — Dos paneles
+   ════════════════════════════════════════════════════════════════ */
+@media (min-width: 720px) {
+  /* Fondo suave con orbs; sin overlay oscuro */
+  .sel-body    { overflow: hidden; }
+  .sel-overlay { display: none; }
+  .sel-bg      { display: block; }
+
+  /* Layout en fila */
+  .sel-layout {
+    flex-direction: row;
+    align-items: stretch;
+    min-height: 100vh;
+  }
+
+  /* Panel izquierdo: fondo blanco semitransparente que cubre el carrusel */
+  .sel-panel-left {
+    flex: 0 0 min(460px, 42%);
+    min-height: auto;
+    justify-content: center;
+    padding: 48px 36px;
+    background: rgba(255,255,255,0.80);
+    backdrop-filter: blur(22px);
+    -webkit-backdrop-filter: blur(22px);
+    border-right: 1px solid #e2e8f0;
+    position: relative;
+    z-index: 2;
+  }
+  .sel-panel-left::after {
+    content: '';
+    position: absolute;
+    right: -1px; top: 15%; bottom: 15%;
+    width: 1px;
+    background: linear-gradient(180deg, transparent, rgba(59,130,246,0.45), transparent);
+  }
+
+  /* Elementos solo-móvil: ocultos en escritorio */
+  .sel-header    { display: none; }
+  .sel-hero      { display: none; }
+  .sel-dots--mob { display: none; }
+
+  /* Tarjeta: sin estilos visuales (el panel blanco es el fondo) */
+  .sel-card {
+    max-width: 380px;
+    background: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    border-radius: 0;
+    box-shadow: none;
+    padding: 0;
+    animation: sel-fade-up 0.5s cubic-bezier(0.22,1,0.36,1) both;
+  }
+
+  /* Brand dentro de la tarjeta: visible en escritorio */
+  .sel-brand--card {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    margin-bottom: 28px;
+  }
+  .sel-brand--card .sel-brand-icon {
+    flex-shrink: 0;
+    width: 44px; height: 44px; border-radius: 11px;
+    background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(29,78,216,0.28);
+  }
+  .sel-brand--card .sel-brand-name {
+    display: block;
+    font-size: 0.9rem; font-weight: 800;
+    color: #0f172a; letter-spacing: 0.01em;
+  }
+  .sel-brand--card .sel-brand-sub {
+    display: block;
+    font-size: 0.65rem; color: #64748b;
+    line-height: 1.35; margin-top: 2px;
+  }
+
+  /* Divisor */
+  .sel-divider {
+    display: block;
+    height: 1px;
+    background: linear-gradient(90deg, rgba(59,130,246,0.3), #e2e8f0 50%, transparent);
+    margin-bottom: 28px;
+  }
+
+  /* Encabezado: tamaño escritorio */
+  .sel-headline   { margin-bottom: 28px; }
+  .sel-headline-h {
+    font-size: 1.6rem; font-weight: 800;
+    color: #0f172a; line-height: 1.2;
+    margin: 0 0 7px; letter-spacing: -0.02em;
+  }
+  .sel-headline-p { font-size: 0.8rem; color: #64748b; }
+
+  /* Opciones más espaciosas */
+  .sel-opciones   { gap: 14px; margin-bottom: 30px; }
+  .sel-opcion     { padding: 20px 22px; gap: 16px; border-radius: 16px; }
+  .sel-opcion:hover { transform: translateY(-3px); }
+  .sel-opcion--log:hover  { box-shadow: 0 8px 28px rgba(59,130,246,0.12); }
+  .sel-opcion--cond:hover { box-shadow: 0 8px 28px rgba(16,185,129,0.10); }
+  .sel-opcion-ico     { width: 46px; height: 46px; border-radius: 12px; }
+  .sel-opcion-nombre  { font-size: 0.95rem; }
+  .sel-opcion-desc    { font-size: 0.72rem; }
+
+  /* Panel derecho: transparente, el carrusel fixed muestra detrás */
+  .sel-panel-right {
+    flex: 1;
+    display: flex;
+    align-items: stretch;
+    position: relative;
+    overflow: hidden;
+  }
+  .sel-panel-right::before {
+    content: '';
+    position: absolute; inset: 0; z-index: 1;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 52px 52px;
+    pointer-events: none;
+  }
+
+  /* Overlay del carrusel (fusión lateral + capas de contraste) */
+  .sel-carousel-overlay {
+    position: absolute; inset: 0; z-index: 2;
+    pointer-events: none;
+    background:
+      linear-gradient(90deg, rgba(248,250,252,0.55) 0%, transparent 22%),
+      linear-gradient(0deg, rgba(12,22,70,0.96) 0%, rgba(12,22,70,0.38) 28%, transparent 55%),
+      linear-gradient(180deg, rgba(30,58,138,0.68) 0%, transparent 30%),
+      linear-gradient(270deg, rgba(30,58,138,0.32) 0%, transparent 20%),
+      rgba(12,22,70,0.36);
+  }
+
+  /* Contenido del panel derecho */
+  .sel-ilus {
+    position: relative; z-index: 3;
+    width: 100%;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: space-between;
+    padding: 52px 40px 44px;
+  }
+  .sel-tagline {
+    text-align: center;
+    animation: sel-fade-up 0.55s 0.1s cubic-bezier(0.22,1,0.36,1) both;
+  }
+  .sel-tagline-h2 {
+    font-size: 2rem; font-weight: 800;
+    color: rgba(255,255,255,0.96);
+    margin: 0 0 10px; letter-spacing: -0.03em;
+    text-shadow: 0 2px 18px rgba(0,0,0,0.35);
+  }
+  .sel-tagline-p {
+    font-size: 0.78rem; color: rgba(255,255,255,0.55);
+    margin: 0; letter-spacing: 0.03em;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.3);
+  }
+  .sel-bottom-group {
+    display: flex; flex-direction: column;
+    align-items: center; gap: 16px;
+    animation: sel-fade-up 0.6s 0.2s cubic-bezier(0.22,1,0.36,1) both;
+  }
+  .sel-features {
+    display: flex; flex-wrap: wrap; gap: 10px; justify-content: center;
+  }
+  .sel-feat {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 15px; border-radius: 100px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.2);
+    color: rgba(255,255,255,0.72);
+    font-size: 0.71rem; font-weight: 600; letter-spacing: 0.01em;
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    transition: background 0.2s, color 0.2s, border-color 0.2s;
+    cursor: default;
+  }
+  .sel-feat:hover {
+    background: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.38);
+    color: rgba(255,255,255,0.96);
+  }
+  .sel-feat svg { flex-shrink: 0; }
+
+  /* Dots escritorio */
+  .sel-dots--desk {
+    display: flex;
+    animation: sel-fade-up 0.6s 0.22s cubic-bezier(0.22,1,0.36,1) both;
+  }
+  .sel-dots--desk .sel-dot { background: rgba(255,255,255,0.3); }
+  .sel-dots--desk .sel-dot.active { background: rgba(255,255,255,0.9); }
+  .sel-dots--desk .sel-dot:hover:not(.active) { background: rgba(255,255,255,0.58); }
+}
+
+/* Tablet intermedia */
+@media (min-width: 720px) and (max-width: 900px) {
+  .sel-panel-left { padding: 40px 28px; flex-basis: min(400px, 44%); }
+  .sel-tagline-h2 { font-size: 1.65rem; }
+  .sel-ilus       { padding: 44px 28px 36px; }
 }
 
 /* ================================================================
