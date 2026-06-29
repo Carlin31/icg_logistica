@@ -283,18 +283,19 @@
    MÓVIL (base, < 720px) — Carrusel full-screen + tarjeta centrada
    ════════════════════════════════════════════════════════════════ */
 
-/* Layout columna, ocupa toda la pantalla */
+/* Layout columna, ocupa toda la pantalla — sin z-index para no crear un stacking context que engulla al panel-right */
 .sel-layout {
   position: relative;
-  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: stretch;
   min-height: 100vh;
 }
 
-/* Panel izquierdo: en móvil es el contenedor de todo, sin fondo */
+/* Panel izquierdo: z-index alto en su propio contexto, encima del overlay (z-index:1) y del carrusel (z-index:0) */
 .sel-panel-left {
+  position: relative;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -572,12 +573,13 @@
   .sel-opcion-nombre  { font-size: 0.95rem; }
   .sel-opcion-desc    { font-size: 0.72rem; }
 
-  /* Panel derecho: en escritorio vuelve al flujo; el carrusel dentro ocupa todo el panel */
+  /* Panel derecho: en escritorio vuelve al flujo; z-index propio para contener el carousel-overlay y sel-ilus */
   .sel-panel-right {
     flex: 1;
     display: flex;
     align-items: stretch;
     position: relative;
+    z-index: 1;
     overflow: hidden;
   }
   .sel-panel-right::before {
