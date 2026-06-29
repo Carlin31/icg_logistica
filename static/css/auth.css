@@ -238,6 +238,7 @@
   overflow-x: hidden;
   overflow-y: auto;
   position: relative;
+  background: #0d1b3e; /* fondo oscuro antes de que cargue el carrusel */
 }
 
 /* ── Carrusel full-screen (fondo en móvil; visible en panel derecho en escritorio) ── */
@@ -309,39 +310,34 @@
 /* Panel derecho: oculto en móvil */
 .sel-panel-right { display: none; }
 
-/* Brand flotante (blanco sobre la imagen) — solo móvil */
-.sel-header {
-  width: 100%;
-  max-width: 460px;
-  margin-bottom: 24px;
-}
-.sel-brand--over {
+/* Header flotante: oculto (brand se mueve dentro del recuadro blanco) */
+.sel-header { display: none; }
+
+/* Brand dentro de la tarjeta: visible en móvil y escritorio */
+.sel-brand--card {
   display: flex;
   align-items: center;
   gap: 13px;
+  margin-bottom: 20px;
 }
-.sel-brand--over .sel-brand-icon {
+.sel-brand--card .sel-brand-icon {
   flex-shrink: 0;
-  width: 44px; height: 44px;
-  border-radius: 11px;
+  width: 44px; height: 44px; border-radius: 11px;
   background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
   display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 4px 14px rgba(29,78,216,0.42);
+  box-shadow: 0 4px 14px rgba(29,78,216,0.28);
 }
-.sel-brand--over .sel-brand-name {
+.sel-brand--card .sel-brand-name {
   display: block;
   font-size: 0.9rem; font-weight: 800;
-  color: rgba(255,255,255,0.96); letter-spacing: 0.01em;
+  color: #0f172a; letter-spacing: 0.01em;
 }
-.sel-brand--over .sel-brand-sub {
+.sel-brand--card .sel-brand-sub {
   display: block;
-  font-size: 0.64rem; color: rgba(255,255,255,0.52);
+  font-size: 0.65rem; color: #64748b;
   line-height: 1.35; margin-top: 2px;
 }
-
-/* Brand dentro de la tarjeta y divisor: ocultos en móvil */
-.sel-brand--card { display: none; }
-.sel-divider     { display: none; }
+.sel-divider { display: none; }
 
 /* Tagline hero — solo móvil */
 .sel-hero {
@@ -552,30 +548,8 @@
     animation: sel-fade-up 0.5s cubic-bezier(0.22,1,0.36,1) both;
   }
 
-  /* Brand dentro de la tarjeta: visible en escritorio */
-  .sel-brand--card {
-    display: flex;
-    align-items: center;
-    gap: 13px;
-    margin-bottom: 28px;
-  }
-  .sel-brand--card .sel-brand-icon {
-    flex-shrink: 0;
-    width: 44px; height: 44px; border-radius: 11px;
-    background: linear-gradient(135deg, #1d4ed8 0%, #3b82f6 100%);
-    display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 14px rgba(29,78,216,0.28);
-  }
-  .sel-brand--card .sel-brand-name {
-    display: block;
-    font-size: 0.9rem; font-weight: 800;
-    color: #0f172a; letter-spacing: 0.01em;
-  }
-  .sel-brand--card .sel-brand-sub {
-    display: block;
-    font-size: 0.65rem; color: #64748b;
-    line-height: 1.35; margin-top: 2px;
-  }
+  /* Brand: mayor separación en escritorio */
+  .sel-brand--card { margin-bottom: 28px; }
 
   /* Divisor */
   .sel-divider {
