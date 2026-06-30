@@ -49,6 +49,42 @@ function _onUnidadChange(sel) {
   sel.value = nueva;
 }
 
+function _renderListaUnidades() {
+  if (!UNIDADES_MEDIDA.length) return `<p class="cfg-unidades-vacio">Sin unidades definidas.</p>`;
+  return `<ul class="cfg-unidades-lista">${
+    UNIDADES_MEDIDA.map(u => `
+      <li>
+        <span>${h(u)}</span>
+        <button type="button" class="cfg-unidades-del" onclick="_eliminarUnidad('${h(u)}')" title="Eliminar">×</button>
+      </li>`).join("")
+  }</ul>`;
+}
+
+function _toggleGestionarUnidades() {
+  const panel = document.getElementById("panel-gestionar-unidades");
+  if (!panel) return;
+  const visible = panel.style.display !== "none";
+  panel.style.display = visible ? "none" : "block";
+  if (!visible) panel.innerHTML = _renderListaUnidades();
+}
+
+function _eliminarUnidad(unidad) {
+  const idx = UNIDADES_MEDIDA.indexOf(unidad);
+  if (idx === -1) return;
+  UNIDADES_MEDIDA.splice(idx, 1);
+  localStorage.setItem("icg_unidades", JSON.stringify(UNIDADES_MEDIDA));
+  const sel = document.getElementById("modal-field-unidad_medida");
+  if (sel) {
+    const current = sel.value === unidad ? "" : sel.value;
+    sel.innerHTML = `<option value="">— Seleccionar —</option>
+      ${_opcionesUnidad(current)}
+      <option value="__nueva__">+ Agregar nueva unidad…</option>`;
+    sel.value = current;
+  }
+  const panel = document.getElementById("panel-gestionar-unidades");
+  if (panel) panel.innerHTML = _renderListaUnidades();
+}
+
 // Esquemas alineados con MongoDB (¡AQUÍ SE AGREGAN LOS CAMPOS PARA EL MODAL!)
 const CAMPOS_PRODUCTO_ICG = [
   { key: "clave_sae",      label: "Clave SAE",         type: "number" },
@@ -826,12 +862,15 @@ async function abrirModal(mode, tipo, docId = null) {
     if (c.type === "select" && c.key === "unidad_medida") {
       return `
       <div class="form-group">
-        <label>${h(c.label)}</label>
+        <label>${h(c.label)}
+          <button type="button" class="cfg-unidades-btn-gestionar" onclick="_toggleGestionarUnidades()">Gestionar unidades</button>
+        </label>
         <select name="${c.key}" class="form-control" id="modal-field-${c.key}" onchange="_onUnidadChange(this)">
           <option value="">— Seleccionar —</option>
           ${_opcionesUnidad(existente[c.key] || "")}
           <option value="__nueva__">+ Agregar nueva unidad…</option>
         </select>
+        <div id="panel-gestionar-unidades" class="cfg-unidades-panel" style="display:none"></div>
       </div>`;
     }
     return `
