@@ -560,12 +560,47 @@ function debounceCarga(tipo) {
 }
 
 function initTabs() {
+  const dropdownLi  = document.getElementById("nav-dropdown-productos");
+  const dropdownBtn = document.getElementById("btn-nav-dropdown-productos");
+
+  // Toggle del dropdown "Productos"
+  if (dropdownLi && dropdownBtn) {
+    dropdownBtn.addEventListener("click", e => {
+      e.preventDefault();
+      const isOpen = dropdownLi.classList.toggle("open");
+      dropdownBtn.setAttribute("aria-expanded", isOpen);
+    });
+    document.addEventListener("click", e => {
+      if (!dropdownLi.contains(e.target)) {
+        dropdownLi.classList.remove("open");
+        dropdownBtn.setAttribute("aria-expanded", "false");
+      }
+    });
+  }
+
   document.querySelectorAll(".nav-tabs a").forEach(a => {
     a.addEventListener("click", e => {
       e.preventDefault();
-      document.querySelectorAll(".nav-tabs li").forEach(li => li.classList.remove("active"));
+      // Cerrar dropdown
+      dropdownLi?.classList.remove("open");
+      dropdownBtn?.setAttribute("aria-expanded", "false");
+
+      // Quitar activo de todos los items
+      document.querySelectorAll(".nav-tabs > li:not(.nav-tab-dropdown)").forEach(li => li.classList.remove("active"));
+      if (dropdownLi) {
+        dropdownLi.classList.remove("active");
+        dropdownLi.querySelectorAll("li").forEach(li => li.classList.remove("active"));
+      }
       document.querySelectorAll(".tab-content").forEach(s => s.classList.add("hidden"));
-      a.parentElement.classList.add("active");
+
+      // Activar el item correcto
+      if (dropdownLi?.contains(a)) {
+        a.parentElement.classList.add("active");
+        dropdownLi.classList.add("active");
+      } else {
+        a.parentElement.classList.add("active");
+      }
+
       const target = document.getElementById("tab-" + a.dataset.tab);
       if (target) target.classList.remove("hidden");
     });

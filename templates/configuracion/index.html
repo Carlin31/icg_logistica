@@ -16,9 +16,16 @@
 
   <ul class="nav-tabs" id="config-tabs">
     <li class="active"><a href="#tab-general"    data-tab="general">General</a></li>
-    <li><a href="#tab-icg"                 data-tab="icg">ICG</a></li>
-    <li><a href="#tab-proalmex"            data-tab="proalmex">Proalmex</a></li>
-    <li><a href="#tab-bimbo"              data-tab="bimbo">Bimbo</a></li>
+    <li class="nav-tab-dropdown" id="nav-dropdown-productos">
+      <button class="nav-tab-dropdown__btn" id="btn-nav-dropdown-productos" aria-haspopup="true" aria-expanded="false">
+        Productos <i data-lucide="chevron-down" class="nav-tab-dropdown__chevron"></i>
+      </button>
+      <ul class="nav-tab-dropdown__menu">
+        <li><a href="#tab-icg"      data-tab="icg">ICG</a></li>
+        <li><a href="#tab-proalmex" data-tab="proalmex">Proalmex</a></li>
+        <li><a href="#tab-bimbo"    data-tab="bimbo">Bimbo</a></li>
+      </ul>
+    </li>
     <li><a href="#tab-sucursales"          data-tab="sucursales">Sucursales</a></li>
     <li><a href="#tab-vehiculos"           data-tab="vehiculos">Vehículos</a></li>
     <li><a href="#tab-clientes-mayoristas" data-tab="clientes-mayoristas">Clientes Mayoristas</a></li>
