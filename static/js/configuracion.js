@@ -21,15 +21,17 @@ function getEndpoint(tipo) {
 
 // Esquemas alineados con MongoDB (¡AQUÍ SE AGREGAN LOS CAMPOS PARA EL MODAL!)
 const CAMPOS_PRODUCTO_ICG = [
-  { key: "marca",       label: "Marca",        type: "text"   },
-  { key: "clave_sae",   label: "Clave SAE",    type: "number" },
-  { key: "descripcion", label: "Descripción",  type: "text"   },
-  { key: "costo",       label: "Costo",        type: "number" },
-  { key: "peso",        label: "Peso (kg)",    type: "number", step: "1", min: "0" },
-  { key: "largo",       label: "Largo (cm)",   type: "number" },
-  { key: "ancho",       label: "Ancho (cm)",   type: "number" },
-  { key: "alto",        label: "Alto (cm)",    type: "number" },
-  { key: "volumen",     label: "Volumen (m³)", type: "number", readonly: true },
+  { key: "clave_sae",      label: "Clave SAE",         type: "number" },
+  { key: "codigo_barras",  label: "Código de Barras",  type: "text"   },
+  { key: "marca",          label: "Marca",             type: "text"   },
+  { key: "descripcion",    label: "Descripción",       type: "text"   },
+  { key: "unidad_medida",  label: "Unidad de Medida",  type: "text"   },
+  { key: "costo",          label: "Costo",             type: "number" },
+  { key: "peso",           label: "Peso (kg)",         type: "number", step: "1", min: "0" },
+  { key: "largo",          label: "Largo (cm)",        type: "number" },
+  { key: "ancho",          label: "Ancho (cm)",        type: "number" },
+  { key: "alto",           label: "Alto (cm)",         type: "number" },
+  { key: "volumen",        label: "Volumen (m³)",      type: "number", readonly: true },
 ];
 
 const CAMPOS_PRODUCTO_PROALMEX = [
@@ -620,7 +622,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 11, producto_proalmex: 7, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
+      const cols = { producto: 13, producto_proalmex: 7, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -628,9 +630,11 @@ async function cargarDatos(tipo) {
     if (tipo === "producto") {
       tbody.innerHTML = data.map(p => `
         <tr>
-          <td>${h(p.marca)}</td>
           <td>${p.clave_sae ?? ""}</td>
+          <td>${h(p.codigo_barras ?? "")}</td>
+          <td>${h(p.marca)}</td>
           <td>${h(p.descripcion)}</td>
+          <td>${h(p.unidad_medida ?? "")}</td>
           <td>$${Number(p.costo || 0).toFixed(2)}</td>
           <td>${p.peso ?? ""} kg</td>
           <td>${p.largo ?? ""}</td>
