@@ -236,7 +236,22 @@ def _eliminar(coleccion: str, doc_id: str) -> dict:
     return {"status": "ok"}
 
 # ── Funciones de Dominio (Productos, Sucursales, Vehículos) ──
-def listar_productos(nombre: str = "", fecha: str = ""): return _listar("productos", ["descripcion", "marca"], nombre, fecha, "marca")
+def listar_productos(nombre: str = "", fecha: str = "") -> list:
+    db    = get_db()
+    query: dict = {}
+    if nombre:
+        or_conds = [
+            {"descripcion": {"$regex": nombre, "$options": "i"}},
+            {"marca":       {"$regex": nombre, "$options": "i"}},
+        ]
+        try:
+            or_conds.append({"clave_sae": int(nombre)})
+        except (ValueError, TypeError):
+            pass
+        query["$or"] = or_conds
+    if fecha:
+        query["ultima_modificacion"] = {"$regex": f"^{fecha}"}
+    return [_serialize(doc) for doc in db["productos"].find(query).sort("marca", 1)]
 def obtener_producto(producto_id: str): return _obtener("productos", producto_id)
 
 def buscar_producto_por_clave(clave_sae) -> dict | None:
