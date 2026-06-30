@@ -351,6 +351,10 @@ html, body {
   font-size: .7rem; color: rgba(255,255,255,.16);
   letter-spacing: .06em; text-transform: uppercase; z-index: 1;
 }
+.fl-overlay .hdr-icon {
+  filter: invert(1) brightness(1);
+  display: block; flex-shrink: 0;
+}
 
 /* ── Historial de rutas completadas ── */
 #cd-historial-section { margin: 0 12px 20px; }
