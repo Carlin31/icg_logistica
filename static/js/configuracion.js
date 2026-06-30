@@ -697,6 +697,15 @@ function initTabs() {
 }
 
 // ── CRUD ─────────────────────────────────────────────────────
+function _volIcg(p) {
+  const v = ((parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.alto) || 0)) / 1_000_000;
+  return v > 0 ? v.toFixed(6) : "—";
+}
+function _volBimbo(p) {
+  const v = ((parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.altura) || 0)) / 1_000_000;
+  return v > 0 ? v.toFixed(6) : "—";
+}
+
 async function cargarDatos(tipo) {
   const nombre = document.getElementById(`buscar-${tipo}-nombre`).value;
   const fecha  = document.getElementById(`buscar-${tipo}-fecha`).value;
@@ -727,7 +736,7 @@ async function cargarDatos(tipo) {
           <td>${p.largo ?? ""}</td>
           <td>${p.ancho ?? ""}</td>
           <td>${p.alto ?? ""}</td>
-          <td>${p.volumen != null && p.volumen !== 0 ? Number(p.volumen).toFixed(6) : "—"}</td>
+          <td>${_volIcg(p)}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
@@ -757,7 +766,7 @@ async function cargarDatos(tipo) {
           <td>${p.altura ?? ""}</td>
           <td>${p.ancho  ?? ""}</td>
           <td>${p.largo  ?? ""}</td>
-          <td>${p.volumen != null && p.volumen !== 0 ? Number(p.volumen).toFixed(6) : "—"}</td>
+          <td>${_volBimbo(p)}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
