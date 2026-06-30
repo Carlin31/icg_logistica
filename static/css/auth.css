@@ -64,8 +64,10 @@
 
 .auth-card {
   background-color: var(--blanco);
-  background-image: radial-gradient(circle, rgba(37,99,235,0.065) 1.5px, transparent 1.5px);
-  background-size: 22px 22px;
+  background-image:
+    linear-gradient(rgba(37,99,235,0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37,99,235,0.1) 1px, transparent 1px);
+  background-size: 24px 24px;
   border-radius: var(--radio-lg);
   box-shadow: var(--sombra-xl);
   padding: 32px 30px 26px;
@@ -371,8 +373,10 @@
   width: 100%;
   max-width: 440px;
   background-color: rgba(255,255,255,0.97);
-  background-image: radial-gradient(circle, rgba(37,99,235,0.065) 1.5px, transparent 1.5px);
-  background-size: 22px 22px;
+  background-image:
+    linear-gradient(rgba(37,99,235,0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37,99,235,0.1) 1px, transparent 1px);
+  background-size: 24px 24px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-radius: 22px;
