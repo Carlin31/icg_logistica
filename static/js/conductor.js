@@ -398,7 +398,7 @@ async function confirmarEntregaPendiente() {
   cerrarConfirm();
 
   try {
-    mostrarOpLoader("Registrando entrega…");
+    Loader.show("Registrando entrega…");
     const res = await fetch("/conductor/api/marcar-entrega", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -424,7 +424,7 @@ async function confirmarEntregaPendiente() {
     console.error("[confirmarEntregaPendiente]", err);
     mostrarToastConductor("Error de conexión al registrar la entrega.", "error");
   } finally {
-    ocultarOpLoader();
+    Loader.hide();
   }
 }
 
@@ -449,7 +449,7 @@ async function confirmarCancelarPendiente() {
   cerrarConfirmCancelar();
 
   try {
-    mostrarOpLoader("Cancelando entrega…");
+    Loader.show("Cancelando entrega…");
     const res = await fetch("/conductor/api/marcar-entrega", {
       method:  "POST",
       headers: { "Content-Type": "application/json" },
@@ -474,21 +474,42 @@ async function confirmarCancelarPendiente() {
     console.error("[confirmarCancelarPendiente]", err);
     mostrarToastConductor("Error de conexión al cancelar la entrega.", "error");
   } finally {
-    ocultarOpLoader();
+    Loader.hide();
   }
 }
 
-// ── Loader de operación ──────────────────────────────────────────
-function mostrarOpLoader(texto) {
-  const el  = document.getElementById("cd-op-loader");
-  const txt = document.getElementById("cd-op-loader-txt");
-  if (txt) txt.textContent = texto || "Procesando…";
-  if (el)  el.classList.remove("hidden");
-}
-function ocultarOpLoader() {
-  const el = document.getElementById("cd-op-loader");
-  if (el) el.classList.add("hidden");
-}
+// ── Loader del sistema ───────────────────────────────────────────
+const Loader = (() => {
+  let _rotTimer = null;
+  function show(titulo, mensajes = []) {
+    const overlay = document.getElementById("fl-overlay");
+    const title   = document.getElementById("fl-title");
+    const msg     = document.getElementById("fl-msg");
+    if (!overlay) return;
+    clearInterval(_rotTimer);
+    title.textContent = titulo;
+    msg.textContent   = mensajes[0] || "";
+    msg.classList.remove("fl-fade");
+    overlay.classList.add("fl-visible");
+    if (mensajes.length > 1) {
+      let idx = 0;
+      _rotTimer = setInterval(() => {
+        idx = (idx + 1) % mensajes.length;
+        msg.classList.add("fl-fade");
+        setTimeout(() => {
+          msg.textContent = mensajes[idx];
+          msg.classList.remove("fl-fade");
+        }, 350);
+      }, 2600);
+    }
+  }
+  function hide() {
+    clearInterval(_rotTimer);
+    const overlay = document.getElementById("fl-overlay");
+    if (overlay) overlay.classList.remove("fl-visible");
+  }
+  return { show, hide };
+})();
 
 // ── Utilidades ───────────────────────────────────────────────────
 function h(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
