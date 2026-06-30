@@ -12,7 +12,7 @@ ID_CAMPO = {
 }
 
 # Colecciones cuyo campo ID se almacena como entero (las demás se tratan como string)
-_ID_NUMERICO = {"productos", "sucursales", "clientes_mayoristas"}
+_ID_NUMERICO = {"sucursales", "clientes_mayoristas"}
 
 def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | None:
     """
@@ -244,6 +244,7 @@ def listar_productos(nombre: str = "", fecha: str = "") -> list:
             {"descripcion": {"$regex": nombre, "$options": "i"}},
             {"marca":       {"$regex": nombre, "$options": "i"}},
         ]
+        or_conds.append({"clave_sae": {"$regex": nombre, "$options": "i"}})
         try:
             or_conds.append({"clave_sae": int(nombre)})
         except (ValueError, TypeError):
@@ -255,12 +256,16 @@ def listar_productos(nombre: str = "", fecha: str = "") -> list:
 def obtener_producto(producto_id: str): return _obtener("productos", producto_id)
 
 def buscar_producto_por_clave(clave_sae) -> dict | None:
-    try:
-        clave = int(clave_sae)
-    except (ValueError, TypeError):
+    clave_str = str(clave_sae).strip() if clave_sae else ""
+    if not clave_str:
         return None
     db  = get_db()
-    doc = db["productos"].find_one({"clave_sae": clave})
+    doc = db["productos"].find_one({"clave_sae": clave_str})
+    if not doc:
+        try:
+            doc = db["productos"].find_one({"clave_sae": int(clave_str)})
+        except (ValueError, TypeError):
+            pass
     return _serialize(doc) if doc else None
 def agregar_producto(datos: dict): return _agregar("productos", datos)
 def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)

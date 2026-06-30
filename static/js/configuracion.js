@@ -108,7 +108,7 @@ function _eliminarUnidad(unidad) {
 
 // Esquemas alineados con MongoDB (¡AQUÍ SE AGREGAN LOS CAMPOS PARA EL MODAL!)
 const CAMPOS_PRODUCTO_ICG = [
-  { key: "clave_sae",      label: "Clave SAE",         type: "number" },
+  { key: "clave_sae",      label: "Clave SAE",         type: "text"   },
   { key: "codigo_barras",  label: "Código de Barras",  type: "text"   },
   { key: "marca",          label: "Marca",             type: "text"   },
   { key: "descripcion",    label: "Descripción",       type: "text"   },
