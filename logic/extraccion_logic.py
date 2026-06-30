@@ -86,14 +86,14 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
         pd.to_numeric(df_productos['peso'] if 'peso' in df_productos.columns else pd.Series(dtype=float),
                       errors='coerce').fillna(0)
     )
-    # Recalcular volumen desde las dimensiones actuales (largo, ancho, alto en cm)
+    # Recalcular volumen desde las dimensiones actuales (largo, ancho, alto en metros)
     for _dim in ('largo', 'ancho', 'alto'):
         df_productos[_dim] = pd.to_numeric(
             df_productos[_dim] if _dim in df_productos.columns else pd.Series(dtype=float),
             errors='coerce'
         ).fillna(0)
     df_productos['volumen'] = (
-        df_productos['largo'] * df_productos['ancho'] * df_productos['alto'] / 1_000_000
+        df_productos['largo'] * df_productos['ancho'] * df_productos['alto']
     ).round(6)
 
     # ── 2. Mapas de sucursales ───────────────────────────────────────────────

@@ -115,9 +115,9 @@ const CAMPOS_PRODUCTO_ICG = [
   { key: "unidad_medida",  label: "Unidad de Medida",  type: "select" },
   { key: "costo",          label: "Costo",             type: "number" },
   { key: "peso",           label: "Peso (kg)",         type: "number", step: "1", min: "0" },
-  { key: "largo",          label: "Largo (cm)",        type: "number" },
-  { key: "ancho",          label: "Ancho (cm)",        type: "number" },
-  { key: "alto",           label: "Alto (cm)",         type: "number" },
+  { key: "largo",          label: "Largo (m)",         type: "number" },
+  { key: "ancho",          label: "Ancho (m)",         type: "number" },
+  { key: "alto",           label: "Alto (m)",          type: "number" },
   { key: "volumen",        label: "Volumen (m³)",      type: "number", readonly: true },
 ];
 
@@ -158,9 +158,9 @@ const CAMPOS_PRODUCTO_BIMBO = [
   { key: "codigo_barra", label: "Código de Barra", type: "text"   },
   { key: "descripcion",  label: "Descripción",     type: "text"   },
   { key: "peso",         label: "Peso (kg)",        type: "number", step: "any", min: "0" },
-  { key: "altura",       label: "Altura (cm)",      type: "number" },
-  { key: "ancho",        label: "Ancho (cm)",       type: "number" },
-  { key: "largo",        label: "Largo (cm)",       type: "number" },
+  { key: "altura",       label: "Altura (m)",       type: "number" },
+  { key: "ancho",        label: "Ancho (m)",        type: "number" },
+  { key: "largo",        label: "Largo (m)",        type: "number" },
   { key: "volumen",      label: "Volumen (m³)",     type: "number", readonly: true },
 ];
 
@@ -698,11 +698,11 @@ function initTabs() {
 
 // ── CRUD ─────────────────────────────────────────────────────
 function _volIcg(p) {
-  const v = ((parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.alto) || 0)) / 1_000_000;
+  const v = (parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.alto) || 0);
   return v > 0 ? v.toFixed(6) : "—";
 }
 function _volBimbo(p) {
-  const v = ((parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.altura) || 0)) / 1_000_000;
+  const v = (parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.altura) || 0);
   return v > 0 ? v.toFixed(6) : "—";
 }
 
@@ -998,7 +998,7 @@ function _actualizarVolumenModal() {
   const ancho = parseFloat(document.getElementById('modal-field-ancho')?.value) || 0;
   const alto  = parseFloat(document.getElementById('modal-field-alto')?.value)  || 0;
   const volEl = document.getElementById('modal-field-volumen');
-  if (volEl) volEl.value = ((largo * ancho * alto) / 1_000_000).toFixed(6);
+  if (volEl) volEl.value = (largo * ancho * alto).toFixed(6);
 }
 
 function _actualizarVolumenBimboModal() {
@@ -1006,7 +1006,7 @@ function _actualizarVolumenBimboModal() {
   const ancho  = parseFloat(document.getElementById('modal-field-ancho')?.value)  || 0;
   const altura = parseFloat(document.getElementById('modal-field-altura')?.value) || 0;
   const volEl  = document.getElementById('modal-field-volumen');
-  if (volEl) volEl.value = ((largo * ancho * altura) / 1_000_000).toFixed(6);
+  if (volEl) volEl.value = (largo * ancho * altura).toFixed(6);
 }
 
 function _actualizarVolumenVehiculoModal() {

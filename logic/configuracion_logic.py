@@ -83,22 +83,22 @@ def guardar_configuracion(datos: dict) -> dict:
 
 # ── Helpers de dominio ─────────────────────────────────────
 def _calcular_volumen_producto(datos: dict) -> float:
-    """Calcula volumen (m³) a partir de largo, ancho, alto en cm."""
+    """Calcula volumen (m³) a partir de largo, ancho, alto en metros."""
     try:
         largo = float(datos.get('largo') or 0)
         ancho = float(datos.get('ancho') or 0)
         alto  = float(datos.get('alto')  or 0)
-        return round((largo * ancho * alto) / 1_000_000, 6)
+        return round(largo * ancho * alto, 6)
     except (TypeError, ValueError):
         return 0.0
 
 def _calcular_volumen_bimbo(datos: dict) -> float:
-    """Calcula volumen (m³) a partir de largo, ancho, altura en cm."""
+    """Calcula volumen (m³) a partir de largo, ancho, altura en metros."""
     try:
         largo  = float(datos.get('largo')  or 0)
         ancho  = float(datos.get('ancho')  or 0)
         altura = float(datos.get('altura') or 0)
-        return round((largo * ancho * altura) / 1_000_000, 6)
+        return round(largo * ancho * altura, 6)
     except (TypeError, ValueError):
         return 0.0
 
