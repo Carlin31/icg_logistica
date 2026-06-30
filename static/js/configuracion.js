@@ -19,13 +19,43 @@ function getEndpoint(tipo) {
   return tipo + "s";
 }
 
+// ── Unidades de medida ICG ────────────────────────────────────────
+const _UNIDADES_DEFAULT = ["PZA", "KG", "LT", "CAJA", "BULTO", "COSTAL", "ROLLO", "PAQUETE", "BOLSA", "TONELADA"];
+let UNIDADES_MEDIDA = (() => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("icg_unidades") || "null");
+    if (Array.isArray(saved) && saved.length) return saved;
+  } catch {}
+  return [..._UNIDADES_DEFAULT];
+})();
+
+function _opcionesUnidad(actual) {
+  return UNIDADES_MEDIDA.map(u =>
+    `<option value="${h(u)}"${u === actual ? " selected" : ""}>${h(u)}</option>`
+  ).join("");
+}
+
+function _onUnidadChange(sel) {
+  if (sel.value !== "__nueva__") return;
+  const nueva = prompt("Nueva unidad de medida (ej. PZA, KG, LT):")?.trim().toUpperCase();
+  if (!nueva) { sel.value = ""; return; }
+  if (!UNIDADES_MEDIDA.includes(nueva)) {
+    UNIDADES_MEDIDA.push(nueva);
+    localStorage.setItem("icg_unidades", JSON.stringify(UNIDADES_MEDIDA));
+    const opt = document.createElement("option");
+    opt.value = nueva; opt.textContent = nueva;
+    sel.insertBefore(opt, sel.lastElementChild);
+  }
+  sel.value = nueva;
+}
+
 // Esquemas alineados con MongoDB (¡AQUÍ SE AGREGAN LOS CAMPOS PARA EL MODAL!)
 const CAMPOS_PRODUCTO_ICG = [
   { key: "clave_sae",      label: "Clave SAE",         type: "number" },
   { key: "codigo_barras",  label: "Código de Barras",  type: "text"   },
   { key: "marca",          label: "Marca",             type: "text"   },
   { key: "descripcion",    label: "Descripción",       type: "text"   },
-  { key: "unidad_medida",  label: "Unidad de Medida",  type: "text"   },
+  { key: "unidad_medida",  label: "Unidad de Medida",  type: "select" },
   { key: "costo",          label: "Costo",             type: "number" },
   { key: "peso",           label: "Peso (kg)",         type: "number", step: "1", min: "0" },
   { key: "largo",          label: "Largo (cm)",        type: "number" },
@@ -793,6 +823,17 @@ async function abrirModal(mode, tipo, docId = null) {
         </select>
       </div>`;
     }
+    if (c.type === "select" && c.key === "unidad_medida") {
+      return `
+      <div class="form-group">
+        <label>${h(c.label)}</label>
+        <select name="${c.key}" class="form-control" id="modal-field-${c.key}" onchange="_onUnidadChange(this)">
+          <option value="">— Seleccionar —</option>
+          ${_opcionesUnidad(existente[c.key] || "")}
+          <option value="__nueva__">+ Agregar nueva unidad…</option>
+        </select>
+      </div>`;
+    }
     return `
     <div class="form-group">
       <label>${h(c.label)}${c.readonly ? ' <span class="config-computed-badge">auto</span>' : ''}</label>
@@ -874,7 +915,7 @@ async function guardarModal(e) {
         if (!el) return;
         const raw = el.value.trim();
 
-        if (raw === "") {
+        if (raw === "" || raw === "__nueva__") {
             // Campo vacío → null (permite múltiples nulos en MongoDB)
             payload[key] = null;
         } else if (type === "number") {
