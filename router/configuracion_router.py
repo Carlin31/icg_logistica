@@ -13,7 +13,8 @@ from logic.historico_logic import (
 )
 from logic.configuracion_logic import (
     obtener_configuracion, guardar_configuracion,
-    listar_productos,  obtener_producto,  agregar_producto,  editar_producto,  eliminar_producto,
+    listar_productos,  obtener_producto,  buscar_producto_por_clave,
+    agregar_producto,  editar_producto,  eliminar_producto,
     listar_productos_proalmex, obtener_producto_proalmex, agregar_producto_proalmex,
     editar_producto_proalmex, eliminar_producto_proalmex,
     listar_productos_bimbo, obtener_producto_bimbo, agregar_producto_bimbo,
@@ -71,6 +72,14 @@ def get_productos():
         request.args.get("nombre", ""),
         request.args.get("fecha",  ""),
     ))
+
+
+@configuracion_bp.route("/productos-por-clave", methods=["GET"])
+def get_producto_por_clave():
+    doc = buscar_producto_por_clave(request.args.get("clave", ""))
+    if doc:
+        return jsonify(doc)
+    return jsonify({"encontrado": False}), 404
 
 
 @configuracion_bp.route("/productos/<producto_id>", methods=["GET"])

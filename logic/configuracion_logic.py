@@ -238,6 +238,15 @@ def _eliminar(coleccion: str, doc_id: str) -> dict:
 # ── Funciones de Dominio (Productos, Sucursales, Vehículos) ──
 def listar_productos(nombre: str = "", fecha: str = ""): return _listar("productos", ["descripcion", "marca"], nombre, fecha, "marca")
 def obtener_producto(producto_id: str): return _obtener("productos", producto_id)
+
+def buscar_producto_por_clave(clave_sae) -> dict | None:
+    try:
+        clave = int(clave_sae)
+    except (ValueError, TypeError):
+        return None
+    db  = get_db()
+    doc = db["productos"].find_one({"clave_sae": clave})
+    return _serialize(doc) if doc else None
 def agregar_producto(datos: dict): return _agregar("productos", datos)
 def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)
 def eliminar_producto(producto_id: str): return _eliminar("productos", producto_id)

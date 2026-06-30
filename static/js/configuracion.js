@@ -37,16 +37,37 @@ function _opcionesUnidad(actual) {
 
 function _onUnidadChange(sel) {
   if (sel.value !== "__nueva__") return;
-  const nueva = prompt("Nueva unidad de medida (ej. PZA, KG, LT):")?.trim().toUpperCase();
-  if (!nueva) { sel.value = ""; return; }
+  sel.value = "";
+  const wrap = document.getElementById("nueva-unidad-wrap");
+  if (wrap) {
+    wrap.style.display = "flex";
+    const inp = document.getElementById("nueva-unidad-input");
+    if (inp) { inp.value = ""; inp.focus(); }
+  }
+}
+
+function _confirmarNuevaUnidad() {
+  const inp  = document.getElementById("nueva-unidad-input");
+  const wrap = document.getElementById("nueva-unidad-wrap");
+  const nueva = inp?.value.trim().toUpperCase();
+  if (!nueva) return;
   if (!UNIDADES_MEDIDA.includes(nueva)) {
     UNIDADES_MEDIDA.push(nueva);
     localStorage.setItem("icg_unidades", JSON.stringify(UNIDADES_MEDIDA));
-    const opt = document.createElement("option");
-    opt.value = nueva; opt.textContent = nueva;
-    sel.insertBefore(opt, sel.lastElementChild);
   }
-  sel.value = nueva;
+  const sel = document.getElementById("modal-field-unidad_medida");
+  if (sel) {
+    sel.innerHTML = `<option value="">— Seleccionar —</option>
+      ${_opcionesUnidad(nueva)}
+      <option value="__nueva__">+ Agregar nueva unidad…</option>`;
+    sel.value = nueva;
+  }
+  if (wrap) wrap.style.display = "none";
+}
+
+function _cancelarNuevaUnidad() {
+  const wrap = document.getElementById("nueva-unidad-wrap");
+  if (wrap) wrap.style.display = "none";
 }
 
 function _renderListaUnidades() {
@@ -831,6 +852,46 @@ async function cargarDatos(tipo) {
   }
 }
 
+function _mostrarNoticeModal(texto, variante) {
+  const el = document.getElementById("modal-clave-notice");
+  if (!el) return;
+  el.textContent = texto;
+  el.className = `modal-clave-notice modal-clave-notice--${variante}`;
+}
+
+function _ocultarNoticeModal() {
+  const el = document.getElementById("modal-clave-notice");
+  if (el) el.className = "modal-clave-notice hidden";
+}
+
+async function _buscarPorClaveSae() {
+  const clave = document.getElementById("modal-field-clave_sae")?.value.trim();
+  if (!clave) return;
+
+  const res = await fetch(`/configuracion/productos-por-clave?clave=${encodeURIComponent(clave)}`);
+
+  if (res.ok) {
+    const doc = await res.json();
+    // Existe — cargar datos en modo edición
+    modalMode  = "edit";
+    modalDocId = doc._id;
+    document.getElementById("modal-title").textContent = "Editar producto ICG";
+    CAMPOS_PRODUCTO_ICG.forEach(c => {
+      const el = document.getElementById(`modal-field-${c.key}`);
+      if (!el) return;
+      el.value = doc[c.key] != null ? doc[c.key] : "";
+    });
+    _actualizarVolumenModal();
+    _mostrarNoticeModal("✓ Clave existente — datos cargados. Puedes modificarlos y guardar.", "encontrado");
+  } else {
+    // No existe — dejar en blanco, mover foco al siguiente campo
+    modalMode  = "create";
+    modalDocId = null;
+    _mostrarNoticeModal("Clave nueva — completa los datos del producto.", "nuevo");
+    document.getElementById("modal-field-codigo_barras")?.focus();
+  }
+}
+
 async function abrirModal(mode, tipo, docId = null) {
   modalMode = mode; modalTipo = tipo; modalDocId = docId;
   const campos = tipo === "producto"          ? CAMPOS_PRODUCTO_ICG
@@ -870,6 +931,12 @@ async function abrirModal(mode, tipo, docId = null) {
           ${_opcionesUnidad(existente[c.key] || "")}
           <option value="__nueva__">+ Agregar nueva unidad…</option>
         </select>
+        <div id="nueva-unidad-wrap" class="cfg-nueva-unidad-wrap" style="display:none">
+          <input id="nueva-unidad-input" type="text" class="form-control" placeholder="Ej. PZA, KG, LT…"
+                 onkeydown="if(event.key==='Enter'){event.preventDefault();_confirmarNuevaUnidad();}if(event.key==='Escape')_cancelarNuevaUnidad();">
+          <button type="button" class="btn btn-primary btn-sm" onclick="_confirmarNuevaUnidad()">Agregar</button>
+          <button type="button" class="btn btn-sm"             onclick="_cancelarNuevaUnidad()">Cancelar</button>
+        </div>
         <div id="panel-gestionar-unidades" class="cfg-unidades-panel" style="display:none"></div>
       </div>`;
     }
@@ -886,6 +953,16 @@ async function abrirModal(mode, tipo, docId = null) {
       if (el) el.addEventListener('input', _actualizarVolumenModal);
     });
     _actualizarVolumenModal();
+
+    // Enter en Clave SAE → buscar si ya existe
+    if (mode === "create") {
+      const claveEl = document.getElementById("modal-field-clave_sae");
+      if (claveEl) claveEl.addEventListener("keydown", async e => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        await _buscarPorClaveSae();
+      });
+    }
   }
 
   if (tipo === "producto_bimbo") {
@@ -935,6 +1012,7 @@ function cerrarModal() {
   document.getElementById("modal-overlay").classList.add("hidden");
   const errEl = document.getElementById("modal-error");
   if (errEl) errEl.classList.add("hidden");
+  _ocultarNoticeModal();
 }
 
 async function guardarModal(e) {

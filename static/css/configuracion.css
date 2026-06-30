@@ -99,6 +99,11 @@
 }
 .cfg-unidades-del:hover { color: var(--rojo); }
 .cfg-unidades-vacio { font-size: 0.8rem; color: var(--gris-texto); margin: 0; padding: 2px 4px; }
+.cfg-nueva-unidad-wrap {
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 8px;
+}
+.cfg-nueva-unidad-wrap .form-control { flex: 1; }
 
 /* ── Section header ── */
 .section-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
@@ -344,6 +349,26 @@ th.sortable.desc::after { opacity: 1; content: '\25BC'; }
 .btn-confirm-ok { min-width: 120px; font-weight: 600; }
 
 /* .modal-error → shared.css */
+
+/* ── Aviso de búsqueda por Clave SAE ── */
+.modal-clave-notice {
+  margin: 8px 0 4px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.modal-clave-notice.hidden { display: none; }
+.modal-clave-notice--encontrado {
+  background: #f0fdf4;
+  border: 1px solid #86efac;
+  color: #15803d;
+}
+.modal-clave-notice--nuevo {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1d4ed8;
+}
 
 /* ── Toast de notificación ── */
 .cfg-toast-container {
