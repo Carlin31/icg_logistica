@@ -876,6 +876,78 @@
   pointer-events: none;
 }
 
+/* ── Dropdown "Productos" en la barra de tabs ──────── */
+.ext-tab-dropdown {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.ext-tab__chevron {
+  width: 14px; height: 14px;
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.ext-tab-dropdown.open > .ext-tab--dropdown .ext-tab__chevron {
+  transform: rotate(180deg);
+}
+
+.ext-tab--dropdown.active {
+  color: var(--azul);
+  border-bottom-color: var(--azul);
+  background: #fff;
+}
+
+.ext-tab-dropdown__menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  min-width: 150px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.10), 0 1px 4px rgba(0,0,0,0.06);
+  z-index: 200;
+  overflow: hidden;
+}
+
+.ext-tab-dropdown.open .ext-tab-dropdown__menu {
+  display: block;
+}
+
+.ext-tab-dropdown__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  background: transparent;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ext-tab-dropdown__item:hover {
+  background: var(--azul-bg);
+  color: var(--azul);
+}
+
+.ext-tab-dropdown__item.active {
+  background: #eff6ff;
+  color: var(--azul);
+}
+
+.ext-tabs-bar--bloqueado .ext-tab--dropdown:not(.active) {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
 /* ═══════════════════════════════════════════════════
    BADGE: MAYORISTAS
 ═══════════════════════════════════════════════════ */

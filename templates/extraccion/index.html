@@ -33,23 +33,29 @@
       Consolidado
     </button>
 
-    <!-- ── Sección: Tiendas Lores ─────────────────── -->
-    <span class="ext-tab-section">Tiendas Lores</span>
-
-    <button class="ext-tab" data-tab="icg" role="tab" aria-selected="false">
-      <span class="ext-tab__dot" id="dot-icg"></span>
-      ICG
-    </button>
-
-    <button class="ext-tab" data-tab="proalmex" role="tab" aria-selected="false">
-      <span class="ext-tab__dot" id="dot-proalmex"></span>
-      Proalmex
-    </button>
-
-    <button class="ext-tab" data-tab="bimbo" role="tab" aria-selected="false">
-      <span class="ext-tab__dot" id="dot-bimbo"></span>
-      Bimbo
-    </button>
+    <!-- ── Dropdown: Productos ───────────────────────── -->
+    <div class="ext-tab-dropdown" id="dropdown-productos">
+      <button class="ext-tab ext-tab--dropdown" id="btn-dropdown-productos"
+              aria-haspopup="true" aria-expanded="false">
+        <i data-lucide="package" class="ext-tab__icon"></i>
+        Productos
+        <i data-lucide="chevron-down" class="ext-tab__chevron"></i>
+      </button>
+      <div class="ext-tab-dropdown__menu" role="menu">
+        <button class="ext-tab-dropdown__item" data-tab="icg" role="menuitem">
+          <span class="ext-tab__dot" id="dot-icg"></span>
+          ICG
+        </button>
+        <button class="ext-tab-dropdown__item" data-tab="proalmex" role="menuitem">
+          <span class="ext-tab__dot" id="dot-proalmex"></span>
+          Proalmex
+        </button>
+        <button class="ext-tab-dropdown__item" data-tab="bimbo" role="menuitem">
+          <span class="ext-tab__dot" id="dot-bimbo"></span>
+          Bimbo
+        </button>
+      </div>
+    </div>
 
     <!-- ── Sección: Clientes Mayoristas ──────────── -->
     <span class="ext-tab-section">Clientes Mayoristas</span>

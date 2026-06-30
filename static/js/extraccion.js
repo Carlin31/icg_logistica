@@ -232,9 +232,32 @@ async function cargarDatosGuardados() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 function inicializarTabs() {
-  document.querySelectorAll('.ext-tab').forEach(btn => {
+  // Tabs normales (solo los que tienen data-tab, excluye el trigger del dropdown)
+  document.querySelectorAll('.ext-tab[data-tab]').forEach(btn => {
     btn.addEventListener('click', () => cambiarTab(btn.dataset.tab));
   });
+
+  // Dropdown "Productos"
+  const dropdown   = document.getElementById('dropdown-productos');
+  const btnDrop    = document.getElementById('btn-dropdown-productos');
+  if (dropdown && btnDrop) {
+    btnDrop.addEventListener('click', e => {
+      e.stopPropagation();
+      const isOpen = dropdown.classList.toggle('open');
+      btnDrop.setAttribute('aria-expanded', isOpen);
+    });
+    dropdown.querySelectorAll('.ext-tab-dropdown__item').forEach(item => {
+      item.addEventListener('click', () => {
+        dropdown.classList.remove('open');
+        btnDrop.setAttribute('aria-expanded', 'false');
+        cambiarTab(item.dataset.tab);
+      });
+    });
+    document.addEventListener('click', () => {
+      dropdown.classList.remove('open');
+      btnDrop.setAttribute('aria-expanded', 'false');
+    });
+  }
 }
 
 async function cambiarTab(tab) {
@@ -248,11 +271,20 @@ async function cambiarTab(tab) {
     _cerrarModalForzado();
   }
   state.tabActiva = tab;
-  document.querySelectorAll('.ext-tab').forEach(b =>
+  document.querySelectorAll('.ext-tab[data-tab]').forEach(b =>
     b.classList.toggle('active', b.dataset.tab === tab)
   );
   document.querySelectorAll('.ext-panel').forEach(p =>
     p.classList.toggle('active', p.id === `panel-${tab}`)
+  );
+
+  // Estado del dropdown "Productos"
+  const TABS_PRODUCTOS = ['icg', 'proalmex', 'bimbo'];
+  const btnDrop  = document.getElementById('btn-dropdown-productos');
+  const dropdown = document.getElementById('dropdown-productos');
+  if (btnDrop)  btnDrop.classList.toggle('active', TABS_PRODUCTOS.includes(tab));
+  if (dropdown) dropdown.querySelectorAll('.ext-tab-dropdown__item').forEach(item =>
+    item.classList.toggle('active', item.dataset.tab === tab)
   );
 }
 
