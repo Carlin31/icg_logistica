@@ -63,7 +63,9 @@
 }
 
 .auth-card {
-  background: var(--blanco);
+  background-color: var(--blanco);
+  background-image: radial-gradient(circle, rgba(37,99,235,0.065) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
   border-radius: var(--radio-lg);
   box-shadow: var(--sombra-xl);
   padding: 32px 30px 26px;
@@ -368,7 +370,9 @@
 .sel-card {
   width: 100%;
   max-width: 440px;
-  background: rgba(255,255,255,0.97);
+  background-color: rgba(255,255,255,0.97);
+  background-image: radial-gradient(circle, rgba(37,99,235,0.065) 1.5px, transparent 1.5px);
+  background-size: 22px 22px;
   backdrop-filter: blur(24px);
   -webkit-backdrop-filter: blur(24px);
   border-radius: 22px;
@@ -519,7 +523,9 @@
     min-height: auto;
     justify-content: center;
     padding: 48px 40px;
-    background: #ffffff;
+    background-color: #ffffff;
+    background-image: radial-gradient(circle, rgba(37,99,235,0.065) 1.5px, transparent 1.5px);
+    background-size: 22px 22px;
     border-right: 1px solid #e8ecf0;
     box-shadow: 4px 0 32px rgba(0,0,0,0.09);
     position: relative;
