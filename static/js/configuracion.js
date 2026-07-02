@@ -122,11 +122,17 @@ const CAMPOS_PRODUCTO_ICG = [
 ];
 
 const CAMPOS_PRODUCTO_PROALMEX = [
-  { key: "marca",   label: "Marca",   type: "text"   },
-  { key: "linea",   label: "Descripción", type: "text"   },
-  { key: "tamano",  label: "Tamaño",  type: "text"   },
-  { key: "costo",   label: "Costo",   type: "number" },
-  { key: "peso",    label: "Peso (kg)", type: "number" },
+  { key: "clave_sae",     label: "Clave SAE",        type: "text"   },
+  { key: "marca",         label: "Marca",            type: "text"   },
+  { key: "linea",         label: "Descripción",      type: "text"   },
+  { key: "tamano",        label: "Tamaño",           type: "text"   },
+  { key: "costo",         label: "Costo",            type: "number" },
+  { key: "peso",          label: "Peso (kg)",        type: "number" },
+  { key: "unidad_medida", label: "Unidad de Medida", type: "select" },
+  { key: "largo",         label: "Largo (m)",        type: "number" },
+  { key: "ancho",         label: "Ancho (m)",        type: "number" },
+  { key: "alto",          label: "Alto (m)",         type: "number" },
+  { key: "volumen",       label: "Volumen (m³)",     type: "number", readonly: true },
 ];
 
 const CAMPOS_SUCURSAL = [
@@ -718,7 +724,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 13, producto_proalmex: 7, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
+      const cols = { producto: 13, producto_proalmex: 13, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -746,11 +752,17 @@ async function cargarDatos(tipo) {
     } else if (tipo === "producto_proalmex") {
       tbody.innerHTML = data.map(p => `
         <tr>
+          <td>${h(p.clave_sae ?? "")}</td>
           <td>${h(p.marca)}</td>
           <td>${h(p.linea)}</td>
           <td>${h(p.tamano)}</td>
           <td>$${Number(p.costo || 0).toFixed(2)}</td>
           <td>${p.peso != null ? p.peso + " kg" : ""}</td>
+          <td>${h(p.unidad_medida ?? "")}</td>
+          <td>${p.largo ?? ""}</td>
+          <td>${p.ancho ?? ""}</td>
+          <td>${p.alto ?? ""}</td>
+          <td>${_volIcg(p)}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
@@ -972,6 +984,14 @@ async function abrirModal(mode, tipo, docId = null) {
         await _buscarPorClaveSae();
       });
     }
+  }
+
+  if (tipo === "producto_proalmex") {
+    ['largo', 'ancho', 'alto'].forEach(k => {
+      const el = document.getElementById(`modal-field-${k}`);
+      if (el) el.addEventListener('input', _actualizarVolumenModal);
+    });
+    _actualizarVolumenModal();
   }
 
   if (tipo === "producto_bimbo") {

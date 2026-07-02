@@ -164,7 +164,7 @@ def _agregar(coleccion: str, datos: dict) -> dict:
     if error:
         return {"status": "error", "mensaje": error}
 
-    if coleccion == "productos":
+    if coleccion in ("productos", "productos_proalmex"):
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif coleccion == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
@@ -206,7 +206,7 @@ def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
     datos["ultima_modificacion"] = _fecha_completa()
     # Si la llave se eliminó con pop(), no se sobrescribirá si ya existía.
     # Para limpiar un ID existente a vacío, usamos $unset
-    if coleccion == "productos":
+    if coleccion in ("productos", "productos_proalmex"):
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif coleccion == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
