@@ -271,6 +271,19 @@ def agregar_producto(datos: dict): return _agregar("productos", datos)
 def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)
 def eliminar_producto(producto_id: str): return _eliminar("productos", producto_id)
 
+def buscar_producto_proalmex_por_clave(clave_sae) -> dict | None:
+    clave_str = str(clave_sae).strip() if clave_sae else ""
+    if not clave_str:
+        return None
+    db  = get_db()
+    doc = db["productos_proalmex"].find_one({"clave_sae": clave_str})
+    if not doc:
+        try:
+            doc = db["productos_proalmex"].find_one({"clave_sae": int(clave_str)})
+        except (ValueError, TypeError):
+            pass
+    return _serialize(doc) if doc else None
+
 def listar_productos_proalmex(nombre: str = "", fecha: str = ""): return _listar("productos_proalmex", ["marca", "linea", "tamano"], nombre, fecha, "marca")
 def obtener_producto_proalmex(producto_id: str): return _obtener("productos_proalmex", producto_id)
 def agregar_producto_proalmex(datos: dict): return _agregar("productos_proalmex", datos)

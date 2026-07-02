@@ -887,6 +887,32 @@ function _ocultarNoticeModal() {
   if (el) el.className = "modal-clave-notice hidden";
 }
 
+async function _buscarPorClaveProalmex() {
+  const clave = document.getElementById("modal-field-clave_sae")?.value.trim();
+  if (!clave) return;
+
+  const res = await fetch(`/configuracion/productos-proalmex-por-clave?clave=${encodeURIComponent(clave)}`);
+
+  if (res.ok) {
+    const doc = await res.json();
+    modalMode  = "edit";
+    modalDocId = doc._id;
+    document.getElementById("modal-title").textContent = "Editar producto Proalmex";
+    CAMPOS_PRODUCTO_PROALMEX.forEach(c => {
+      const el = document.getElementById(`modal-field-${c.key}`);
+      if (!el) return;
+      el.value = doc[c.key] != null ? doc[c.key] : "";
+    });
+    _actualizarVolumenModal();
+    _mostrarNoticeModal("✓ Clave existente — datos cargados. Puedes modificarlos y guardar.", "encontrado");
+  } else {
+    modalMode  = "create";
+    modalDocId = null;
+    _mostrarNoticeModal("Clave nueva — completa los datos del producto.", "nuevo");
+    document.getElementById("modal-field-codigo_barras")?.focus();
+  }
+}
+
 async function _buscarPorClaveSae() {
   const clave = document.getElementById("modal-field-clave_sae")?.value.trim();
   if (!clave) return;
@@ -994,6 +1020,15 @@ async function abrirModal(mode, tipo, docId = null) {
       if (el) el.addEventListener('input', _actualizarVolumenModal);
     });
     _actualizarVolumenModal();
+
+    if (mode === "create") {
+      const claveEl = document.getElementById("modal-field-clave_sae");
+      if (claveEl) claveEl.addEventListener("keydown", async e => {
+        if (e.key !== "Enter") return;
+        e.preventDefault();
+        await _buscarPorClaveProalmex();
+      });
+    }
   }
 
   if (tipo === "producto_bimbo") {

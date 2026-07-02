@@ -15,7 +15,8 @@ from logic.configuracion_logic import (
     obtener_configuracion, guardar_configuracion,
     listar_productos,  obtener_producto,  buscar_producto_por_clave,
     agregar_producto,  editar_producto,  eliminar_producto,
-    listar_productos_proalmex, obtener_producto_proalmex, agregar_producto_proalmex,
+    listar_productos_proalmex, obtener_producto_proalmex, buscar_producto_proalmex_por_clave,
+    agregar_producto_proalmex,
     editar_producto_proalmex, eliminar_producto_proalmex,
     listar_productos_bimbo, obtener_producto_bimbo, agregar_producto_bimbo,
     editar_producto_bimbo, eliminar_producto_bimbo,
@@ -109,6 +110,14 @@ def put_producto(producto_id):
 @configuracion_bp.route("/productos/<producto_id>", methods=["DELETE"])
 def delete_producto(producto_id):
     return _respuesta(eliminar_producto(producto_id))
+
+
+@configuracion_bp.route("/productos-proalmex-por-clave", methods=["GET"])
+def get_producto_proalmex_por_clave():
+    doc = buscar_producto_proalmex_por_clave(request.args.get("clave", ""))
+    if doc:
+        return jsonify(doc)
+    return jsonify({"encontrado": False}), 404
 
 
 @configuracion_bp.route("/productos-proalmex", methods=["GET"])
