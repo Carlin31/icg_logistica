@@ -645,6 +645,8 @@ window.guardarDatos = async function () {
     return;
   }
 
+  let guardadoExitoso = true;
+
   const btn = document.getElementById('btn-guardar');
   btn.disabled    = true;
   btn.textContent = 'Guardando…';
@@ -709,6 +711,7 @@ window.guardarDatos = async function () {
         window.location.href = '/';
         return;
       } else {
+        guardadoExitoso = false;
         mostrarToast('Error al guardar Tiendas Lores: ' + (result.mensaje || 'Error desconocido.'), 'error');
       }
     }
@@ -727,6 +730,7 @@ window.guardarDatos = async function () {
         actualizarDotTabMayoristas();
         actualizarChipEstadoGuardado('mayoristas');
       } else {
+        guardadoExitoso = false;
         mostrarToast('Error al guardar Mayoristas: ' + (resultMay.mensaje || ''), 'error');
       }
     }
@@ -735,7 +739,7 @@ window.guardarDatos = async function () {
     actualizarUnsavedIndicator();
 
     const huboGuardado     = hayPeso || hayVol || hayMayoristas;
-    const siguientePestana = huboGuardado ? await avanzarSiguientePestana() : null;
+    const siguientePestana = (huboGuardado && guardadoExitoso) ? await avanzarSiguientePestana() : null;
 
     let mensaje = huboGuardado
       ? 'Datos guardados correctamente'
