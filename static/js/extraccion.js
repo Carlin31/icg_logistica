@@ -50,6 +50,15 @@ const state = {
 
 const PERFILES = ['icg', 'proalmex', 'bimbo'];
 
+const FLOW_ORDER  = ['consolidado', 'icg', 'proalmex', 'bimbo', 'mayoristas'];
+const FLOW_LABELS = {
+  consolidado: 'Consolidado',
+  icg:         'ICG',
+  proalmex:    'Proalmex',
+  bimbo:       'Bimbo',
+  mayoristas:  'Mayoristas',
+};
+
 // Mapeo perfil → claves del campo `advertencias` devuelto por el backend
 const ADV_KEYS = {
   icg:      { total: 'total_claves_icg',      faltantes: 'claves_no_encontradas_icg' },
@@ -255,6 +264,14 @@ async function cambiarTab(tab) {
     p.classList.toggle('active', p.id === `panel-${tab}`)
   );
   actualizarBotonConfirmar();
+}
+
+async function avanzarSiguientePestana() {
+  const idx = FLOW_ORDER.indexOf(state.tabActiva);
+  if (idx === -1 || idx === FLOW_ORDER.length - 1) return null;
+  const siguiente = FLOW_ORDER[idx + 1];
+  await cambiarTab(siguiente);
+  return siguiente;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -716,12 +733,17 @@ window.guardarDatos = async function () {
 
     state.hayUnsaved = false;
     actualizarUnsavedIndicator();
-    mostrarToast(
-      (hayPeso || hayVol || hayMayoristas)
-        ? 'Datos guardados correctamente'
-        : 'Fuentes eliminadas. Regenera las rutas VRP para actualizar las asignaciones.',
-      'ok'
-    );
+
+    const huboGuardado     = hayPeso || hayVol || hayMayoristas;
+    const siguientePestana = huboGuardado ? await avanzarSiguientePestana() : null;
+
+    let mensaje = huboGuardado
+      ? 'Datos guardados correctamente'
+      : 'Fuentes eliminadas. Regenera las rutas VRP para actualizar las asignaciones.';
+    if (siguientePestana) {
+      mensaje += `. Avanzando a ${FLOW_LABELS[siguientePestana]}…`;
+    }
+    mostrarToast(mensaje, 'ok');
 
   } catch (err) {
     console.error(err);
