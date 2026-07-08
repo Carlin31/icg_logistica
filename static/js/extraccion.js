@@ -254,6 +254,7 @@ async function cambiarTab(tab) {
   document.querySelectorAll('.ext-panel').forEach(p =>
     p.classList.toggle('active', p.id === `panel-${tab}`)
   );
+  actualizarBotonConfirmar();
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -593,6 +594,11 @@ function actualizarDotTab(perfil) {
   }`;
 }
 
+function actualizarBotonConfirmar() {
+  document.getElementById('btn-confirmar').style.display =
+    state.tabActiva === 'mayoristas' ? '' : 'none';
+}
+
 function actualizarUI() {
   const hayLores = PERFILES.some(
     p => state.perfiles[p].datos !== null || state.perfiles[p].volumen !== null
@@ -600,6 +606,7 @@ function actualizarUI() {
   const hayMayoristas = state.mayoristas.consolidado !== null;
   document.getElementById('action-bar').style.display = (hayLores || hayMayoristas) ? 'flex' : 'none';
   actualizarUnsavedIndicator();
+  actualizarBotonConfirmar();
 }
 
 function actualizarUnsavedIndicator() {
