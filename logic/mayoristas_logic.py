@@ -21,6 +21,11 @@ from sqlalchemy import select, insert
 from db import get_db, get_table
 from logic.vrp_logic import capacidad_efectiva_kg
 
+# Al resolver una sobrecarga de mayoristas, True = se expulsa al mayorista más
+# LEJANO del centroide de su ruta (conserva a los geográficamente afines);
+# False = comportamiento anterior (expulsa al más pesado).
+MAYORISTAS_GEOGRAFICO = True
+
 
 def _id_valido(doc_id: str) -> "str | None":
     try:
@@ -377,7 +382,21 @@ def _resolver_sobrecarga_mayoristas(
             if _peso_total(rid) <= cap:
                 continue
 
-            for m in sorted(mays, key=lambda x: float(x.get("peso_kg", 0) or 0), reverse=True):
+            centro_rid = centros_ruta.get(rid)
+
+            def _clave_expulsion(m, _centro=centro_rid):
+                # Interruptor apagado: comportamiento previo (más pesado primero).
+                if not MAYORISTAS_GEOGRAFICO:
+                    return float(m.get("peso_kg", 0) or 0)
+                # Encendido: más LEJANO del centroide primero. Sin coordenadas
+                # o sin centroide → prioridad mínima (se conserva, se expulsa
+                # solo si no queda otro remedio).
+                lat_m, lon_m = m.get("latitud"), m.get("longitud")
+                if lat_m is None or lon_m is None or not _centro or _centro[0] is None:
+                    return -1.0
+                return _haversine_km(lat_m, lon_m, _centro[0], _centro[1])
+
+            for m in sorted(mays, key=_clave_expulsion, reverse=True):
                 destino = _mejor_destino(m, rid)
                 if destino:
                     mayoristas_por_ruta[rid].remove(m)
