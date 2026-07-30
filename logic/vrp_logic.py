@@ -181,6 +181,26 @@ def obtener_capacidades_vehiculos() -> dict:
         return {}
 
 
+def obtener_volumenes_vehiculos() -> dict:
+    """
+    Lee el volumen (m³) de cada vehículo desde SQL Server.
+    Retorna: {abreviatura: volumen_m3 (float)} — solo vehículos con volumen > 0.
+    Espejo de obtener_capacidades_vehiculos() pero para el límite volumétrico.
+    """
+    try:
+        db    = get_db()
+        tabla = get_table("vehiculos")
+        vols  = {}
+        for v in db.execute(select(tabla)).mappings():
+            abrev = (v.get("abreviatura") or v.get("descripcion") or "").strip()
+            vol   = float(v.get("volumen_m3") or 0)
+            if abrev and vol > 0:
+                vols[abrev] = vol
+        return vols
+    except Exception:
+        return {}
+
+
 def obtener_placas_por_abrev() -> dict:
     """
     Mapea abreviatura → placas para vehículos activos.
