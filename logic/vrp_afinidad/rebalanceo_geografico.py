@@ -42,3 +42,19 @@ def _costo_ruta(sids: list, coords: dict) -> float:
         return 0.0
     clat, clon = _centroide(pts)
     return sum(_haversine(lat, lon, clat, clon) for lat, lon in pts)
+
+
+def _peso_sids(sids: list, pesos: dict) -> float:
+    return sum(pesos.get(s, 0) for s in sids)
+
+
+def _vol_sids(sids: list, volumenes: dict) -> float:
+    return sum(volumenes.get(s, 0.0) for s in sids)
+
+
+def _cabe(sids: list, veh: str, pesos: dict, volumenes: dict,
+          cap_peso: dict, cap_vol: dict) -> bool:
+    """True si el conjunto `sids` no excede ni el peso ni el volumen del
+    vehículo `veh`. Un vehículo sin capacidad registrada no impone límite."""
+    return (_peso_sids(sids, pesos) <= cap_peso.get(veh, float("inf"))
+            and _vol_sids(sids, volumenes) <= cap_vol.get(veh, float("inf")))
