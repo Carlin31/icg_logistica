@@ -154,3 +154,61 @@ def test_invariantes_y_determinismo():
     assert all(len(g) >= 1 for g in out1.values())
     # Idempotente: correr de nuevo no cambia nada
     assert {k: _sids(v) for k, v in out2.items()} == {k: _sids(v) for k, v in out1.items()}
+
+
+def test_dias_separados_no_cruzan():
+    # LUNES tiene 2 rutas (V1 con un outlier, V2 cercana al outlier). MARTES
+    # tiene una ruta geográficamente MÁS cercana aún al outlier. El outlier
+    # debe moverse a la ruta cercana de SU MISMO día (V2/LUNES), nunca cruzar
+    # a MARTES. Verifica la invariante estrella: nadie cambia de día.
+    coords = {
+        1:  (18.90, -96.95), 2: (18.91, -96.95),   # LUNES-V1: cluster lejano
+        99: (18.30, -96.10),                        # LUNES-V1: outlier
+        5:  (18.29, -96.09),                        # LUNES-V2: cerca del outlier (destino correcto)
+        3:  (18.305, -96.105),                      # MARTES: aún más cerca del outlier, pero otro día
+    }
+    groups = {
+        ("V1", "LUNES"):  [{"sid": 1, "seq": 1}, {"sid": 2, "seq": 2}, {"sid": 99, "seq": 3}],
+        ("V2", "LUNES"):  [{"sid": 5, "seq": 1}],
+        ("V3", "MARTES"): [{"sid": 3, "seq": 1}],
+    }
+    pesos = {s: 100 for s in coords}
+    vols  = {s: 1.0 for s in coords}
+    out = rebalancear_por_geografia(
+        groups, coords, pesos, vols,
+        {"V1": 10000, "V2": 10000, "V3": 10000},
+        {"V1": 999, "V2": 999, "V3": 999})
+    # El outlier se movió a la ruta cercana del MISMO día, no a MARTES.
+    assert 99 in _sids(out[("V2", "LUNES")])
+    assert 99 not in _sids(out[("V3", "MARTES")])
+    # Ninguna sucursal cambió de día.
+    dia_original = {m["sid"]: dia for (veh, dia), ms in groups.items() for m in ms}
+    for (veh, dia), ms in out.items():
+        for m in ms:
+            assert dia_original[m["sid"]] == dia
+
+
+def test_dia_una_sola_ruta_es_no_op():
+    # Un día con una sola ruta no tiene a dónde mover: queda idéntico.
+    groups = {("V1", "LUNES"): [{"sid": 1, "seq": 1}, {"sid": 2, "seq": 2}, {"sid": 99, "seq": 3}]}
+    out = rebalancear_por_geografia(
+        groups, COORDS, {1: 100, 2: 100, 99: 100}, {1: 1.0, 2: 1.0, 99: 1.0},
+        {"V1": 10000}, {"V1": 999})
+    assert _sids(out[("V1", "LUNES")]) == [1, 2, 99]
+
+
+def test_swap_bloqueado_por_volumen():
+    # El swap 12<->22 compactaría (ambos se acercan a su cluster), pero 22 es
+    # voluminoso (5.0 m³) y al entrar a A excedería su cap de volumen (3.0).
+    # El intercambio NO debe aplicarse: 22 se queda en B.
+    coords = {11: (0.0, 0.0), 12: (0.0, 10.0), 21: (0.0, 10.1), 22: (0.0, 0.1)}
+    groups = {
+        ("A", "LUNES"): [{"sid": 11, "seq": 1}, {"sid": 12, "seq": 2}],
+        ("B", "LUNES"): [{"sid": 21, "seq": 1}, {"sid": 22, "seq": 2}],
+    }
+    pesos = {11: 100, 12: 100, 21: 100, 22: 100}
+    vols  = {11: 1.0, 12: 1.0, 21: 1.0, 22: 5.0}
+    out = rebalancear_por_geografia(
+        groups, coords, pesos, vols, {"A": 10000, "B": 10000}, {"A": 3.0, "B": 10.0})
+    assert 22 in _sids(out[("B", "LUNES")])
+    assert 22 not in _sids(out[("A", "LUNES")])

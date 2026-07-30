@@ -1145,6 +1145,10 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     if REBALANCEO_GEOGRAFICO:
         try:
             vehiculos_vol = obtener_volumenes_vehiculos()
+            _sin_vol = [v for v in vehiculos_cap if v not in vehiculos_vol]
+            if _sin_vol:
+                print(f"[rebalanceo_geografico] sin volumen configurado "
+                      f"(límite volumétrico no aplicado): {_sin_vol}")
             groups = rebalancear_por_geografia(
                 groups,
                 coords_dict,
