@@ -336,9 +336,15 @@ def consultar_osrm(coords: list) -> dict:
                 continue
 
             ruta = data["routes"][0]
+            # Duración por tramo (matriz→p1, p1→p2, …, pn→matriz). OSRM ya la
+            # devuelve en routes[0].legs; se usa para calcular la hora de
+            # llegada a cada parada (Fase A de tiempo de entrega).
+            tramos_min = [round(float(leg.get("duration", 0.0)) / 60, 1)
+                          for leg in ruta.get("legs", [])]
             return {
                 "distancia_km": round(ruta.get("distance", 0.0) / 1000, 2),
                 "traslado_min": round(ruta.get("duration", 0.0) / 60, 1),
+                "tramos_min":   tramos_min,
                 "origen": "osrm",
             }
         except urllib.error.HTTPError as e:
