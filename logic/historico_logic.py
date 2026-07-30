@@ -43,12 +43,19 @@ from logic.vrp_logic import (
     build_template_from_history,
     generate_routes_vrp,
     obtener_capacidades_vehiculos,
+    obtener_volumenes_vehiculos,
     obtener_placas_por_abrev,
     obtener_info_vehiculos,
     capacidad_efectiva_kg,
     DIA_ORDEN,
     ordenar_paradas_por_historico,
 )
+from logic.vrp_afinidad.rebalanceo_geografico import rebalancear_por_geografia
+
+# Interruptor del rebalanceo geográfico de rutas. True = las rutas se compactan
+# geográficamente (la cercanía gana sobre el histórico). False = comportamiento
+# anterior idéntico.
+REBALANCEO_GEOGRAFICO = True
 
 # Algoritmo de afinidad histórica — motor VRP activo en producción.
 from logic.vrp_afinidad.afinidad import construir_afinidad
@@ -1131,6 +1138,23 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
         groups, pedidos_dict, vehiculos_cap, afinidad_norm, afinidad_raw,
         nodos_hist, solos_historicos,
     )
+
+    # ── 6.6. Rebalanceo geográfico: compactar rutas por cercanía (por día),
+    # respetando peso y volumen. Degradación segura: ante cualquier error se
+    # conservan las rutas sin rebalancear.
+    if REBALANCEO_GEOGRAFICO:
+        try:
+            vehiculos_vol = obtener_volumenes_vehiculos()
+            groups = rebalancear_por_geografia(
+                groups,
+                coords_dict,
+                pedidos_dict,
+                volumenes_dict,
+                vehiculos_cap,
+                vehiculos_vol,
+            )
+        except Exception as e:  # noqa: BLE001
+            print(f"[rebalanceo_geografico] omitido por error: {e}")
 
     # ── 7. Estadísticas históricas para clasificar el estado de cada ruta ───────
     dfs_hist = obtener_historicos_como_dfs()
