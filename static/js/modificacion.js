@@ -23,6 +23,9 @@ let _rutaLayer        = null;
 let _markersLayer     = null;
 let _pendientesLayer  = null;
 let _mayoristasLayer  = null;
+// Mostrar u ocultar en el mapa las "M" de mayoristas sin ruta.
+// false = mapa limpio, solo la ruta en edición. Cambiar a true para verlos.
+const MOSTRAR_MAYORISTAS_LIBRES = false;
 let _cancelarBatch    = false;
 let _altLayer          = null; // Leaflet layer para línea de referencia gris
 let _modoPersonalizado = {};   // rutaId → bool (false=recomendada, true=personalizada)
@@ -872,11 +875,13 @@ function actualizarMapa(ruta) {
     if (suc.latitud != null && suc.longitud != null) bounds.push([suc.latitud, suc.longitud]);
   });
 
-  // Incluir mayoristas sin ruta en los límites del mapa
-  mayLibres.forEach(m => {
-    const may = _normalizarMayorista({ ...m, tipo: "mayorista" });
-    if (may?.latitud != null && may?.longitud != null) bounds.push([may.latitud, may.longitud]);
-  });
+  // Incluir mayoristas sin ruta en los límites del mapa (solo si se muestran)
+  if (MOSTRAR_MAYORISTAS_LIBRES) {
+    mayLibres.forEach(m => {
+      const may = _normalizarMayorista({ ...m, tipo: "mayorista" });
+      if (may?.latitud != null && may?.longitud != null) bounds.push([may.latitud, may.longitud]);
+    });
+  }
 
   if (bounds.length > 0) _mapa.fitBounds(bounds, { padding: [40,40], maxZoom: 13 });
 }
@@ -914,6 +919,7 @@ function _mayoristasNoAsignados() {
 function renderMayoristasLibresLayer(libres = null) {
   if (!_mayoristasLayer) return;
   _mayoristasLayer.clearLayers();
+  if (!MOSTRAR_MAYORISTAS_LIBRES) return;   // ocultas: solo se muestra la ruta en edición
   const lista = libres || _mayoristasNoAsignados();
   lista.forEach(m => {
     const may = _normalizarMayorista({ ...m, tipo: "mayorista" });
@@ -1493,6 +1499,12 @@ function _labelMayorista(m) {
   return doc ? `${doc} | ${nombre}` : nombre;
 }
 
+// Pedido de mayorista sin peso capturado en el origen (peso 0): se puede
+// agregar a una ruta manualmente pero cuenta como 0 kg.
+function _esMayoristaPendiente(m) {
+  return !!(m && (m.pendiente || (Number(m.peso_kg) || 0) <= 0));
+}
+
 /**
  * Devuelve la secuencia combinada y ordenada de sucursales + mayoristas.
  * Cada elemento tiene `tipo`, `orden` y los campos propios.
@@ -1547,7 +1559,7 @@ function renderParadas(ruta) {
           <div class="suc-info">
             <div class="suc-nombre">${h(_labelMayorista(p))}</div>
             <div class="suc-detalle may-detalle">
-              Mayoristas${p.peso_kg > 0 ? ` · ${p.peso_kg.toLocaleString("es-MX")} kg` : ""}
+              Mayoristas${p.peso_kg > 0 ? ` · ${p.peso_kg.toLocaleString("es-MX", { maximumFractionDigits: 2 })} kg` : ` · <span class="may-tag-pendiente">Pendiente</span>`}
               ${p.latitud == null ? ' · <span style="color:#ef4444;font-size:0.65rem">sin coords</span>' : ""}
             </div>
           </div>
@@ -1926,7 +1938,7 @@ function renderModalCrearRuta() {
 }
 
 function renderListaCrearSucursales() {
-  const q = (_crearRuta.query || "").toLowerCase().trim();
+  const q = _norm(_crearRuta.query);
   const seleccion = new Set(_crearRuta.sucursales.map(n => String(n)));
   const pendientes = Object.values(_pendientes || {});
   const pendSet = new Set(pendientes.map(p => String(p.num_tienda)));
@@ -1937,7 +1949,7 @@ function renderListaCrearSucursales() {
 
   const filtra = (s) => {
     if (!s) return false;
-    const nombre = nombreSucursalLabel(s).toLowerCase();
+    const nombre = _norm(nombreSucursalLabel(s));
     const nt = String(s.num_tienda ?? "");
     return !q || nombre.includes(q) || nt.includes(q);
   };
@@ -2021,13 +2033,13 @@ function renderListaCrearSucursales() {
 function renderListaCrearMayoristas() {
   const LIMITE_MAY = 5;
 
-  const q = (_crearRuta.queryMayoristas || "").toLowerCase().trim();
+  const q = _norm(_crearRuta.queryMayoristas);
   // _crearRuta.mayoristas guarda _docKey strings, no id_cliente numbers
   const seleccion = new Set(_crearRuta.mayoristas);
   const disponibles = _mayoristasNoAsignados().filter(m => {
     if (!m) return false;
-    const nombre = String(m.nombre || "").toLowerCase();
-    const doc    = String(m.documento || "").toLowerCase();
+    const nombre = _norm(m.nombre);
+    const doc    = _norm(m.documento);
     const idCl   = String(m.id_cliente ?? "");
     return !q || nombre.includes(q) || doc.includes(q) || idCl.includes(q);
   });
@@ -2046,14 +2058,17 @@ function renderListaCrearMayoristas() {
       const dk       = _docKey(m);
       const idCl     = String(m.id_cliente ?? "");
       const selected = seleccion.has(dk);
-      const peso     = Number(m.peso_kg || 0).toLocaleString("es-MX");
+      const pendiente = _esMayoristaPendiente(m);
+      const pesoTxt  = pendiente
+        ? `<span class="may-tag-pendiente">Pendiente</span>`
+        : `${Number(m.peso_kg || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 })} kg`;
       return `
         <div class="disp-item${selected ? " selected" : ""}" data-doc-key="${h(dk)}">
           <div>
             <span class="nombre">${h(_labelMayorista(m))}</span>
             <span class="num">#${h(idCl)}</span>
           </div>
-          <span class="disp-pend-tag">${peso} kg${selected ? " · seleccionado" : ""}</span>
+          <span class="disp-pend-tag">${pesoTxt}${selected ? " · seleccionado" : ""}</span>
         </div>`;
     }).join("");
   }
@@ -2282,18 +2297,18 @@ function renderDisponibles(query) {
   const asignadas = new Set();
   _rutas.forEach(r => (r.sucursales || []).forEach(s => asignadas.add(String(s.num_tienda))));
 
-  const q = (query || "").toLowerCase().trim();
+  const q = _norm(query);
 
   // Pendientes: fueron quitadas de rutas, no están en asignadas
   const pendientesCoinciden = Object.values(_pendientes).filter(s =>
     !enRuta.has(String(s.num_tienda)) &&
-    (!q || nombreSucursalLabel(s).toLowerCase().includes(q) || String(s.num_tienda).includes(q))
+    (!q || _norm(nombreSucursalLabel(s)).includes(q) || String(s.num_tienda).includes(q))
   );
 
   // Solo sucursales completamente libres (no en ninguna ruta)
   const disponibles = _sucDisponibles.filter(s =>
     !asignadas.has(String(s.num_tienda)) &&
-    (!q || nombreSucursalLabel(s).toLowerCase().includes(q) || String(s.num_tienda).includes(q))
+    (!q || _norm(nombreSucursalLabel(s)).includes(q) || String(s.num_tienda).includes(q))
   ).slice(0, 50);
 
   const pendientesHTML = pendientesCoinciden.length > 0
@@ -2409,13 +2424,13 @@ function renderMayoristasDisponibles(query) {
   const asignados = new Set();
   _rutas.forEach(r => (r.mayoristas || []).forEach(m => asignados.add(_docKey(m))));
   const enRuta = new Set((ruta.mayoristas || []).map(m => _docKey(m)));
-  const q = (query || "").toLowerCase().trim();
+  const q = _norm(query);
 
   const disponibles = _mayoristasTodos.filter(m => {
     if (asignados.has(_docKey(m))) return false;
     if (enRuta.has(_docKey(m))) return false;
     if (!q) return true;
-    return (m.nombre || "").toLowerCase().includes(q) || (m.documento || "").toLowerCase().includes(q) || String(m.id_cliente).includes(q);
+    return _norm(m.nombre).includes(q) || _norm(m.documento).includes(q) || String(m.id_cliente).includes(q);
   }).slice(0, 50);
 
   const listaEl = document.getElementById("lista-disponibles-may");
@@ -2429,14 +2444,17 @@ function renderMayoristasDisponibles(query) {
   }
 
   listaEl.innerHTML = disponibles.map(m => {
-    const peso = (m.peso_kg || 0).toLocaleString("es-MX");
+    const pendiente = _esMayoristaPendiente(m);
+    const detalle = pendiente
+      ? `<span class="may-tag-pendiente">Pendiente</span> · + Agregar`
+      : `${(m.peso_kg || 0).toLocaleString("es-MX", { maximumFractionDigits: 2 })} kg · + Agregar`;
     return `
       <div class="disp-item" data-doc-key="${h(_docKey(m))}">
         <div>
           <span class="nombre">${h(_labelMayorista(m))}</span>
           <span class="num" style="color:#f97316">★ Mayorista</span>
         </div>
-        <span style="color:#2563eb;font-size:0.75rem;font-weight:600">${peso} kg · + Agregar</span>
+        <span style="color:#2563eb;font-size:0.75rem;font-weight:600">${detalle}</span>
       </div>`;
   }).join("");
   lucide.createIcons();
@@ -2855,6 +2873,12 @@ function capitalizar(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ""
 
 function h(s) {
   return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+
+// Normaliza texto para búsquedas: minúsculas + sin acentos/diacríticos.
+// Así "sochiapa" encuentra "Sochiapá" y "JALAPA" encuentra "Jálapa".
+function _norm(s) {
+  return String(s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
 }
 
 function nombreSucursalLabel(s) {

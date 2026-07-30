@@ -1,9 +1,13 @@
+import json
+from datetime import datetime
+
 from bson import ObjectId
 from bson.errors import InvalidId
-from datetime import datetime
-from db import get_db
+from sqlalchemy import select, insert, update, delete, or_
 
-# ── Helpers ────────────────────────────────────────────────
+from db import get_db, get_table
+
+# ── Helpers ────────────────────────────────────────
 ID_CAMPO = {
     "productos":           "clave_sae",
     "sucursales":          "num_tienda",
@@ -11,16 +15,42 @@ ID_CAMPO = {
     "productos_bimbo":     "codigo_barra",
 }
 
-# Colecciones cuyo campo ID se almacena como entero (las demás se tratan como string)
+# Tablas cuyo campo ID se almacena como entero (las demás se tratan como string)
 _ID_NUMERICO = {"sucursales", "clientes_mayoristas"}
 
-def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | None:
+_LIKE_ESPECIALES = str.maketrans({"\\": "\\\\", "%": "\\%", "_": "\\_", "[": "\\["})
+
+
+def _like(valor: str) -> str:
+    """Escapa comodines de LIKE para que una búsqueda de texto se comporte
+    como substring literal (igual que el $regex de Mongo trataba estos
+    caracteres como texto normal, no como comodín)."""
+    return f"%{valor.translate(_LIKE_ESPECIALES)}%"
+
+
+def _prefijo_like(valor: str) -> str:
+    return f"{valor.translate(_LIKE_ESPECIALES)}%"
+
+
+def _nuevo_id() -> str:
+    return str(ObjectId())
+
+
+def _id_valido(doc_id: str) -> "str | None":
+    """Devuelve el mongo_id validado, o None si el string es inválido."""
+    try:
+        return str(ObjectId(doc_id))
+    except (InvalidId, TypeError):
+        return None
+
+
+def _verificar_id_unico(nombre_tabla: str, datos: dict, excluir_id=None) -> "str | None":
     """
-    Devuelve un mensaje de error si el campo ID ya existe en otra doc.
+    Devuelve un mensaje de error si el campo ID ya existe en otra fila.
     Retorna None si la validación pasa (incluye cuando el campo es nulo/vacío).
-    Soporta IDs numéricos (colecciones en _ID_NUMERICO) y string (resto).
+    Soporta IDs numéricos (tablas en _ID_NUMERICO) y string (resto).
     """
-    campo = ID_CAMPO.get(coleccion)
+    campo = ID_CAMPO.get(nombre_tabla)
     if not campo:
         return None
 
@@ -30,7 +60,7 @@ def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | 
     if valor is None or valor == "" or valor != valor:  # NaN check
         return None
 
-    if coleccion in _ID_NUMERICO:
+    if nombre_tabla in _ID_NUMERICO:
         try:
             valor_norm = int(valor)
         except (ValueError, TypeError):
@@ -38,48 +68,67 @@ def _verificar_id_unico(coleccion: str, datos: dict, excluir_oid=None) -> str | 
     else:
         valor_norm = str(valor).strip()
 
-    db = get_db()
-    query = {campo: valor_norm}
-    if excluir_oid:
-        query["_id"] = {"$ne": excluir_oid}
+    db    = get_db()
+    tabla = get_table(nombre_tabla)
+    condicion = tabla.c[campo] == valor_norm
+    consulta = select(tabla.c.mongo_id).where(condicion)
+    if excluir_id:
+        consulta = consulta.where(tabla.c.mongo_id != excluir_id)
 
-    if db[coleccion].find_one(query):
+    if db.execute(consulta).first():
         return f"Ya existe un registro con {campo} = {valor_norm}"
     return None
 
-def _serialize(doc: dict) -> dict:
-    """Convierte _id ObjectId → str. Opera sobre copia para no mutar el original."""
-    doc = dict(doc)
-    doc["_id"] = str(doc["_id"])
-    return doc
 
-def _parse_oid(doc_id: str) -> ObjectId | None:
-    """Devuelve ObjectId o None si el string es inválido."""
-    try:
-        return ObjectId(doc_id)
-    except (InvalidId, TypeError):
-        return None
+def _serialize(row) -> dict:
+    """Convierte mongo_id -> _id. Opera sobre copia para no mutar el original."""
+    d = dict(row)
+    d["_id"] = d.pop("mongo_id")
+    return d
+
 
 def _fecha_completa() -> str:
     """Genera la estampa de tiempo actual para el sistema."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+
 # ── Config general ─────────────────────────────────────────
 def obtener_configuracion() -> dict:
-    db  = get_db()
-    cfg = db.configuracion.find_one({}) or {}
-    if "_id" in cfg:
-        cfg["_id"] = str(cfg["_id"])
+    db    = get_db()
+    tabla = get_table("configuracion")
+    fila  = db.execute(select(tabla)).mappings().first()
+    if not fila:
+        return {}
+    cfg = dict(fila)
+    cfg["_id"] = cfg.pop("mongo_id")
     return cfg
 
+
 def guardar_configuracion(datos: dict) -> dict:
-    db = get_db()
+    """
+    Reemplaza la fila única de configuración con `datos` (igual que el
+    replace_one({}, datos, upsert=True) de Mongo: los campos ausentes de
+    `datos` quedan en NULL, no se conservan valores previos de esos campos).
+    """
+    db    = get_db()
+    tabla = get_table("configuracion")
     datos = dict(datos)
     datos.pop("_id", None)
-    # También rastreamos la modificación en la configuración general
+    datos.pop("mongo_id", None)
     datos["ultima_modificacion"] = _fecha_completa()
-    db.configuracion.replace_one({}, datos, upsert=True)
+
+    columnas = [c.name for c in tabla.columns if c.name != "mongo_id"]
+    valores  = {col: datos.get(col) for col in columnas}
+    if isinstance(valores.get("config_dias"), (dict, list)):
+        valores["config_dias"] = json.dumps(valores["config_dias"], ensure_ascii=False)
+
+    existente = db.execute(select(tabla.c.mongo_id)).first()
+    if existente:
+        db.execute(update(tabla).where(tabla.c.mongo_id == existente.mongo_id).values(**valores))
+    else:
+        db.execute(insert(tabla).values(mongo_id=_nuevo_id(), **valores))
     return {"status": "ok", "mensaje": "Configuración guardada"}
+
 
 # ── Helpers de dominio ─────────────────────────────────────
 def _calcular_volumen_producto(datos: dict) -> float:
@@ -113,46 +162,47 @@ def _calcular_volumen_vehiculo(datos: dict) -> float:
         return 0.0
 
 # ── Base CRUD ──────────────────────────────────────────────
-def _listar(coleccion: str, campo_busqueda, nombre: str = "", fecha: str = "", sort_field: str = "") -> list:
+def _listar(nombre_tabla: str, campo_busqueda, nombre: str = "", fecha: str = "", sort_field: str = "") -> list:
     db    = get_db()
-    query: dict = {}
+    tabla = get_table(nombre_tabla)
+    consulta = select(tabla)
 
     if nombre:
-        if isinstance(campo_busqueda, list):
-            query["$or"] = [{c: {"$regex": nombre, "$options": "i"}} for c in campo_busqueda]
-        else:
-            query[campo_busqueda] = {"$regex": nombre, "$options": "i"}
+        campos = campo_busqueda if isinstance(campo_busqueda, list) else [campo_busqueda]
+        condiciones = [tabla.c[c].like(_like(nombre), escape="\\") for c in campos]
+        consulta = consulta.where(or_(*condiciones))
 
     if fecha:
-        # Busca por la parte de la fecha en la cadena de 'ultima_modificacion'
-        query["ultima_modificacion"] = {"$regex": f"^{fecha}"}
+        consulta = consulta.where(tabla.c.ultima_modificacion.like(_prefijo_like(fecha), escape="\\"))
 
-    cursor = db[coleccion].find(query)
     if sort_field:
-        cursor = cursor.sort(sort_field, 1)
+        consulta = consulta.order_by(tabla.c[sort_field])
 
-    return [_serialize(doc) for doc in cursor]
+    return [_serialize(f) for f in db.execute(consulta).mappings().all()]
 
-def _obtener(coleccion: str, doc_id: str) -> dict | None:
-    oid = _parse_oid(doc_id)
-    if oid is None:
+def _obtener(nombre_tabla: str, doc_id: str) -> "dict | None":
+    did = _id_valido(doc_id)
+    if did is None:
         return None
-    db  = get_db()
-    doc = db[coleccion].find_one({"_id": oid})
-    return _serialize(doc) if doc else None
+    db    = get_db()
+    tabla = get_table(nombre_tabla)
+    fila  = db.execute(select(tabla).where(tabla.c.mongo_id == did)).mappings().first()
+    return _serialize(fila) if fila else None
 
-def _agregar(coleccion: str, datos: dict) -> dict:
-    db = get_db()
+def _agregar(nombre_tabla: str, datos: dict) -> dict:
+    db    = get_db()
+    tabla = get_table(nombre_tabla)
     datos = dict(datos)
     datos.pop("_id", None)
+    datos.pop("mongo_id", None)
 
     # Normalizar campo ID: eliminar si vacío; convertir a int (numérico) o string (resto)
-    campo = ID_CAMPO.get(coleccion)
+    campo = ID_CAMPO.get(nombre_tabla)
     if campo:
         valor = datos.get(campo)
         if valor == "" or valor is None:
             datos.pop(campo, None)
-        elif coleccion in _ID_NUMERICO:
+        elif nombre_tabla in _ID_NUMERICO:
             try:
                 datos[campo] = int(valor)
             except ValueError:
@@ -160,38 +210,41 @@ def _agregar(coleccion: str, datos: dict) -> dict:
         else:
             datos[campo] = str(valor).strip()
 
-    error = _verificar_id_unico(coleccion, datos)
+    error = _verificar_id_unico(nombre_tabla, datos)
     if error:
         return {"status": "error", "mensaje": error}
 
-    if coleccion in ("productos", "productos_proalmex"):
+    if nombre_tabla in ("productos", "productos_proalmex"):
         datos['volumen'] = _calcular_volumen_producto(datos)
-    elif coleccion == "productos_bimbo":
+    elif nombre_tabla == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
-    elif coleccion == "vehiculos":
+    elif nombre_tabla == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         datos.setdefault("activo", True)
-        datos["chofer_id"] = _parse_oid(datos.get("chofer_id")) if datos.get("chofer_id") else None
+        datos["chofer_id"] = _id_valido(datos.get("chofer_id")) if datos.get("chofer_id") else None
 
     datos["ultima_modificacion"] = _fecha_completa()
-    result = db[coleccion].insert_one(datos)
-    return {"status": "ok", "id": str(result.inserted_id)}
+    nuevo_id = _nuevo_id()
+    db.execute(insert(tabla).values(mongo_id=nuevo_id, **{k: v for k, v in datos.items() if k in tabla.columns}))
+    return {"status": "ok", "id": nuevo_id}
 
-def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
-    oid = _parse_oid(doc_id)
-    if oid is None:
+def _editar(nombre_tabla: str, doc_id: str, datos: dict) -> dict:
+    did = _id_valido(doc_id)
+    if did is None:
         return {"status": "error", "mensaje": "ID inválido"}
-    db = get_db()
+    db    = get_db()
+    tabla = get_table(nombre_tabla)
     datos = dict(datos)
     datos.pop("_id", None)
+    datos.pop("mongo_id", None)
 
     # Normalizar campo ID: eliminar si vacío; convertir a int (numérico) o string (resto)
-    campo = ID_CAMPO.get(coleccion)
+    campo = ID_CAMPO.get(nombre_tabla)
     if campo:
         valor = datos.get(campo)
         if valor == "" or valor is None:
             datos.pop(campo, None)
-        elif coleccion in _ID_NUMERICO:
+        elif nombre_tabla in _ID_NUMERICO:
             try:
                 datos[campo] = int(valor)
             except ValueError:
@@ -199,90 +252,90 @@ def _editar(coleccion: str, doc_id: str, datos: dict) -> dict:
         else:
             datos[campo] = str(valor).strip()
 
-    error = _verificar_id_unico(coleccion, datos, excluir_oid=oid)
+    error = _verificar_id_unico(nombre_tabla, datos, excluir_id=did)
     if error:
         return {"status": "error", "mensaje": error}
 
     datos["ultima_modificacion"] = _fecha_completa()
     # Si la llave se eliminó con pop(), no se sobrescribirá si ya existía.
-    # Para limpiar un ID existente a vacío, usamos $unset
-    if coleccion in ("productos", "productos_proalmex"):
+    # Para limpiar un ID existente a vacío, la ponemos explícitamente a NULL.
+    if nombre_tabla in ("productos", "productos_proalmex"):
         datos['volumen'] = _calcular_volumen_producto(datos)
-    elif coleccion == "productos_bimbo":
+    elif nombre_tabla == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
-    elif coleccion == "vehiculos":
+    elif nombre_tabla == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         if "chofer_id" in datos:
-            datos["chofer_id"] = _parse_oid(datos.get("chofer_id")) if datos.get("chofer_id") else None
+            datos["chofer_id"] = _id_valido(datos.get("chofer_id")) if datos.get("chofer_id") else None
 
-    update_query = {"$set": datos}
+    valores = {k: v for k, v in datos.items() if k in tabla.columns}
     if campo and campo not in datos:
-        update_query["$unset"] = {campo: ""}
+        valores[campo] = None
 
-    result = db[coleccion].update_one({"_id": oid}, update_query)
-    
-    if result.matched_count == 0:
+    resultado = db.execute(update(tabla).where(tabla.c.mongo_id == did).values(**valores))
+    if resultado.rowcount == 0:
         return {"status": "error", "mensaje": "Documento no encontrado"}
     return {"status": "ok"}
 
-def _eliminar(coleccion: str, doc_id: str) -> dict:
-    oid = _parse_oid(doc_id)
-    if oid is None:
+def _eliminar(nombre_tabla: str, doc_id: str) -> dict:
+    did = _id_valido(doc_id)
+    if did is None:
         return {"status": "error", "mensaje": "ID inválido"}
-    db     = get_db()
-    result = db[coleccion].delete_one({"_id": oid})
-    if result.deleted_count == 0:
+    db    = get_db()
+    tabla = get_table(nombre_tabla)
+    resultado = db.execute(delete(tabla).where(tabla.c.mongo_id == did))
+    if resultado.rowcount == 0:
         return {"status": "error", "mensaje": "Documento no encontrado"}
     return {"status": "ok"}
 
 # ── Funciones de Dominio (Productos, Sucursales, Vehículos) ──
 def listar_productos(nombre: str = "", fecha: str = "") -> list:
     db    = get_db()
-    query: dict = {}
+    tabla = get_table("productos")
+    consulta = select(tabla)
     if nombre:
-        or_conds = [
-            {"descripcion": {"$regex": nombre, "$options": "i"}},
-            {"marca":       {"$regex": nombre, "$options": "i"}},
+        condiciones = [
+            tabla.c.descripcion.like(_like(nombre), escape="\\"),
+            tabla.c.marca.like(_like(nombre), escape="\\"),
+            tabla.c.clave_sae.like(_like(nombre), escape="\\"),
         ]
-        or_conds.append({"clave_sae": {"$regex": nombre, "$options": "i"}})
-        try:
-            or_conds.append({"clave_sae": int(nombre)})
-        except (ValueError, TypeError):
-            pass
-        query["$or"] = or_conds
+        consulta = consulta.where(or_(*condiciones))
     if fecha:
-        query["ultima_modificacion"] = {"$regex": f"^{fecha}"}
-    return [_serialize(doc) for doc in db["productos"].find(query).sort("marca", 1)]
+        consulta = consulta.where(tabla.c.ultima_modificacion.like(_prefijo_like(fecha), escape="\\"))
+    consulta = consulta.order_by(tabla.c.marca)
+    return [_serialize(f) for f in get_db().execute(consulta).mappings().all()]
 def obtener_producto(producto_id: str): return _obtener("productos", producto_id)
 
-def buscar_producto_por_clave(clave_sae) -> dict | None:
+def buscar_producto_por_clave(clave_sae) -> "dict | None":
     clave_str = str(clave_sae).strip() if clave_sae else ""
     if not clave_str:
         return None
-    db  = get_db()
-    doc = db["productos"].find_one({"clave_sae": clave_str})
-    if not doc:
+    db    = get_db()
+    tabla = get_table("productos")
+    fila = db.execute(select(tabla).where(tabla.c.clave_sae == clave_str)).mappings().first()
+    if not fila:
         try:
-            doc = db["productos"].find_one({"clave_sae": int(clave_str)})
+            fila = db.execute(select(tabla).where(tabla.c.clave_sae == str(int(clave_str)))).mappings().first()
         except (ValueError, TypeError):
             pass
-    return _serialize(doc) if doc else None
+    return _serialize(fila) if fila else None
 def agregar_producto(datos: dict): return _agregar("productos", datos)
 def editar_producto(producto_id: str, datos: dict): return _editar("productos", producto_id, datos)
 def eliminar_producto(producto_id: str): return _eliminar("productos", producto_id)
 
-def buscar_producto_proalmex_por_clave(clave_sae) -> dict | None:
+def buscar_producto_proalmex_por_clave(clave_sae) -> "dict | None":
     clave_str = str(clave_sae).strip() if clave_sae else ""
     if not clave_str:
         return None
-    db  = get_db()
-    doc = db["productos_proalmex"].find_one({"clave_sae": clave_str})
-    if not doc:
+    db    = get_db()
+    tabla = get_table("productos_proalmex")
+    fila = db.execute(select(tabla).where(tabla.c.clave_sae == clave_str)).mappings().first()
+    if not fila:
         try:
-            doc = db["productos_proalmex"].find_one({"clave_sae": int(clave_str)})
+            fila = db.execute(select(tabla).where(tabla.c.clave_sae == str(int(clave_str)))).mappings().first()
         except (ValueError, TypeError):
             pass
-    return _serialize(doc) if doc else None
+    return _serialize(fila) if fila else None
 
 def listar_productos_proalmex(nombre: str = "", fecha: str = ""): return _listar("productos_proalmex", ["marca", "linea", "tamano"], nombre, fecha, "marca")
 def obtener_producto_proalmex(producto_id: str): return _obtener("productos_proalmex", producto_id)
@@ -296,7 +349,21 @@ def agregar_producto_bimbo(datos: dict): return _agregar("productos_bimbo", dato
 def editar_producto_bimbo(producto_id: str, datos: dict): return _editar("productos_bimbo", producto_id, datos)
 def eliminar_producto_bimbo(producto_id: str): return _eliminar("productos_bimbo", producto_id)
 
-def listar_sucursales(nombre: str = "", fecha: str = ""): return _listar("sucursales", ["nombre_base", "nombre_icg-proalmex", "nombre_bimbo"], nombre, fecha, "num_tienda")
+def listar_sucursales(nombre: str = "", fecha: str = "") -> list:
+    db    = get_db()
+    tabla = get_table("sucursales")
+    consulta = select(tabla)
+    if nombre:
+        condiciones = [
+            tabla.c.nombre_base.like(_like(nombre), escape="\\"),
+            tabla.c["nombre_icg-proalmex"].like(_like(nombre), escape="\\"),
+            tabla.c.nombre_bimbo.like(_like(nombre), escape="\\"),
+        ]
+        consulta = consulta.where(or_(*condiciones))
+    if fecha:
+        consulta = consulta.where(tabla.c.ultima_modificacion.like(_prefijo_like(fecha), escape="\\"))
+    consulta = consulta.order_by(tabla.c.num_tienda)
+    return [_serialize(f) for f in db.execute(consulta).mappings().all()]
 def obtener_sucursal(sucursal_id: str): return _obtener("sucursales", sucursal_id)
 def agregar_sucursal(datos: dict): return _agregar("sucursales", datos)
 def editar_sucursal(sucursal_id: str, datos: dict): return _editar("sucursales", sucursal_id, datos)
@@ -305,41 +372,42 @@ def eliminar_sucursal(sucursal_id: str): return _eliminar("sucursales", sucursal
 def listar_vehiculos(nombre: str = "", fecha: str = ""): return _listar("vehiculos", ["placas", "abreviatura", "descripcion"], nombre, fecha, "placas")
 
 def toggle_activo_vehiculo(vehiculo_id: str) -> dict:
-    oid = _parse_oid(vehiculo_id)
-    if oid is None:
+    vid = _id_valido(vehiculo_id)
+    if vid is None:
         return {"status": "error", "mensaje": "ID inválido"}
-    db  = get_db()
-    doc = db.vehiculos.find_one({"_id": oid}, {"activo": 1})
-    if doc is None:
+    db    = get_db()
+    tabla = get_table("vehiculos")
+    fila  = db.execute(select(tabla.c.activo).where(tabla.c.mongo_id == vid)).mappings().first()
+    if fila is None:
         return {"status": "error", "mensaje": "Vehículo no encontrado"}
-    nuevo = not doc.get("activo", True)
-    db.vehiculos.update_one({"_id": oid}, {"$set": {"activo": nuevo, "ultima_modificacion": _fecha_completa()}})
+    nuevo = not (fila["activo"] if fila["activo"] is not None else True)
+    db.execute(update(tabla).where(tabla.c.mongo_id == vid).values(activo=nuevo, ultima_modificacion=_fecha_completa()))
     return {"status": "ok", "activo": nuevo}
 def obtener_vehiculo(vehiculo_id: str): return _obtener("vehiculos", vehiculo_id)
 def agregar_vehiculo(datos: dict): return _agregar("vehiculos", datos)
 def editar_vehiculo(vehiculo_id: str, datos: dict): return _editar("vehiculos", vehiculo_id, datos)
 def eliminar_vehiculo(vehiculo_id: str): return _eliminar("vehiculos", vehiculo_id)
 
-def actualizar_chofer_vehiculo(vehiculo_id: str, chofer: str, chofer_id: str | None = None) -> dict:
+def actualizar_chofer_vehiculo(vehiculo_id: str, chofer: str, chofer_id: "str | None" = None) -> dict:
     """
     Actualiza el campo `chofer` (nombre, para PDF/UI existente) y, si se
-    provee, `chofer_id` (referencia real a la colección `choferes`, usada
+    provee, `chofer_id` (referencia real a la tabla `choferes`, usada
     por el portal del Conductor para saber con certeza qué rutas son suyas).
     """
-    oid = _parse_oid(vehiculo_id)
-    if oid is None:
+    vid = _id_valido(vehiculo_id)
+    if vid is None:
         return {"status": "error", "mensaje": "ID inválido"}
-    db = get_db()
-    chofer_oid = _parse_oid(chofer_id) if chofer_id else None
-    result = db.vehiculos.update_one(
-        {"_id": oid},
-        {"$set": {
-            "chofer":             (chofer or "").strip(),
-            "chofer_id":          chofer_oid,
-            "ultima_modificacion": _fecha_completa(),
-        }},
+    db    = get_db()
+    tabla = get_table("vehiculos")
+    chofer_vid = _id_valido(chofer_id) if chofer_id else None
+    resultado = db.execute(
+        update(tabla).where(tabla.c.mongo_id == vid).values(
+            chofer=(chofer or "").strip(),
+            chofer_id=chofer_vid,
+            ultima_modificacion=_fecha_completa(),
+        )
     )
-    if result.matched_count == 0:
+    if resultado.rowcount == 0:
         return {"status": "error", "mensaje": "Vehículo no encontrado"}
     return {"status": "ok"}
 
@@ -357,8 +425,12 @@ def agregar_chofer(datos: dict) -> dict:
     nombre = (datos.get("nombre") or "").strip()
     if not nombre:
         return {"status": "error", "mensaje": "El nombre del chofer es obligatorio."}
-    db = get_db()
-    if db.choferes.find_one({"nombre": {"$regex": f"^{nombre}$", "$options": "i"}}):
+    db    = get_db()
+    tabla = get_table("choferes")
+    # La columna usa collation *_CI_AS (case-insensitive), así que "==" ya
+    # compara sin distinguir mayúsculas/minúsculas — replica el
+    # {"$regex": f"^{nombre}$", "$options": "i"} original (coincidencia exacta).
+    if db.execute(select(tabla.c.mongo_id).where(tabla.c.nombre == nombre)).first():
         return {"status": "error", "mensaje": "Ya existe un chofer con ese nombre."}
     return _agregar("choferes", {"nombre": nombre})
 
@@ -371,13 +443,14 @@ def editar_cliente_mayorista(cliente_id: str, datos: dict): return _editar("clie
 def eliminar_cliente_mayorista(cliente_id: str): return _eliminar("clientes_mayoristas", cliente_id)
 
 def toggle_activo_cliente_mayorista(cliente_id: str) -> dict:
-    oid = _parse_oid(cliente_id)
-    if oid is None:
+    cid = _id_valido(cliente_id)
+    if cid is None:
         return {"status": "error", "mensaje": "ID inválido"}
-    db  = get_db()
-    doc = db.clientes_mayoristas.find_one({"_id": oid}, {"activo": 1})
-    if doc is None:
+    db    = get_db()
+    tabla = get_table("clientes_mayoristas")
+    fila  = db.execute(select(tabla.c.activo).where(tabla.c.mongo_id == cid)).mappings().first()
+    if fila is None:
         return {"status": "error", "mensaje": "Cliente no encontrado"}
-    nuevo = not doc.get("activo", True)
-    db.clientes_mayoristas.update_one({"_id": oid}, {"$set": {"activo": nuevo, "ultima_modificacion": _fecha_completa()}})
+    nuevo = not (fila["activo"] if fila["activo"] is not None else True)
+    db.execute(update(tabla).where(tabla.c.mongo_id == cid).values(activo=nuevo, ultima_modificacion=_fecha_completa()))
     return {"status": "ok", "activo": nuevo}

@@ -2178,6 +2178,8 @@ function h(s) {
     const btnGen  = document.getElementById("btn-generar-vrp");
     const spinner = document.getElementById("vrp-spinner");
     const reporte = document.getElementById("vrp-reporte");
+    const fill    = document.getElementById("vrp-progress-fill");
+    const tiempoEl= document.getElementById("vrp-progress-tiempo");
 
     btnGen.disabled        = true;
     spinner.style.display  = "";
@@ -2197,11 +2199,24 @@ function h(s) {
       mi++;
     }, 900);
 
+    // Barra de progreso: el POST no reporta avance real, así que la barra
+    // sube asintóticamente hacia ~92 % y se completa a 100 % al llegar la
+    // respuesta. El cronómetro muestra el tiempo transcurrido.
+    let pct = 0;
+    const t0 = Date.now();
+    if (fill) fill.style.width = "0%";
+    const progTimer = setInterval(() => {
+      pct += (92 - pct) * 0.08;
+      if (fill)     fill.style.width      = pct.toFixed(1) + "%";
+      if (tiempoEl) tiempoEl.textContent  = `${((Date.now() - t0) / 1000).toFixed(0)} s`;
+    }, 350);
+    const _detener = () => { clearInterval(ticker); clearInterval(progTimer); };
+
     try {
       const res  = await fetch("/asignacion/generar-vrp-historico", { method: "POST" });
       const data = await res.json();
-      clearInterval(ticker);
-      spinner.style.display = "none";
+      _detener();
+      if (fill) fill.style.width = "100%";
 
       if (data.status === "ok") {
         renderReporte(data.reporte, data.consolidaciones || [], null);
@@ -2212,8 +2227,9 @@ function h(s) {
         lucide.createIcons();
         mostrarAlerta(data.mensaje || "Error al generar", "error");
       }
+      setTimeout(() => { spinner.style.display = "none"; }, 450);
     } catch (e) {
-      clearInterval(ticker);
+      _detener();
       spinner.style.display = "none";
       hint.innerHTML = `<i data-lucide="x-circle" style="width:14px;height:14px;vertical-align:middle;color:#dc2626"></i> Error de conexión`;
       lucide.createIcons();

@@ -1,7 +1,7 @@
 import pandas as pd
 
 class LectorICG:
-    COLUMNAS_IGNORAR = ['TOTAL PIEZAS', 'TOTAL CAJAS', 'TOTAL IMPORTE', 'INV. BODEGA', 'INV. DISPONIBLE', 'COSTO', 'cap', 'CAP ICG', 'Costo','Importe','Total Cajas','PEDIDO','PIEZAS','']
+    COLUMNAS_IGNORAR = ['TOTAL PIEZAS', 'TOTAL CAJAS', 'TOTAL IMPORTE', 'INV. BODEGA', 'INV. DISPONIBLE', 'OBSERVACIONES', 'COSTO', 'cap', 'CAP ICG', 'Costo','Importe','Total Cajas','PEDIDO','PIEZAS','']
     COLUMNAS_METADATA = ['#', 'Proveedor', 'Línea', 'Marca', 'PROVEEDOR', 'CLAVE SAE', 'Descripción', 'Tamaño', 'Clave', 'Producto', 'Origen']
 
     @classmethod
@@ -19,6 +19,8 @@ class LectorICG:
                 or 'CAJAS' in str(col).upper()
                 or 'COMPRAS' in str(col).upper()
                 or 'VTA' in str(col).upper()
+                or 'OBSERV' in str(col).upper()
+                or 'BODEGA' in str(col).upper()
             ]
 
             df = df.drop(columns=cols_a_borrar, errors='ignore')

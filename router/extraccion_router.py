@@ -1,11 +1,26 @@
+import json
+from datetime import datetime
+
 from flask import Blueprint, render_template, request, jsonify, session, redirect, url_for
+
+from bson import ObjectId
+from bson.errors import InvalidId
+from sqlalchemy import select, insert, update, delete
+
 from logic.extraccion_logic import procesar_archivos_extraccion, procesar_mayoristas
 
 extraccion_bp = Blueprint('extraccion', __name__)
 
 
-def _logistica_id() -> str | None:
+def _logistica_id() -> "str | None":
     return session.get('logistica_id')
+
+
+def _id_valido(doc_id: str) -> "str | None":
+    try:
+        return str(ObjectId(doc_id))
+    except (InvalidId, TypeError):
+        return None
 
 
 # ── Vistas ──────────────────────────────────────────────────────────────────
@@ -57,20 +72,81 @@ def procesar():
     return jsonify(resultado)
 
 
+# ── Helpers de desglose (extraccion_desglose) ────────────────────────────────
+
+def _id_sucursal_int(valor) -> "int | None":
+    """
+    Coacciona id_sucursal a int para la columna INT de extraccion_desglose.
+
+    Las sucursales del pedido que no cruzan con el catálogo llegan con
+    id_sucursal == 'N/A' (marcador de "sin match", ver calculadora.py). Ese
+    valor —o cualquier otro no numérico— no cabe en una columna INT de SQL
+    Server (falla con "Conversion failed ... to data type int"), así que aquí
+    se normaliza a NULL. El marcador textual se conserva íntegro en el JSON
+    `datos`/`datos_volumen`, que es la fuente que consumen pesos/volúmenes.
+    """
+    if valor is None:
+        return None
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return None
+
+
+def _desglose_a_filas(extraccion_id: str, logistica_id: str, tipo_medida: str, desglose: dict) -> list:
+    """
+    Aplana desglose[marca][nombre_sucursal] = {id_sucursal, kg|m3} en filas
+    listas para insertar en extraccion_desglose.
+    """
+    campo_valor = 'kg' if tipo_medida == 'kg' else 'm3'
+    filas = []
+    for marca, por_sucursal in (desglose or {}).items():
+        if not isinstance(por_sucursal, dict):
+            continue
+        for nombre_sucursal, valores in por_sucursal.items():
+            if not isinstance(valores, dict):
+                continue
+            filas.append({
+                'extraccion_id':    extraccion_id,
+                'logistica_id':     logistica_id,
+                'tipo_medida':      tipo_medida,
+                'marca':            marca,
+                'nombre_sucursal':  nombre_sucursal,
+                'id_sucursal':      _id_sucursal_int(valores.get('id_sucursal')),
+                'valor':            valores.get(campo_valor),
+            })
+    return filas
+
+
+def _filas_a_desglose(filas: list, campo_valor: str) -> dict:
+    """Inverso de _desglose_a_filas: reconstruye desglose[marca][nombre_sucursal] = {id_sucursal, kg|m3}."""
+    desglose: dict = {}
+    for f in filas:
+        desglose.setdefault(f.marca, {})[f.nombre_sucursal] = {
+            'id_sucursal': f.id_sucursal,
+            campo_valor:   f.valor,
+        }
+    return desglose
+
+
 # ── Obtener datos guardados ──────────────────────────────────────────────────
 @extraccion_bp.route('/datos', methods=['GET'])
 def obtener_datos():
-    """Retorna los datos guardados en MongoDB para la logística activa."""
+    """Retorna los datos guardados en SQL Server para la logística activa."""
     lid = _logistica_id()
     if not lid:
         return jsonify({'status': 'error', 'mensaje': 'No hay logística activa.'}), 400
 
-    try:
-        from db import get_db
-        from bson import ObjectId
+    oid = _id_valido(lid)
+    if oid is None:
+        return jsonify({'status': 'error', 'mensaje': 'Logística inválida.'}), 400
 
-        db  = get_db()
-        doc = db['extraccion'].find_one({'logistica_id': ObjectId(lid)})
+    try:
+        from db import get_db, get_table
+
+        db      = get_db()
+        tabla   = get_table('extraccion')
+        doc = db.execute(select(tabla).where(tabla.c.logistica_id == oid)).mappings().first()
         if not doc:
             return jsonify({
                 'status':           'ok',
@@ -80,22 +156,26 @@ def obtener_datos():
                 'desglose_volumen': {},
             })
 
+        t_desglose = get_table('extraccion_desglose')
+        filas_kg = db.execute(select(t_desglose).where(t_desglose.c.logistica_id == oid, t_desglose.c.tipo_medida == 'kg')).all()
+        filas_m3 = db.execute(select(t_desglose).where(t_desglose.c.logistica_id == oid, t_desglose.c.tipo_medida == 'm3')).all()
+
         return jsonify({
             'status':           'ok',
-            'data':             doc.get('datos',             {}),
-            'desglose':         doc.get('desglose',          {}),
-            'datos_volumen':    doc.get('datos_volumen',     {}),
-            'desglose_volumen': doc.get('desglose_volumen',  {}),
+            'data':             json.loads(doc['datos']) if doc['datos'] else {},
+            'desglose':         _filas_a_desglose(filas_kg, 'kg'),
+            'datos_volumen':    json.loads(doc['datos_volumen']) if doc['datos_volumen'] else {},
+            'desglose_volumen': _filas_a_desglose(filas_m3, 'm3'),
         })
     except Exception as e:
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
 
 
-# ── Guardar en MongoDB ───────────────────────────────────────────────────────
+# ── Guardar en SQL Server ───────────────────────────────────────────────────
 @extraccion_bp.route('/guardar', methods=['POST'])
 def guardar():
     """
-    Guarda peso + volumen en MongoDB asociados a la logística activa.
+    Guarda peso + volumen en SQL Server asociados a la logística activa.
 
     Payload esperado:
       {
@@ -129,25 +209,43 @@ def guardar():
         desglose_volumen  = {}
 
     try:
-        from db import get_db
-        from bson import ObjectId
-        from datetime import datetime
+        from db import get_table, transaccion
 
-        oid = ObjectId(lid)
-        db  = get_db()
-        db['extraccion'].update_one(
-            {'logistica_id': oid},
-            {'$set': {
-                'logistica_id':    oid,
-                'datos':           datos,
-                'desglose':        desglose,
-                'datos_volumen':   datos_volumen,
-                'desglose_volumen': desglose_volumen,
-                'guardado_en':     datetime.now().isoformat(),
-            }},
-            upsert=True,
-        )
-        return jsonify({'status': 'ok', 'mensaje': 'Datos guardados en MongoDB.'})
+        oid   = _id_valido(lid)
+        if oid is None:
+            return jsonify({'status': 'error', 'mensaje': 'Logística inválida.'}), 400
+
+        tabla      = get_table('extraccion')
+        t_desglose = get_table('extraccion_desglose')
+
+        # Todo el guardado (fila de extraccion + reemplazo de su desglose) es
+        # una sola unidad atómica — en Mongo era un único $set de un mismo
+        # documento; aquí son varias sentencias sobre dos tablas, así que
+        # necesitan una transacción real (ver db.transaccion()).
+        with transaccion() as conn:
+            existente = conn.execute(select(tabla.c.mongo_id).where(tabla.c.logistica_id == oid)).first()
+            valores = {
+                'logistica_id':  oid,
+                'datos':         json.dumps(datos, ensure_ascii=False),
+                'datos_volumen': json.dumps(datos_volumen, ensure_ascii=False),
+                'guardado_en':   datetime.now().isoformat(),
+            }
+            if existente:
+                extraccion_id = existente.mongo_id
+                conn.execute(update(tabla).where(tabla.c.mongo_id == extraccion_id).values(**valores))
+            else:
+                extraccion_id = str(ObjectId())
+                conn.execute(insert(tabla).values(mongo_id=extraccion_id, **valores))
+
+            conn.execute(delete(t_desglose).where(t_desglose.c.logistica_id == oid))
+            filas = (
+                _desglose_a_filas(extraccion_id, oid, 'kg', desglose)
+                + _desglose_a_filas(extraccion_id, oid, 'm3', desglose_volumen)
+            )
+            if filas:
+                conn.execute(insert(t_desglose), filas)
+
+        return jsonify({'status': 'ok', 'mensaje': 'Datos guardados en SQL Server.'})
     except Exception as e:
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
 
@@ -169,21 +267,25 @@ def procesar_mayoristas_endpoint():
 
 @extraccion_bp.route('/datos-mayoristas', methods=['GET'])
 def obtener_datos_mayoristas():
-    """Retorna el consolidado de mayoristas guardado en MongoDB."""
+    """Retorna el consolidado de mayoristas guardado en SQL Server."""
     lid = _logistica_id()
     if not lid:
         return jsonify({'status': 'error', 'mensaje': 'No hay logística activa.'}), 400
 
     try:
-        from db import get_db
-        from bson import ObjectId
+        from db import get_db, get_table
 
-        db  = get_db()
-        doc = db['extraccion'].find_one({'logistica_id': ObjectId(lid)})
-        if not doc or 'mayoristas' not in doc:
+        oid = _id_valido(lid)
+        if oid is None:
+            return jsonify({'status': 'error', 'mensaje': 'Logística inválida.'}), 400
+
+        db    = get_db()
+        tabla = get_table('extraccion')
+        doc = db.execute(select(tabla.c.mayoristas).where(tabla.c.logistica_id == oid)).mappings().first()
+        if not doc or doc['mayoristas'] is None:
             return jsonify({'status': 'ok', 'consolidado': None})
 
-        return jsonify({'status': 'ok', 'consolidado': doc.get('mayoristas')})
+        return jsonify({'status': 'ok', 'consolidado': json.loads(doc['mayoristas'])})
     except Exception as e:
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
 
@@ -191,9 +293,9 @@ def obtener_datos_mayoristas():
 @extraccion_bp.route('/guardar-mayoristas', methods=['POST'])
 def guardar_mayoristas():
     """
-    Guarda el consolidado de Clientes Mayoristas en MongoDB asociado a la
-    logística activa. El campo 'mayoristas' se escribe dentro del mismo
-    documento de extracción que usa el pipeline de Tiendas Lores.
+    Guarda el consolidado de Clientes Mayoristas en SQL Server asociado a la
+    logística activa. El campo 'mayoristas' se escribe dentro de la misma
+    fila de extracción que usa el pipeline de Tiendas Lores.
 
     Payload esperado:
       { "consolidado": [ {codigo, nombre, peso_total_kg}, … ] }
@@ -210,21 +312,24 @@ def guardar_mayoristas():
         return jsonify({'status': 'error', 'mensaje': 'No se recibieron datos para guardar.'}), 400
 
     try:
-        from db import get_db
-        from bson import ObjectId
-        from datetime import datetime
+        from db import get_db, get_table
 
-        oid = ObjectId(lid)
-        db  = get_db()
-        db['extraccion'].update_one(
-            {'logistica_id': oid},
-            {'$set': {
-                'logistica_id':       oid,
-                'mayoristas':         payload['consolidado'],
-                'mayoristas_guardado_en': datetime.now().isoformat(),
-            }},
-            upsert=True,
-        )
+        oid = _id_valido(lid)
+        if oid is None:
+            return jsonify({'status': 'error', 'mensaje': 'Logística inválida.'}), 400
+
+        db    = get_db()
+        tabla = get_table('extraccion')
+        valores = {
+            'mayoristas':             json.dumps(payload['consolidado'], ensure_ascii=False),
+            'mayoristas_guardado_en': datetime.now().isoformat(),
+        }
+        existente = db.execute(select(tabla.c.mongo_id).where(tabla.c.logistica_id == oid)).first()
+        if existente:
+            db.execute(update(tabla).where(tabla.c.mongo_id == existente.mongo_id).values(**valores))
+        else:
+            db.execute(insert(tabla).values(mongo_id=str(ObjectId()), logistica_id=oid, **valores))
+
         return jsonify({'status': 'ok', 'mensaje': 'Datos de mayoristas guardados.'})
     except Exception as e:
         return jsonify({'status': 'error', 'mensaje': str(e)}), 500
@@ -242,7 +347,8 @@ def eliminar_fuente():
     Para Mayoristas elimina el campo del documento de extracción.
     Para Tiendas Lores (icg/bimbo/proalmex) los datos ya quedan vacíos al
     guardar el consolidado sin esa fuente; aquí solo se limpian asignaciones.
-    En todos los casos borra asignaciones y reportes VRP de la logística activa.
+    En todos los casos borra asignaciones y reportes VRP de la logística activa
+    (base + todas sus tablas normalizadas hijas).
     """
     lid = _logistica_id()
     if not lid:
@@ -254,22 +360,26 @@ def eliminar_fuente():
         return jsonify({'status': 'error', 'mensaje': f'Fuente inválida: "{fuente}"'}), 400
 
     try:
-        from db import get_db
-        from bson import ObjectId
+        from db import get_db, get_table
+        from logic.menu_logic import eliminar_datos_asignacion, eliminar_datos_vrp_reportes
 
-        oid = ObjectId(lid)
-        db  = get_db()
+        oid = _id_valido(lid)
+        if oid is None:
+            return jsonify({'status': 'error', 'mensaje': 'Logística inválida.'}), 400
+
+        db = get_db()
 
         # Para Mayoristas: eliminar el campo del documento de extracción
         if fuente == 'mayoristas':
-            db['extraccion'].update_one(
-                {'logistica_id': oid},
-                {'$unset': {'mayoristas': '', 'mayoristas_guardado_en': ''}},
+            tabla = get_table('extraccion')
+            db.execute(
+                update(tabla).where(tabla.c.logistica_id == oid)
+                .values(mayoristas=None, mayoristas_guardado_en=None)
             )
 
-        # Limpiar asignaciones y reportes VRP para forzar regeneración
-        for coleccion in ('asignaciones', 'vrp_reportes'):
-            db[coleccion].delete_one({'logistica_id': oid})
+        # Limpiar asignaciones y reportes VRP (+ tablas normalizadas) para forzar regeneración
+        eliminar_datos_asignacion(oid)
+        eliminar_datos_vrp_reportes(oid)
 
         return jsonify({
             'status':  'ok',

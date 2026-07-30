@@ -2,44 +2,34 @@
 logic/menu_logistica.py
 Lógica de negocio para la gestión de Logísticas semanales.
 
-Renombrado desde logistica_logic.py para unificar la nomenclatura del módulo
-de menú principal bajo el prefijo "menu_".
-
-Cada logística almacena SOLO metadatos en la colección `logisticas`.
+Cada logística almacena SOLO metadatos en la tabla `logisticas`.
 Los datos operativos (extraccion, asignacion, etc.) viven en sus propias
-colecciones con referencia a logistica_id:
+tablas con referencia a logistica_id:
 
   logisticas           → metadatos (nombre, fechas, estado)
-  extraccion           → { logistica_id, datos, guardado_en }
-  asignaciones         → { logistica_id, ...payload }
-  modificaciones_rutas → { logistica_id, rutas_confirmadas, ... }
-  config_dias          → { logistica_id, config_dias, actualizado_en }
+  extraccion           → { logistica_id, datos, guardado_en, ... }
+  asignaciones (+ tablas normalizadas) → { logistica_id, ...payload }
+  modificaciones_rutas (+ tablas normalizadas) → { logistica_id, rutas_confirmadas, ... }
+  config_dias          → { logistica_id, dia, habilitado, hora_salida, hora_limite }
 
 NO se usan archivos JSON para ningún dato operativo.
 """
-import os
 import re
 import unicodedata
 from datetime import datetime, date
+
 from bson import ObjectId
 from bson.errors import InvalidId
+from sqlalchemy import select, insert, update, delete, desc
 
-from db import get_db
+from db import get_db, get_table
 
 MESES_ES = [
     "", "enero", "febrero", "marzo", "abril", "mayo", "junio",
     "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
 ]
 
-# Colecciones asociadas a una logística (para limpieza al eliminar)
-COLECCIONES_SECCION = [
-    "extraccion",
-    "asignaciones",
-    "modificaciones_rutas",
-    "config_dias",
-]
-
-# Mapeo colección → clave que espera el frontend en secciones_completadas
+# Mapeo sección → clave que espera el frontend en secciones_completadas
 _CLAVE_FRONTEND = {
     "extraccion":           "extraccion",
     "asignaciones":         "asignacion",
@@ -50,20 +40,9 @@ _CLAVE_FRONTEND = {
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _serialize(doc: dict) -> dict:
-    """Convierte ObjectId → str para serializar a JSON."""
-    doc = dict(doc)
-    raw_id = doc.get("_id")
-    if raw_id is not None:
-        doc["_id"] = str(raw_id)
-    else:
-        doc["_id"] = None
-    return doc
-
-
-def _parse_oid(doc_id: str) -> "ObjectId | None":
+def _id_valido(doc_id: str) -> "str | None":
     try:
-        return ObjectId(doc_id)
+        return str(ObjectId(doc_id))
     except (InvalidId, TypeError):
         return None
 
@@ -90,6 +69,12 @@ def _nombre_automatico(fecha_inicio_str: str, fecha_fin_str: str) -> str:
     return f"Logística del {fi.day} de {mes_i} al {ff.day} de {mes_f} del {anio}"
 
 
+def _serialize(row) -> dict:
+    d = dict(row)
+    d["_id"] = d.pop("mongo_id")
+    return d
+
+
 # ── CRUD de Logísticas ───────────────────────────────────────────────────────
 
 def listar_logisticas() -> list:
@@ -97,40 +82,52 @@ def listar_logisticas() -> list:
     Devuelve todas las logísticas ordenadas de más reciente a más antigua.
     Enriquece cada logística con indicadores de progreso por sección.
     """
-    db = get_db()
-    cursor = db.logisticas.find({}).sort("fecha_inicio", -1)
-    logisticas = [_serialize(doc) for doc in cursor]
+    db    = get_db()
+    tabla = get_table("logisticas")
+    filas = db.execute(select(tabla).order_by(desc(tabla.c.fecha_inicio))).mappings().all()
+    logisticas = [_serialize(f) for f in filas]
 
     # Descartar documentos con _id inválido o nulo
     logisticas = [l for l in logisticas if l.get("_id") not in (None, "None", "")]
 
-    # Agregar indicadores de secciones completadas + estado de autorización
+    tabla_extraccion   = get_table("extraccion")
+    tabla_asignaciones = get_table("asignaciones")
+    tabla_modrutas     = get_table("modificaciones_rutas")
+    tabla_config_dias  = get_table("config_dias")
+
     for log in logisticas:
-        lid = _parse_oid(log["_id"])
-        if not lid:
-            log["secciones_completadas"] = {}
-            log["estado_autorizacion"] = "sin_autorizar"
-            continue
+        lid = log["_id"]
         secciones = {}
-        for col in COLECCIONES_SECCION:
-            clave = _CLAVE_FRONTEND.get(col, col)
-            try:
-                if col == "modificaciones_rutas":
-                    doc = db[col].find_one({"logistica_id": lid}, {"autorizado": 1, "cancelado_en": 1})
-                    secciones[clave] = doc is not None
-                    if not doc:
-                        log["estado_autorizacion"] = "sin_autorizar"
-                    elif doc.get("autorizado"):
-                        log["estado_autorizacion"] = "autorizado"
-                    elif doc.get("cancelado_en"):
-                        log["estado_autorizacion"] = "cancelada"
-                    else:
-                        log["estado_autorizacion"] = "sin_autorizar"
-                else:
-                    existe = db[col].find_one({"logistica_id": lid}, {"_id": 1})
-                    secciones[clave] = existe is not None
-            except Exception:
-                secciones[clave] = False
+
+        existe_extraccion = db.execute(
+            select(tabla_extraccion.c.mongo_id).where(tabla_extraccion.c.logistica_id == lid)
+        ).first()
+        secciones[_CLAVE_FRONTEND["extraccion"]] = existe_extraccion is not None
+
+        existe_asignaciones = db.execute(
+            select(tabla_asignaciones.c.mongo_id).where(tabla_asignaciones.c.logistica_id == lid)
+        ).first()
+        secciones[_CLAVE_FRONTEND["asignaciones"]] = existe_asignaciones is not None
+
+        doc_mod = db.execute(
+            select(tabla_modrutas.c.autorizado, tabla_modrutas.c.cancelado_en)
+            .where(tabla_modrutas.c.logistica_id == lid)
+        ).mappings().first()
+        secciones[_CLAVE_FRONTEND["modificaciones_rutas"]] = doc_mod is not None
+        if not doc_mod:
+            log["estado_autorizacion"] = "sin_autorizar"
+        elif doc_mod["autorizado"]:
+            log["estado_autorizacion"] = "autorizado"
+        elif doc_mod["cancelado_en"]:
+            log["estado_autorizacion"] = "cancelada"
+        else:
+            log["estado_autorizacion"] = "sin_autorizar"
+
+        existe_config_dias = db.execute(
+            select(tabla_config_dias.c.config_dias_id).where(tabla_config_dias.c.logistica_id == lid)
+        ).first()
+        secciones[_CLAVE_FRONTEND["config_dias"]] = existe_config_dias is not None
+
         log["secciones_completadas"] = secciones
 
     return logisticas
@@ -138,12 +135,13 @@ def listar_logisticas() -> list:
 
 def obtener_logistica(logistica_id: str) -> "dict | None":
     """Devuelve los metadatos de la logística (sin datos de secciones)."""
-    oid = _parse_oid(logistica_id)
-    if oid is None:
+    lid = _id_valido(logistica_id)
+    if lid is None:
         return None
-    db = get_db()
-    doc = db.logisticas.find_one({"_id": oid})
-    return _serialize(doc) if doc else None
+    db    = get_db()
+    tabla = get_table("logisticas")
+    fila  = db.execute(select(tabla).where(tabla.c.mongo_id == lid)).mappings().first()
+    return _serialize(fila) if fila else None
 
 
 def crear_logistica(fecha_inicio: str, fecha_fin: str) -> dict:
@@ -157,11 +155,11 @@ def crear_logistica(fecha_inicio: str, fecha_fin: str) -> dict:
     if fi > ff:
         return {"status": "error", "mensaje": "La fecha de inicio no puede ser posterior a la fecha fin."}
 
-    db = get_db()
-    existente = db.logisticas.find_one({
-        "fecha_inicio": fecha_inicio,
-        "fecha_fin":    fecha_fin,
-    })
+    db    = get_db()
+    tabla = get_table("logisticas")
+    existente = db.execute(
+        select(tabla.c.mongo_id).where(tabla.c.fecha_inicio == fecha_inicio, tabla.c.fecha_fin == fecha_fin)
+    ).first()
     if existente:
         return {
             "status":  "error",
@@ -171,21 +169,21 @@ def crear_logistica(fecha_inicio: str, fecha_fin: str) -> dict:
     nombre = _nombre_automatico(fecha_inicio, fecha_fin)
     slug   = _slugify(nombre)
     ahora  = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    nuevo_id = str(ObjectId())
 
-    doc = {
-        "nombre":              nombre,
-        "slug":                slug,
-        "fecha_inicio":        fecha_inicio,
-        "fecha_fin":           fecha_fin,
-        "estado":              "en_progreso",
-        "creado_en":           ahora,
-        "ultima_modificacion": ahora,
-    }
-
-    result = db.logisticas.insert_one(doc)
+    db.execute(insert(tabla).values(
+        mongo_id=nuevo_id,
+        nombre=nombre,
+        slug=slug,
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        estado="en_progreso",
+        creado_en=ahora,
+        ultima_modificacion=ahora,
+    ))
     return {
         "status": "ok",
-        "id":     str(result.inserted_id),
+        "id":     nuevo_id,
         "nombre": nombre,
         "slug":   slug,
     }
@@ -197,38 +195,104 @@ def obtener_logistica_por_slug(slug: str) -> "dict | None":
     Primero consulta el campo `slug` indexado; si no existe (registros previos
     sin slug), computa el slug dinámicamente desde el nombre.
     """
-    db  = get_db()
-    doc = db.logisticas.find_one({"slug": slug})
-    if doc:
-        return _serialize(doc)
+    db    = get_db()
+    tabla = get_table("logisticas")
+    fila  = db.execute(select(tabla).where(tabla.c.slug == slug)).mappings().first()
+    if fila:
+        return _serialize(fila)
     # Fallback para logísticas creadas antes de que se guardara el slug
-    for doc in db.logisticas.find({}):
-        nombre = doc.get("nombre", "")
+    for fila in db.execute(select(tabla)).mappings():
+        nombre = fila.get("nombre") or ""
         if _slugify(nombre) == slug:
-            return _serialize(doc)
+            return _serialize(fila)
     return None
+
+
+def eliminar_datos_asignacion(lid: str) -> None:
+    """
+    Borra la fila de `asignaciones` de esta logística y sus 8 tablas
+    normalizadas hijas. `lid` debe ser un mongo_id ya validado.
+    Reutilizada por eliminar_logistica() y por extraccion_router.eliminar_fuente()
+    (que también debe limpiar la asignación vigente al borrar una fuente).
+    """
+    db = get_db()
+    for nombre_tabla in (
+        "asignaciones_rutas", "asignaciones_sucursales", "asignaciones_mayoristas",
+        "asignaciones_chofer_overrides", "asignaciones_orden_overrides",
+        "asignaciones_mayoristas_overrides", "asignaciones_sucursales_pendientes",
+        "asignaciones_rutas_confirmadas",
+    ):
+        t = get_table(nombre_tabla)
+        db.execute(delete(t).where(t.c.logistica_id == lid))
+    db.execute(delete(get_table("asignaciones")).where(get_table("asignaciones").c.logistica_id == lid))
+
+
+def eliminar_datos_vrp_reportes(lid: str) -> None:
+    """
+    Borra la fila de `vrp_reportes` (fuente 'vrp_reportes'; NO toca
+    `vrp_reportes_afinidad`, igual que el código Mongo original) de esta
+    logística y sus 4 tablas normalizadas hijas. `lid` debe ser un
+    mongo_id ya validado. Reutilizada por eliminar_logistica() y por
+    extraccion_router.eliminar_fuente().
+    """
+    db = get_db()
+    tabla_vrp = get_table("vrp_reportes")
+    ids_reporte = [
+        row.mongo_id for row in
+        db.execute(select(tabla_vrp.c.mongo_id).where(tabla_vrp.c.logistica_id == lid))
+    ]
+    if ids_reporte:
+        for nombre_tabla in ("vrp_reportes_rutas", "vrp_reportes_sucursales", "vrp_reportes_mayoristas", "vrp_reportes_resumen"):
+            t = get_table(nombre_tabla)
+            db.execute(delete(t).where(t.c.reporte_id.in_(ids_reporte), t.c.fuente == "vrp_reportes"))
+    db.execute(delete(tabla_vrp).where(tabla_vrp.c.logistica_id == lid))
 
 
 def eliminar_logistica(logistica_id: str) -> dict:
     """
     Elimina permanentemente la logística y TODOS sus datos operativos
-    en las colecciones asociadas.
+    en las tablas asociadas (base + tablas normalizadas hijas).
     """
-    oid = _parse_oid(logistica_id)
-    if oid is None:
+    lid = _id_valido(logistica_id)
+    if lid is None:
         return {"status": "error", "mensaje": "ID inválido."}
 
     db = get_db()
-    result = db.logisticas.delete_one({"_id": oid})
-    if result.deleted_count == 0:
+    tabla_logisticas = get_table("logisticas")
+    if not db.execute(select(tabla_logisticas.c.mongo_id).where(tabla_logisticas.c.mongo_id == lid)).first():
         return {"status": "error", "mensaje": "Logística no encontrada."}
 
-    for col in COLECCIONES_SECCION:
-        db[col].delete_many({"logistica_id": oid})
+    # ── extraccion + su tabla normalizada ───────────────────────
+    db.execute(delete(get_table("extraccion_desglose")).where(get_table("extraccion_desglose").c.logistica_id == lid))
+    db.execute(delete(get_table("extraccion")).where(get_table("extraccion").c.logistica_id == lid))
 
-    # rutas_historicas guarda logistica_id como string, no ObjectId
-    db["rutas_historicas"].delete_many({"logistica_id": str(oid)})
-    db["vrp_reportes"].delete_many({"logistica_id": oid})
+    eliminar_datos_asignacion(lid)
+
+    # ── modificaciones_rutas + sus 2 tablas normalizadas (por modificacion_id) ──
+    tabla_modrutas = get_table("modificaciones_rutas")
+    ids_modificacion = [
+        row.mongo_id for row in
+        db.execute(select(tabla_modrutas.c.mongo_id).where(tabla_modrutas.c.logistica_id == lid))
+    ]
+    if ids_modificacion:
+        t_suc = get_table("modificacion_ruta_sucursales")
+        t_may = get_table("modificacion_ruta_mayoristas")
+        t_hdr = get_table("modificacion_rutas")
+        db.execute(delete(t_suc).where(t_suc.c.modificacion_id.in_(ids_modificacion)))
+        db.execute(delete(t_may).where(t_may.c.modificacion_id.in_(ids_modificacion)))
+        db.execute(delete(t_hdr).where(t_hdr.c.modificacion_id.in_(ids_modificacion)))
+    db.execute(delete(tabla_modrutas).where(tabla_modrutas.c.logistica_id == lid))
+
+    # ── config_dias ──────────────────────────────────────────────
+    t_config_dias = get_table("config_dias")
+    db.execute(delete(t_config_dias).where(t_config_dias.c.logistica_id == lid))
+
+    # rutas_historicas guarda logistica_id como string, no ObjectId (igual que en Mongo)
+    db.execute(delete(get_table("rutas_historicas")).where(get_table("rutas_historicas").c.logistica_id == lid))
+
+    eliminar_datos_vrp_reportes(lid)
+
+    db.execute(delete(tabla_logisticas).where(tabla_logisticas.c.mongo_id == lid))
 
     return {"status": "ok"}
 
@@ -258,17 +322,16 @@ def activar_logistica(logistica_id: str) -> dict:
 
 def marcar_completada(logistica_id: str) -> dict:
     """Cambia el estado de la logística a 'completada'."""
-    oid = _parse_oid(logistica_id)
-    if oid is None:
+    lid = _id_valido(logistica_id)
+    if lid is None:
         return {"status": "error", "mensaje": "ID inválido."}
-    db = get_db()
-    result = db.logisticas.update_one(
-        {"_id": oid},
-        {"$set": {
-            "estado": "completada",
-            "ultima_modificacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        }},
+    db    = get_db()
+    tabla = get_table("logisticas")
+    resultado = db.execute(
+        update(tabla)
+        .where(tabla.c.mongo_id == lid)
+        .values(estado="completada", ultima_modificacion=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
     )
-    if result.matched_count == 0:
+    if resultado.rowcount == 0:
         return {"status": "error", "mensaje": "Logística no encontrada."}
     return {"status": "ok"}

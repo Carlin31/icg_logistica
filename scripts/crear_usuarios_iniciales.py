@@ -1,9 +1,9 @@
 """
 crear_usuarios_iniciales.py
 
-Script de un solo uso: crea 5 usuarios iniciales en MongoDB con contraseñas
+Script de un solo uso: crea 5 usuarios iniciales en SQL Server con contraseñas
 aleatorias seguras (hasheadas con bcrypt + salt, nunca en texto plano en BD).
-Si la colección 'usuarios' ya tiene documentos, no hace nada.
+Si la tabla 'usuarios' ya tiene filas, no hace nada.
 
 Las contraseñas se imprimen UNA SOLA VEZ en la consola — el hash no es
 reversible, así que cópialas y entrégalas de forma segura a cada usuario.

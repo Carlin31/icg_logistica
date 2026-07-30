@@ -10,21 +10,21 @@ Se elimina la lógica de cheapest insertion. En su lugar:
      las rutas confirmadas, pero marcado como tipo_registro='mayoristas'.
 """
 
+import json
 import math
-from collections import defaultdict
 from datetime import datetime
 
 from bson import ObjectId
 from bson.errors import InvalidId
+from sqlalchemy import select, insert
 
-from db import get_db
-from logic.historico_logic import guardar_en_historico
+from db import get_db, get_table
 from logic.vrp_logic import capacidad_efectiva_kg
 
 
-def _parse_oid(doc_id: str) -> ObjectId | None:
+def _id_valido(doc_id: str) -> "str | None":
     try:
-        return ObjectId(doc_id)
+        return str(ObjectId(doc_id))
     except (InvalidId, TypeError):
         return None
 
@@ -36,7 +36,7 @@ def _to_float(valor):
         return None
 
 
-def _normalizar_id(valor) -> int | None:
+def _normalizar_id(valor) -> "int | None":
     try:
         return int(str(valor).split(".")[0])
     except (TypeError, ValueError, IndexError):
@@ -132,15 +132,16 @@ def _ordenar_sucursales_planificacion(sucursales: list) -> list:
 
 
 def _leer_depot(db) -> tuple:
-    cfg = db["configuracion"].find_one({}) or {}
+    tabla = get_table("configuracion")
+    cfg = db.execute(select(tabla)).mappings().first() or {}
     lat = _to_float(cfg.get("matriz_lat")) or 18.87329315661368
     lon = _to_float(cfg.get("matriz_lon")) or -96.9491574270346
     return lat, lon
 
 
-def _leer_pesos_mayoristas(db, oid: ObjectId) -> tuple[list, dict]:
+def _leer_pesos_mayoristas(db, oid: str) -> tuple:
     """
-    Lee los pedidos de mayoristas desde extraccion.mayoristas.
+    Lee los pedidos de mayoristas desde extraccion.mayoristas (columna JSON).
 
     Retorna:
         pedidos : list de {documento, id_cliente, peso}  — uno por documento/pedido
@@ -148,10 +149,11 @@ def _leer_pesos_mayoristas(db, oid: ObjectId) -> tuple[list, dict]:
     """
     pedidos: list = []
     nombres: dict = {}
-    ext = db["extraccion"].find_one({"logistica_id": oid})
-    if not ext:
+    tabla = get_table("extraccion")
+    fila = db.execute(select(tabla.c.mayoristas).where(tabla.c.logistica_id == oid)).mappings().first()
+    if not fila or not fila["mayoristas"]:
         return pedidos, nombres
-    for m in ext.get("mayoristas", []):
+    for m in json.loads(fila["mayoristas"]):
         codigo = m.get("codigo") or m.get("id_cliente")
         id_int = _normalizar_id(codigo)
         if id_int is None:
@@ -160,7 +162,10 @@ def _leer_pesos_mayoristas(db, oid: ObjectId) -> tuple[list, dict]:
             peso = float(m.get("peso_total_kg", 0) or 0)
         except (TypeError, ValueError):
             continue
-        if peso <= 0:
+        # peso 0 = pedido pendiente (sin peso capturado en el origen): se
+        # conserva para ofrecerlo como opción de agregado manual a una ruta.
+        # Solo se descartan pesos negativos (datos inválidos).
+        if peso < 0:
             continue
         documento = str(m.get("documento", "") or id_int).strip()
         pedidos.append({"documento": documento, "id_cliente": id_int, "peso": peso})
@@ -174,22 +179,20 @@ def _leer_coords_mayoristas(db, ids: set) -> dict:
     coords: dict = {}
     if not ids:
         return coords
-    for c in db["clientes_mayoristas"].find(
-        {},
-        {"_id": 0, "id_cliente": 1, "nombre": 1, "latitud": 1, "longitud": 1},
-    ):
-        id_int = _normalizar_id(c.get("id_cliente"))
+    tabla = get_table("clientes_mayoristas")
+    for c in db.execute(select(tabla.c.id_cliente, tabla.c.nombre, tabla.c.latitud, tabla.c.longitud)):
+        id_int = _normalizar_id(c.id_cliente)
         if id_int is None or id_int not in ids:
             continue
         coords[id_int] = {
-            "nombre": (c.get("nombre") or "").strip(),
-            "latitud": _to_float(c.get("latitud")),
-            "longitud": _to_float(c.get("longitud")),
+            "nombre": (c.nombre or "").strip(),
+            "latitud": _to_float(c.latitud),
+            "longitud": _to_float(c.longitud),
         }
     return coords
 
 
-def _ruta_centroid(sucursales: list) -> tuple[float | None, float | None]:
+def _ruta_centroid(sucursales: list) -> tuple:
     coords = [
         (_to_float(s.get("latitud")), _to_float(s.get("longitud")))
         for s in sucursales
@@ -208,21 +211,25 @@ def _cargar_historico_mayoristas(logistica_id: str) -> dict:
     Recupera el último orden de mayoristas guardado para esta logística.
     El índice resultante es {ruta_id: {id_cliente: orden}}.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {}
 
     try:
-        db = get_db()
-        docs = list(db["rutas_historicas"].find({
-            "logistica_id": str(logistica_id),
-            "tipo_registro": "mayoristas",
-        }))
-        docs.sort(key=lambda doc: (doc.get("confirmada", False), doc.get("fecha_inicio", ""), doc.get("cargado_en", "")))
+        db    = get_db()
+        tabla = get_table("rutas_historicas")
+        docs = [
+            dict(d) for d in db.execute(
+                select(tabla.c.filas, tabla.c.confirmada, tabla.c.fecha_inicio, tabla.c.cargado_en)
+                .where(tabla.c.logistica_id == str(logistica_id), tabla.c.tipo_registro == "mayoristas")
+            ).mappings()
+        ]
+        docs.sort(key=lambda doc: (bool(doc.get("confirmada")), doc.get("fecha_inicio") or "", doc.get("cargado_en") or ""))
 
         orden_por_ruta: dict = {}
         for doc in docs:
-            for fila in doc.get("filas", []):
+            filas = json.loads(doc["filas"]) if doc.get("filas") else []
+            for fila in filas:
                 ruta_id = str(fila.get("ruta_id") or "")
                 id_cliente = _normalizar_id(fila.get("id_cliente") or fila.get("id_sucursal"))
                 orden = int(fila.get("secuencia_visita") or fila.get("orden") or 1)
@@ -237,7 +244,7 @@ def _cargar_historico_mayoristas(logistica_id: str) -> dict:
         return {}
 
 
-def _seleccionar_ruta(mayorista: dict, rutas_sucursales: dict) -> str | None:
+def _seleccionar_ruta(mayorista: dict, rutas_sucursales: dict) -> "str | None":
     lat_m = mayorista.get("latitud")
     lon_m = mayorista.get("longitud")
     if lat_m is None or lon_m is None:
@@ -308,10 +315,10 @@ def _otras_rutas_historicas(id_cliente: int, ruta_actual: str, historico_orden: 
 
 def _resolver_sobrecarga_mayoristas(
     mayoristas_por_ruta: dict,
-    peso_sucursales: dict,    # {ruta_id: peso_kg de las sucursales de esa ruta}
-    capacidad_kg: dict,       # {ruta_id: capacidad efectiva del vehículo asignado, en kg}
-    historico_orden: dict,    # {ruta_id: {id_cliente: orden}} — histórico de mayoristas
-    centros_ruta: dict | None = None,  # {ruta_id: (lat, lon)} — para el nivel de proximidad
+    peso_sucursales: dict,
+    capacidad_kg: dict,
+    historico_orden: dict,
+    centros_ruta: "dict | None" = None,
     max_iter: int = 200,
 ) -> dict:
     """
@@ -331,11 +338,10 @@ def _resolver_sobrecarga_mayoristas(
             float(m.get("peso_kg", 0) or 0) for m in mayoristas_por_ruta.get(rid, [])
         )
 
-    def _mejor_destino(m: dict, rid_origen: str) -> str | None:
+    def _mejor_destino(m: dict, rid_origen: str) -> "str | None":
         peso_m = float(m.get("peso_kg", 0) or 0)
         id_cl  = m.get("id_cliente")
 
-        # Nivel 1: ruta donde el mayorista también haya pertenecido históricamente.
         if id_cl is not None:
             for alt_rid in _otras_rutas_historicas(id_cl, rid_origen, historico_orden):
                 alt_cap = capacidad_kg.get(alt_rid)
@@ -344,8 +350,6 @@ def _resolver_sobrecarga_mayoristas(
                 if _peso_total(alt_rid) + peso_m <= alt_cap:
                     return alt_rid
 
-        # Nivel 2: ninguna ruta histórica tiene cupo — garantizar la
-        # resolución por proximidad y disponibilidad entre TODAS las rutas.
         lat_m, lon_m = m.get("latitud"), m.get("longitud")
         mejor_rid, mejor_dist = None, float("inf")
         for alt_rid, alt_cap in capacidad_kg.items():
@@ -357,7 +361,7 @@ def _resolver_sobrecarga_mayoristas(
             if lat_m is not None and lon_m is not None and centro and centro[0] is not None:
                 dist = _haversine_km(lat_m, lon_m, centro[0], centro[1])
             else:
-                dist = 0.0  # ruta sin punto de referencia: candidata válida igual
+                dist = 0.0
             if dist < mejor_dist:
                 mejor_dist = dist
                 mejor_rid = alt_rid
@@ -373,7 +377,6 @@ def _resolver_sobrecarga_mayoristas(
             if _peso_total(rid) <= cap:
                 continue
 
-            # Probar cada mayorista (más pesado primero) hasta encontrar destino.
             for m in sorted(mays, key=lambda x: float(x.get("peso_kg", 0) or 0), reverse=True):
                 destino = _mejor_destino(m, rid)
                 if destino:
@@ -388,22 +391,101 @@ def _resolver_sobrecarga_mayoristas(
     return mayoristas_por_ruta
 
 
+def _guardar_historico_mayoristas(logistica_id: str, nombre: str, filas_list: list) -> dict:
+    """
+    Persiste una fotografía de mayoristas confirmados en `rutas_historicas`
+    (tipo_registro='mayoristas'). Equivalente a
+    logic/historico_logic.guardar_en_historico(..., tipo_registro="mayoristas")
+    -- reimplementado aquí en SQL porque historico_logic.py sigue en Mongo
+    (Fase 7) y este módulo ya está en SQL Server.
+
+    Comportamiento preservado del original: el filtro de upsert de Mongo
+    excluía explícitamente tipo_registro="mayoristas" ({"$ne": "mayoristas"}),
+    así que una llamada con ese tipo NUNCA actualizaba un documento existente
+    -- siempre insertaba uno nuevo. _cargar_historico_mayoristas() ya asume
+    varios snapshots acumulados (por eso ordena y combina varios documentos).
+    Aquí se preserva: siempre se hace INSERT, nunca UPDATE.
+    """
+    try:
+        filas = []
+        for r in filas_list:
+            filas.append({
+                "id_sucursal":      r.get("id_sucursal") or r.get("num_tienda", 0),
+                "id_cliente":       r.get("id_cliente"),
+                "ruta_id":          r.get("ruta_id"),
+                "tipo":             r.get("tipo") or "mayorista",
+                "vehiculo":         r.get("vehiculo", ""),
+                "dia_semana":       str(r.get("dia_semana", "")).upper(),
+                "secuencia_visita": int(r.get("secuencia_visita") or r.get("orden") or 1),
+                "kg_entrega":       float(r.get("kg_entrega") or r.get("peso_kg") or 0),
+            })
+
+        if not filas:
+            return {"status": "error", "mensaje": "No hay rutas para guardar"}
+
+        n_may = len(set(str(f.get("id_cliente") or "") for f in filas if f.get("id_cliente")))
+        n_rut = len(set((f["vehiculo"], f["dia_semana"]) for f in filas))
+        dias  = sorted({f["dia_semana"] for f in filas if f["dia_semana"]})
+
+        db = get_db()
+        oid_log = _id_valido(str(logistica_id))
+        fecha_inicio = ""
+        fecha_fin    = ""
+        if oid_log:
+            tabla_log = get_table("logisticas")
+            log_fila = db.execute(
+                select(tabla_log.c.fecha_inicio, tabla_log.c.fecha_fin).where(tabla_log.c.mongo_id == oid_log)
+            ).mappings().first()
+            if log_fila:
+                fecha_inicio = log_fila["fecha_inicio"] or ""
+                fecha_fin    = log_fila["fecha_fin"] or ""
+
+        cargado_en = f"{fecha_inicio}T00:00:00" if fecha_inicio else datetime.now().isoformat()
+
+        nuevo_id = str(ObjectId())
+        tabla = get_table("rutas_historicas")
+        db.execute(insert(tabla).values(
+            mongo_id=nuevo_id,
+            nombre=nombre,
+            filas=json.dumps(filas, ensure_ascii=False),
+            n_sucursales=0,
+            n_mayoristas=n_may,
+            n_rutas=n_rut,
+            dias=json.dumps(dias, ensure_ascii=False),
+            logistica_id=str(logistica_id),
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            cargado_en=cargado_en,
+            confirmada=True,
+            tipo_registro="mayoristas",
+        ))
+        return {"status": "ok", "id": nuevo_id}
+    except Exception as e:
+        return {"status": "error", "mensaje": str(e)}
+
+
 def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoristas_por_ruta: dict) -> None:
     """
     Guarda una fotografía de la distribución para que el flujo de mayoristas
     tenga memoria histórica igual que las sucursales.
     """
     try:
-        db = get_db()
-        oid = _parse_oid(logistica_id)
+        db  = get_db()
+        oid = _id_valido(logistica_id)
         if not oid:
             return
 
-        asig_doc = db["asignaciones"].find_one({"logistica_id": oid}) or {}
-        asignaciones = asig_doc.get("asignaciones") or {}
+        # asignaciones.asignaciones (campo distinto de detalle_por_dia) nunca
+        # tuvo datos reales en ningún documento migrado a SQL Server -- no
+        # existe columna para él. Se preserva el mismo resultado que en
+        # Mongo, donde este lookup tampoco encontraba nada en producción.
+        asignaciones: dict = {}
+
+        tabla_veh = get_table("vehiculos")
         vehiculos = {
-            (v.get("placas") or "").strip(): v
-            for v in db["vehiculos"].find({}, {"placas": 1, "abreviatura": 1})
+            (v.placas or "").strip(): {"placas": v.placas, "abreviatura": v.abreviatura}
+            for v in db.execute(select(tabla_veh.c.placas, tabla_veh.c.abreviatura))
+            if (v.placas or "").strip()
         }
 
         filas = []
@@ -432,7 +514,7 @@ def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoris
                 })
 
         if filas:
-            guardar_en_historico(logistica_id, "Mayoristas confirmados", filas, tipo_registro="mayoristas")
+            _guardar_historico_mayoristas(logistica_id, "Mayoristas confirmados", filas)
     except Exception:
         pass
 
@@ -508,7 +590,7 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
     return paradas
 
 
-def calcular_distribucion_mayoristas(logistica_id: str, rutas: list | None = None) -> dict:
+def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = None) -> dict:
     """
     Calcula la distribución de mayoristas sin cheapest insertion.
 
@@ -522,34 +604,30 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: list | None = Non
          modificación y mapa.
       5. Persiste una fotografía del resultado en el histórico de mayoristas.
     """
-    oid = _parse_oid(logistica_id)
+    vacio = {
+        "mayoristas_por_ruta": {},
+        "paradas_integradas": {},
+        "orden_sucursales": {},
+        "todos_mayoristas": [],
+        "sin_asignar": [],
+        "sin_coords": [],
+    }
+
+    oid = _id_valido(logistica_id)
     if not oid:
-        return {
-            "mayoristas_por_ruta": {},
-            "paradas_integradas": {},
-            "orden_sucursales": {},
-            "todos_mayoristas": [],
-            "sin_asignar": [],
-            "sin_coords": [],
-        }
+        return dict(vacio)
 
     db = get_db()
     pedidos_may, nombres_may = _leer_pesos_mayoristas(db, oid)
     ids = set(p["id_cliente"] for p in pedidos_may)
     if not ids:
-        return {
-            "mayoristas_por_ruta": {},
-            "paradas_integradas": {},
-            "orden_sucursales": {},
-            "todos_mayoristas": [],
-            "sin_asignar": [],
-            "sin_coords": [],
-        }
+        return dict(vacio)
 
     coords_may = _leer_coords_mayoristas(db, ids)
     # Cada documento es una entrada separada en la lista de mayoristas
     mayoristas: list = []
     sin_coords: list = []
+    pendientes: list = []   # peso 0: disponibles para agregar a mano, nunca auto-asignados
     for pedido in pedidos_may:
         id_int = pedido["id_cliente"]
         cat = coords_may.get(id_int) or {}
@@ -564,13 +642,36 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: list | None = Non
             "latitud":    lat,
             "longitud":   lon,
         }
-        if lat is None or lon is None:
+        # Pendientes (peso 0): quedan disponibles para agregado manual, pero
+        # NO entran al reparto automático por ruta.
+        if pedido["peso"] <= 0:
+            entry["pendiente"] = True
+            pendientes.append(entry)
+        elif lat is None or lon is None:
             sin_coords.append(entry)
         else:
             mayoristas.append(entry)
 
     if rutas is None:
-        rutas = list(db["rutas_config"].find({}, {"sucursales": 1}))
+        tabla_rc  = get_table("rutas_config")
+        tabla_rcs = get_table("rutas_config_sucursales")
+        sucs_por_ruta: dict = {}
+        for s in db.execute(select(tabla_rcs)):
+            sucs_por_ruta.setdefault(s.ruta_config_id, []).append({
+                "num_tienda":    s.num_tienda,
+                "nombre_base":   s.nombre_base,
+                "nombre_tienda": s.nombre_tienda,
+                "nombre_pedido": s.nombre_pedido,
+                "nombre":        s.nombre,
+                "latitud":       s.latitud,
+                "longitud":      s.longitud,
+                "orden":         s.orden,
+                "peso_kg":       s.peso_kg,
+            })
+        rutas = [
+            {"_id": r.mongo_id, "sucursales": sucs_por_ruta.get(r.mongo_id, [])}
+            for r in db.execute(select(tabla_rc.c.mongo_id))
+        ]
 
     rutas_index: dict = {}
     rutas_sucursales: dict = {}
@@ -692,8 +793,10 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: list | None = Non
         "mayoristas_por_ruta": mayoristas_por_ruta,
         "paradas_integradas": paradas_integradas,
         "orden_sucursales": orden_sucursales,
-        "todos_mayoristas": mayoristas,
+        # Los pendientes se ofrecen como disponibles, pero no se auto-asignan
+        "todos_mayoristas": mayoristas + pendientes,
         "sin_asignar": sin_asignar,
         "sin_coords": sin_coords,
+        "pendientes": pendientes,
         "actualizado_en": datetime.now().isoformat(),
     }

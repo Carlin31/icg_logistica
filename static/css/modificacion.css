@@ -1222,6 +1222,18 @@
   color: #ea580c;
   white-space: nowrap;
 }
+/* Etiqueta para pedidos de mayorista sin peso capturado (peso 0) */
+.may-tag-pendiente {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .btn-ver-mas {
   display: block;
   width: 100%;

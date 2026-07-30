@@ -927,7 +927,11 @@ function renderMayoristasCargado() {
       <td><strong>${doc}</strong></td>
       <td>${cliente.codigo}</td>
       <td>${cliente.nombre}</td>
-      <td class="col-total"><strong>${Math.round(cliente.peso_total_kg).toLocaleString("es-MX")} kg</strong></td>
+      <td class="col-total">${
+        (cliente.peso_total_kg || 0) > 0
+          ? `<strong>${cliente.peso_total_kg.toLocaleString("es-MX", { maximumFractionDigits: 2 })} kg</strong>`
+          : `<span class="ext-badge ext-badge--pendiente" title="Sin peso capturado en el archivo (pedido pendiente). Se excluye al generar rutas.">Pendiente</span>`
+      }</td>
       <td><button class="btn-may-eliminar" data-doc="${doc}" data-nombre="${cliente.nombre.replace(/"/g,'&quot;')}" title="Quitar de la lista">✕</button></td>`;
     tbody.appendChild(tr);
   }
@@ -938,7 +942,7 @@ function renderMayoristasCargado() {
     trTotal.className = 'ext-fila-total';
     trTotal.innerHTML = `
       <td colspan="3"><strong>Total general</strong></td>
-      <td class="col-total"><strong>${Math.round(pesoTotal).toLocaleString("es-MX")} kg</strong></td>
+      <td class="col-total"><strong>${pesoTotal.toLocaleString("es-MX", { maximumFractionDigits: 2 })} kg</strong></td>
       <td></td>`;
     tbody.appendChild(trTotal);
   }

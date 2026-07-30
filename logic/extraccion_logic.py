@@ -75,6 +75,15 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
         for p in productos_proalmex_db
     }
 
+    # Mapa de volumen Proalmex: (linea, tamano) → volumen_m3 (misma clave que el de peso)
+    map_volumen_proalmex: dict[tuple, float] = {
+        (
+            str(p.get('linea',  '')).strip().lower(),
+            str(p.get('tamano', '')).strip().lower(),
+        ): float(p.get('volumen', 0) or 0)
+        for p in productos_proalmex_db
+    }
+
     df_productos = pd.DataFrame(productos_db)
 
     # clave_sae es el identificador de producto que usan los archivos Excel
@@ -192,6 +201,21 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
             df_proalmex['peso_precalc'] = (
                 df_proalmex.apply(_peso_unitario_proalmex, axis=1) * df_proalmex['Piezas']
             )
+
+            # Volumen unitario desde productos_proalmex usando (linea, tamano),
+            # misma clave que el peso. Sin reportar claves (ya lo hace el peso).
+            def _volumen_unitario_proalmex(row) -> float:
+                desc_raw   = row['descripcion_proalmex']
+                tamano_raw = row['tamano_proalmex']
+                if pd.isnull(desc_raw) or not str(desc_raw).strip() or str(desc_raw).strip().lower() == 'nan':
+                    return 0.0
+                desc   = str(desc_raw).strip()
+                tamano = '' if (pd.isnull(tamano_raw) or str(tamano_raw).strip().lower() == 'nan') else str(tamano_raw).strip()
+                return map_volumen_proalmex.get((desc.lower(), tamano.lower()), 0.0)
+
+            df_proalmex['volumen_precalc'] = (
+                df_proalmex.apply(_volumen_unitario_proalmex, axis=1) * df_proalmex['Piezas']
+            )
             dfs_procesados.append(df_proalmex)
 
     if not dfs_procesados:
@@ -223,13 +247,17 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
     df_enrich['peso_total_fila']    = df_enrich['Piezas'] * df_enrich['peso'].fillna(0)
     df_enrich['volumen_total_fila'] = df_enrich['Piezas'] * df_enrich['volumen'].fillna(0)
 
-    # Para filas Proalmex usamos el peso pre-calculado por (linea, tamano)
+    # Para filas Proalmex usamos el peso y volumen pre-calculados por (linea, tamano)
     # ya que productos_proalmex no comparte clave_sae con el catálogo ICG
     if 'peso_precalc' in df_enrich.columns:
         mask_proalmex = df_enrich['Proveedor'] == 'Proalmex'
         df_enrich.loc[mask_proalmex, 'peso_total_fila'] = (
             df_enrich.loc[mask_proalmex, 'peso_precalc'].fillna(0)
         )
+        if 'volumen_precalc' in df_enrich.columns:
+            df_enrich.loc[mask_proalmex, 'volumen_total_fila'] = (
+                df_enrich.loc[mask_proalmex, 'volumen_precalc'].fillna(0)
+            )
 
     # Para filas Bimbo usamos los valores pre-calculados por codigo_barra
     # ya que productos_bimbo no comparte clave_sae con el catálogo ICG
@@ -298,30 +326,31 @@ def procesar_mayoristas(archivo) -> dict:
             'mensaje': 'No se pudo leer el archivo o no contiene datos válidos.',
         }
 
-    # ── Resolver nombres desde MongoDB ──────────────────────────────────────
+    # ── Resolver nombres desde SQL Server ────────────────────────────────────
     try:
-        from db import get_db
-        db = get_db()
-        clientes_db = list(db['clientes_mayoristas'].find(
-            {}, {'_id': 0, 'id_cliente': 1, 'nombre': 1, 'activo': 1}
-        ))
-        # id_cliente se guarda como int en MongoDB, pero puede llegar como
-        # str, Decimal128 u otro tipo según el cliente que lo insertó.
+        from db import get_db, get_table
+        from sqlalchemy import select
+
+        db    = get_db()
+        tabla = get_table('clientes_mayoristas')
+        clientes_db = db.execute(
+            select(tabla.c.id_cliente, tabla.c.nombre, tabla.c.activo)
+        ).all()
+        # id_cliente ya es BIGINT en SQL Server (a diferencia de Mongo, donde
+        # podía llegar como str/Decimal128/int según el cliente que lo insertó).
         map_nombre = {}
         excluidos  = set()
         for c in clientes_db:
-            if 'id_cliente' not in c:
+            if c.id_cliente is None:
                 continue
-            try:
-                cid = int(str(c['id_cliente']).split('.')[0])
-                map_nombre[cid] = c['nombre']
-                if c.get('activo') is False:
-                    excluidos.add(cid)
-            except (ValueError, TypeError):
-                pass
+            cid = int(c.id_cliente)
+            map_nombre[cid] = c.nombre
+            if c.activo is False:
+                excluidos.add(cid)
     except Exception as e:
-        print(f"[procesar_mayoristas] Error al conectar con MongoDB: {e}")
+        print(f"[procesar_mayoristas] Error al conectar con SQL Server: {e}")
         map_nombre = {}
+        excluidos  = set()
         excluidos  = set()
 
     # ── Construir resultado consolidado ─────────────────────────────────────

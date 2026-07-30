@@ -18,9 +18,23 @@ class Config:
     # Secure exige HTTPS; en local (DEBUG=True) se desactiva para no bloquear el desarrollo.
     SESSION_COOKIE_SECURE      = not DEBUG
 
-    # ── MongoDB ────────────────────────────────────────────────
+    # ── MongoDB (en desuso — se conserva para rollback, ver db_mongo.py) ──
     MONGO_URI     = os.getenv("MONGO_URI",     "mongodb://localhost:27017/")
     MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "icg")
+
+    # ── SQL Server ─────────────────────────────────────────────
+    # SQL_AUTH: "windows" (Trusted_Connection, típico en desarrollo local)
+    #           o "sql" (usuario/contraseña, requiere SQL_USER/SQL_PASSWORD).
+    SQL_SERVER   = os.getenv("SQL_SERVER",   "localhost")
+    SQL_DATABASE = os.getenv("SQL_DATABASE", "icgdb")
+    SQL_DRIVER   = os.getenv("SQL_DRIVER",   "ODBC Driver 18 for SQL Server")
+    SQL_AUTH     = os.getenv("SQL_AUTH",     "windows").lower()
+    SQL_USER     = os.getenv("SQL_USER",     "")
+    SQL_PASSWORD = os.getenv("SQL_PASSWORD", "")
+    # Driver 18 exige TLS con certificado válido por defecto; el SQL Server
+    # local usa un certificado autofirmado, así que se confía en él salvo
+    # que se indique lo contrario (producción con certificado real: "false").
+    SQL_TRUST_SERVER_CERTIFICATE = os.getenv("SQL_TRUST_SERVER_CERTIFICATE", "true").lower() == "true"
 
     # ── Groq (LLM para nombres de rutas) ──────────────────────
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -33,6 +47,14 @@ class Config:
             faltantes.append("MONGO_URI")
         if not cls.MONGO_DB_NAME:
             faltantes.append("MONGO_DB_NAME")
+        if not cls.SQL_SERVER:
+            faltantes.append("SQL_SERVER")
+        if not cls.SQL_DATABASE:
+            faltantes.append("SQL_DATABASE")
+        if cls.SQL_AUTH not in ("windows", "sql"):
+            faltantes.append('SQL_AUTH (debe ser "windows" o "sql")')
+        if cls.SQL_AUTH == "sql" and (not cls.SQL_USER or not cls.SQL_PASSWORD):
+            faltantes.append("SQL_USER/SQL_PASSWORD (requeridos cuando SQL_AUTH=sql)")
         if cls.SECRET_KEY == "clave-secreta-dev-local" and not cls.DEBUG:
             # En producción la SECRET_KEY genérica es un riesgo de seguridad.
             import warnings

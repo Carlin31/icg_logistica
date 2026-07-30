@@ -9,7 +9,9 @@ asignaciones coherentes con los patrones históricos y la capacidad de flota.
 from math import radians, sin, cos, sqrt, atan2
 from collections import defaultdict
 
-from db import get_db
+from sqlalchemy import select
+
+from db import get_db, get_table
 
 # ── Parámetros VRP ────────────────────────────────────────────────────────────
 VRP_DEV_NORMAL   = 0.30   # desviación ≤ 30 % → NORMAL
@@ -158,16 +160,20 @@ def _insertar_pos_proxima(ordenados: list, sid, coord_fn) -> int:
 
 def obtener_capacidades_vehiculos() -> dict:
     """
-    Lee capacidades de vehículos activos desde MongoDB.
+    Lee capacidades de vehículos desde SQL Server (TODOS, sin filtrar por
+    `activo` -- así era también en el Mongo original, a diferencia de
+    obtener_placas_por_abrev()/obtener_info_vehiculos() que sí filtran; se
+    preserva esa asimetría tal cual).
     Retorna: {abreviatura: capacidad_kg (int)} — ya con la regla CAP-4 aplicada
     (tope fijo de 3900 kg para vehículos de 3.5-4 t; 100 % nominal para el resto).
     """
     try:
-        db   = get_db()
-        caps = {}
-        for v in db["vehiculos"].find({}):
+        db    = get_db()
+        tabla = get_table("vehiculos")
+        caps  = {}
+        for v in db.execute(select(tabla)).mappings():
             abrev   = (v.get("abreviatura") or v.get("descripcion") or "").strip()
-            cap_ton = float(v.get("capacidad_ton") or v.get("capacidad_toneladas") or 0)
+            cap_ton = float(v.get("capacidad_toneladas") or 0)
             if abrev and cap_ton > 0:
                 caps[abrev] = int(capacidad_efectiva_kg(cap_ton * 1000))
         return caps
@@ -182,8 +188,9 @@ def obtener_placas_por_abrev() -> dict:
     """
     try:
         db     = get_db()
+        tabla  = get_table("vehiculos")
         placas = {}
-        for v in db["vehiculos"].find({"activo": True}):
+        for v in db.execute(select(tabla).where(tabla.c.activo == True)).mappings():  # noqa: E712
             abrev = (v.get("abreviatura") or v.get("descripcion") or "").strip()
             pl    = (v.get("placas") or "").strip()
             if abrev and pl:
@@ -199,11 +206,12 @@ def obtener_info_vehiculos() -> dict:
     Retorna: {abreviatura: {placas, capacidad_ton, abreviatura, descripcion}}
     """
     try:
-        db  = get_db()
-        res = {}
-        for v in db["vehiculos"].find({"activo": True}):
+        db    = get_db()
+        tabla = get_table("vehiculos")
+        res   = {}
+        for v in db.execute(select(tabla).where(tabla.c.activo == True)).mappings():  # noqa: E712
             abrev   = (v.get("abreviatura") or v.get("descripcion") or "").strip()
-            cap_ton = float(v.get("capacidad_ton") or v.get("capacidad_toneladas") or 0)
+            cap_ton = float(v.get("capacidad_toneladas") or 0)
             if abrev:
                 res[abrev] = {
                     "placas":        (v.get("placas") or "").strip(),

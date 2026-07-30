@@ -1,6 +1,6 @@
 """
 logic/auth_logic.py
-Autenticación de usuarios contra MongoDB: hash de contraseñas con bcrypt
+Autenticación de usuarios contra SQL Server: hash de contraseñas con bcrypt
 (incluye salt automático), validación de credenciales y bloqueo temporal
 de cuentas tras intentos fallidos repetidos.
 """
@@ -13,8 +13,9 @@ from datetime import datetime, timedelta
 import bcrypt
 from bson import ObjectId
 from bson.errors import InvalidId
+from sqlalchemy import select, insert, update, delete, func
 
-from db import get_db
+from db import get_db, get_table
 
 ROL_LOGISTICA = "logistica"
 ROL_CONDUCTOR = "conductor"
@@ -27,8 +28,8 @@ ZOOM_MAX     = 150
 ZOOM_DEFAULT = 100
 
 
-def _hash_password(password: str) -> bytes:
-    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12))
+def _hash_password(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
 
 def _verificar_password(password: str, password_hash) -> bool:
@@ -46,6 +47,19 @@ def generar_password_segura(longitud: int = 14) -> str:
     return "".join(secrets.choice(alfabeto) for _ in range(longitud))
 
 
+def _nuevo_id() -> str:
+    """Genera un id nuevo con el mismo formato que los mongo_id ya migrados."""
+    return str(ObjectId())
+
+
+def _id_valido(doc_id: str) -> "str | None":
+    """Valida el formato de un mongo_id (24 hex, igual que ObjectId). None si es inválido."""
+    try:
+        return str(ObjectId(doc_id))
+    except (InvalidId, TypeError):
+        return None
+
+
 def crear_usuario(
     username: str,
     password: str,
@@ -54,36 +68,41 @@ def crear_usuario(
     rol: str = ROL_LOGISTICA,
     chofer_id=None,
 ) -> dict:
-    db = get_db()
+    db     = get_db()
+    tabla  = get_table("usuarios")
     username = username.strip().lower()
-    if db.usuarios.find_one({"username": username}):
+    if db.execute(select(tabla.c.mongo_id).where(tabla.c.username == username)).first():
         return {"status": "error", "mensaje": f"El usuario '{username}' ya existe"}
-    doc = {
-        "username":          username,
-        "password_hash":     _hash_password(password),
-        "nombre":            nombre or username,
-        "es_admin":          es_admin,
-        "rol":               rol,
-        "chofer_id":         chofer_id,
-        "activo":            True,
-        "intentos_fallidos": 0,
-        "bloqueado_hasta":   None,
-        "ultimo_login":      None,
-        "creado_en":         datetime.utcnow(),
-    }
-    result = db.usuarios.insert_one(doc)
-    return {"status": "ok", "id": str(result.inserted_id)}
+
+    nuevo_id = _nuevo_id()
+    db.execute(insert(tabla).values(
+        mongo_id=nuevo_id,
+        username=username,
+        password_hash=_hash_password(password),
+        nombre=nombre or username,
+        es_admin=es_admin,
+        rol=rol,
+        chofer_id=str(chofer_id) if chofer_id else None,
+        activo=True,
+        intentos_fallidos=0,
+        bloqueado_hasta=None,
+        ultimo_login=None,
+        creado_en=datetime.utcnow(),
+    ))
+    return {"status": "ok", "id": nuevo_id}
 
 
 def crear_usuarios_iniciales() -> list:
     """
-    Crea 5 usuarios iniciales con contraseñas aleatorias si la colección
+    Crea 5 usuarios iniciales con contraseñas aleatorias si la tabla
     'usuarios' está vacía. Retorna las credenciales en texto plano (única
     vez posible, ya que el hash bcrypt no es reversible) para que el
     administrador las distribuya de forma segura.
     """
-    db = get_db()
-    if db.usuarios.count_documents({}) > 0:
+    db    = get_db()
+    tabla = get_table("usuarios")
+    total = db.execute(select(func.count()).select_from(tabla)).scalar()
+    if total > 0:
         return []
 
     base_usuarios = [
@@ -103,48 +122,51 @@ def crear_usuarios_iniciales() -> list:
 
 def autenticar(username: str, password: str) -> dict:
     """
-    Valida credenciales contra MongoDB.
+    Valida credenciales contra SQL Server.
     Bloquea la cuenta por BLOQUEO_MINUTOS tras MAX_INTENTOS_FALLIDOS intentos.
     Retorna {status:'ok', usuario:{...}} o {status:'error', mensaje:str}.
     """
-    db = get_db()
+    db    = get_db()
+    tabla = get_table("usuarios")
     username = (username or "").strip().lower()
     if not username or not password:
         return {"status": "error", "mensaje": "Usuario y contraseña requeridos"}
 
-    usuario = db.usuarios.find_one({"username": username})
+    usuario = db.execute(select(tabla).where(tabla.c.username == username)).mappings().first()
     error_generico = {"status": "error", "mensaje": "Usuario o contraseña incorrectos"}
-    if not usuario or not usuario.get("activo", True):
+    if not usuario or not (usuario["activo"] if usuario["activo"] is not None else True):
         return error_generico
 
     ahora = datetime.utcnow()
-    bloqueado_hasta = usuario.get("bloqueado_hasta")
+    bloqueado_hasta_raw = usuario["bloqueado_hasta"]
+    bloqueado_hasta = datetime.fromisoformat(bloqueado_hasta_raw) if bloqueado_hasta_raw else None
     if bloqueado_hasta and bloqueado_hasta > ahora:
         minutos = max(1, int((bloqueado_hasta - ahora).total_seconds() // 60) + 1)
         return {"status": "error", "mensaje": f"Cuenta bloqueada temporalmente. Intenta en {minutos} min."}
 
     if not _verificar_password(password, usuario["password_hash"]):
-        intentos = usuario.get("intentos_fallidos", 0) + 1
-        update = {"intentos_fallidos": intentos}
+        intentos = (usuario["intentos_fallidos"] or 0) + 1
+        valores = {"intentos_fallidos": intentos}
         if intentos >= MAX_INTENTOS_FALLIDOS:
-            update["bloqueado_hasta"]   = ahora + timedelta(minutes=BLOQUEO_MINUTOS)
-            update["intentos_fallidos"] = 0
-        db.usuarios.update_one({"_id": usuario["_id"]}, {"$set": update})
+            valores["bloqueado_hasta"]   = (ahora + timedelta(minutes=BLOQUEO_MINUTOS)).isoformat()
+            valores["intentos_fallidos"] = 0
+        db.execute(update(tabla).where(tabla.c.mongo_id == usuario["mongo_id"]).values(**valores))
         return error_generico
 
-    db.usuarios.update_one(
-        {"_id": usuario["_id"]},
-        {"$set": {"intentos_fallidos": 0, "bloqueado_hasta": None, "ultimo_login": ahora}},
+    db.execute(
+        update(tabla)
+        .where(tabla.c.mongo_id == usuario["mongo_id"])
+        .values(intentos_fallidos=0, bloqueado_hasta=None, ultimo_login=ahora)
     )
     return {
         "status": "ok",
         "usuario": {
-            "id":        str(usuario["_id"]),
+            "id":        usuario["mongo_id"],
             "username":  usuario["username"],
-            "nombre":    usuario.get("nombre", usuario["username"]),
-            "es_admin":  usuario.get("es_admin", False),
-            "rol":       usuario.get("rol") or ROL_LOGISTICA,
-            "chofer_id": str(usuario["chofer_id"]) if usuario.get("chofer_id") else None,
+            "nombre":    usuario["nombre"] or usuario["username"],
+            "es_admin":  bool(usuario["es_admin"]),
+            "rol":       usuario["rol"] or ROL_LOGISTICA,
+            "chofer_id": usuario["chofer_id"],
         },
     }
 
@@ -159,69 +181,72 @@ def _username_desde_nombre(nombre: str) -> str:
 def generar_acceso_chofer(chofer_id: str) -> dict:
     """
     Crea credenciales de acceso (usuario + contraseña) para un chofer ya
-    registrado en la colección `choferes`, vinculando el usuario creado de
+    registrado en la tabla `choferes`, vinculando el usuario creado de
     vuelta al chofer (`choferes.usuario_id`). La contraseña solo se devuelve
     en esta llamada (no es recuperable después, igual que crear_usuarios_iniciales).
     """
-    db = get_db()
-    try:
-        oid = ObjectId(chofer_id)
-    except (InvalidId, TypeError):
+    db  = get_db()
+    tabla_usuarios  = get_table("usuarios")
+    tabla_choferes  = get_table("choferes")
+
+    cid = _id_valido(chofer_id)
+    if cid is None:
         return {"status": "error", "mensaje": "ID de chofer inválido"}
 
-    chofer = db.choferes.find_one({"_id": oid})
+    chofer = db.execute(select(tabla_choferes).where(tabla_choferes.c.mongo_id == cid)).mappings().first()
     if not chofer:
         return {"status": "error", "mensaje": "Chofer no encontrado"}
-    if chofer.get("usuario_id"):
+    if chofer["usuario_id"]:
         return {"status": "error", "mensaje": "Este chofer ya tiene acceso generado"}
 
-    nombre = chofer.get("nombre", "")
+    nombre = chofer["nombre"] or ""
     base_username = _username_desde_nombre(nombre)
     username = base_username
     sufijo = 1
-    while db.usuarios.find_one({"username": username}):
+    while db.execute(select(tabla_usuarios.c.mongo_id).where(tabla_usuarios.c.username == username)).first():
         sufijo += 1
         username = f"{base_username}{sufijo}"
 
     password  = generar_password_segura()
-    resultado = crear_usuario(username, password, nombre, es_admin=False, rol=ROL_CONDUCTOR, chofer_id=oid)
+    resultado = crear_usuario(username, password, nombre, es_admin=False, rol=ROL_CONDUCTOR, chofer_id=cid)
     if resultado.get("status") != "ok":
         return resultado
 
-    db.choferes.update_one({"_id": oid}, {"$set": {"usuario_id": ObjectId(resultado["id"])}})
+    db.execute(update(tabla_choferes).where(tabla_choferes.c.mongo_id == cid).values(usuario_id=resultado["id"]))
     return {"status": "ok", "username": username, "password": password, "nombre": nombre}
 
 
-def _serializar_usuario(doc: dict) -> dict:
+def _serializar_usuario(row) -> dict:
     """Versión segura de un usuario para listarlo (nunca incluye password_hash)."""
     return {
-        "id":             str(doc["_id"]),
-        "username":       doc.get("username", ""),
-        "nombre":         doc.get("nombre", ""),
-        "rol":            doc.get("rol") or ROL_LOGISTICA,
-        "es_admin":       bool(doc.get("es_admin", False)),
-        "activo":         doc.get("activo", True),
-        "chofer_id":      str(doc["chofer_id"]) if doc.get("chofer_id") else None,
-        "ultimo_login":   doc["ultimo_login"].isoformat() if doc.get("ultimo_login") else None,
-        "creado_en":      doc["creado_en"].isoformat() if doc.get("creado_en") else None,
+        "id":             row["mongo_id"],
+        "username":       row["username"] or "",
+        "nombre":         row["nombre"] or "",
+        "rol":            row["rol"] or ROL_LOGISTICA,
+        "es_admin":       bool(row["es_admin"]),
+        "activo":         row["activo"] if row["activo"] is not None else True,
+        "chofer_id":      row["chofer_id"],
+        "ultimo_login":   row["ultimo_login"].isoformat() if row["ultimo_login"] else None,
+        "creado_en":      row["creado_en"].isoformat() if row["creado_en"] else None,
     }
 
 
 def listar_usuarios() -> list:
     """Todos los usuarios del sistema (Logística y Conductor), sin datos sensibles."""
-    db = get_db()
-    docs = db.usuarios.find({}).sort("username", 1)
-    return [_serializar_usuario(d) for d in docs]
+    db    = get_db()
+    tabla = get_table("usuarios")
+    filas = db.execute(select(tabla).order_by(tabla.c.username)).mappings().all()
+    return [_serializar_usuario(f) for f in filas]
 
 
-def obtener_usuario(usuario_id: str) -> dict | None:
-    try:
-        oid = ObjectId(usuario_id)
-    except (InvalidId, TypeError):
+def obtener_usuario(usuario_id: str) -> "dict | None":
+    uid = _id_valido(usuario_id)
+    if uid is None:
         return None
-    db  = get_db()
-    doc = db.usuarios.find_one({"_id": oid})
-    return _serializar_usuario(doc) if doc else None
+    db    = get_db()
+    tabla = get_table("usuarios")
+    fila = db.execute(select(tabla).where(tabla.c.mongo_id == uid)).mappings().first()
+    return _serializar_usuario(fila) if fila else None
 
 
 def crear_usuario_admin(username: str, password: str, nombre: str, es_admin: bool = False) -> dict:
@@ -240,26 +265,30 @@ def crear_usuario_admin(username: str, password: str, nombre: str, es_admin: boo
     return crear_usuario(username, password, nombre, es_admin=es_admin, rol=ROL_LOGISTICA)
 
 
-def editar_usuario(usuario_id: str, datos: dict, usuario_actual_id: str | None = None) -> dict:
+def editar_usuario(usuario_id: str, datos: dict, usuario_actual_id: "str | None" = None) -> dict:
     """
     Modifica username/nombre/es_admin y, opcionalmente, la contraseña
     (solo si se envía no vacía) de un usuario existente.
     """
-    try:
-        oid = ObjectId(usuario_id)
-    except (InvalidId, TypeError):
+    uid = _id_valido(usuario_id)
+    if uid is None:
         return {"status": "error", "mensaje": "ID inválido"}
 
-    db  = get_db()
-    doc = db.usuarios.find_one({"_id": oid})
-    if not doc:
+    db    = get_db()
+    tabla = get_table("usuarios")
+    fila  = db.execute(select(tabla).where(tabla.c.mongo_id == uid)).mappings().first()
+    if not fila:
         return {"status": "error", "mensaje": "Usuario no encontrado"}
 
     cambios: dict = {}
 
     nuevo_username = (datos.get("username") or "").strip().lower()
-    if nuevo_username and nuevo_username != doc.get("username"):
-        if db.usuarios.find_one({"username": nuevo_username, "_id": {"$ne": oid}}):
+    if nuevo_username and nuevo_username != fila["username"]:
+        dup = db.execute(
+            select(tabla.c.mongo_id)
+            .where(tabla.c.username == nuevo_username, tabla.c.mongo_id != uid)
+        ).first()
+        if dup:
             return {"status": "error", "mensaje": f"El usuario '{nuevo_username}' ya existe"}
         cambios["username"] = nuevo_username
 
@@ -270,7 +299,7 @@ def editar_usuario(usuario_id: str, datos: dict, usuario_actual_id: str | None =
     # por accidente desde este mismo formulario (evita quedar sin acceso).
     if "es_admin" in datos:
         es_admin_nuevo = bool(datos.get("es_admin"))
-        if doc.get("es_admin") and not es_admin_nuevo and str(oid) == str(usuario_actual_id):
+        if fila["es_admin"] and not es_admin_nuevo and str(uid) == str(usuario_actual_id):
             return {"status": "error", "mensaje": "No puedes quitarte el rol de administrador a ti mismo"}
         cambios["es_admin"] = es_admin_nuevo
 
@@ -283,63 +312,66 @@ def editar_usuario(usuario_id: str, datos: dict, usuario_actual_id: str | None =
     if not cambios:
         return {"status": "ok"}
 
-    db.usuarios.update_one({"_id": oid}, {"$set": cambios})
+    db.execute(update(tabla).where(tabla.c.mongo_id == uid).values(**cambios))
     return {"status": "ok"}
 
 
-def eliminar_usuario(usuario_id: str, usuario_actual_id: str | None = None) -> dict:
+def eliminar_usuario(usuario_id: str, usuario_actual_id: "str | None" = None) -> dict:
     """
     Elimina un usuario. Si era de rol conductor, libera el vínculo en su
     chofer (`choferes.usuario_id`) para que se le pueda generar un acceso
     nuevo más adelante. Protege contra auto-eliminación y contra dejar el
     sistema sin ningún administrador activo.
     """
-    try:
-        oid = ObjectId(usuario_id)
-    except (InvalidId, TypeError):
+    uid = _id_valido(usuario_id)
+    if uid is None:
         return {"status": "error", "mensaje": "ID inválido"}
 
-    if str(oid) == str(usuario_actual_id):
+    if str(uid) == str(usuario_actual_id):
         return {"status": "error", "mensaje": "No puedes eliminar tu propia cuenta"}
 
-    db  = get_db()
-    doc = db.usuarios.find_one({"_id": oid})
-    if not doc:
+    db    = get_db()
+    tabla = get_table("usuarios")
+    fila  = db.execute(select(tabla).where(tabla.c.mongo_id == uid)).mappings().first()
+    if not fila:
         return {"status": "error", "mensaje": "Usuario no encontrado"}
 
-    if doc.get("es_admin"):
-        otros_admins = db.usuarios.count_documents({"es_admin": True, "_id": {"$ne": oid}})
+    if fila["es_admin"]:
+        otros_admins = db.execute(
+            select(func.count()).select_from(tabla)
+            .where(tabla.c.es_admin == True, tabla.c.mongo_id != uid)  # noqa: E712
+        ).scalar()
         if otros_admins == 0:
             return {"status": "error", "mensaje": "No puedes eliminar al último administrador del sistema"}
 
-    if doc.get("rol") == ROL_CONDUCTOR and doc.get("chofer_id"):
-        db.choferes.update_one({"_id": doc["chofer_id"]}, {"$unset": {"usuario_id": ""}})
+    if fila["rol"] == ROL_CONDUCTOR and fila["chofer_id"]:
+        tabla_choferes = get_table("choferes")
+        db.execute(update(tabla_choferes).where(tabla_choferes.c.mongo_id == fila["chofer_id"]).values(usuario_id=None))
 
-    db.usuarios.delete_one({"_id": oid})
+    db.execute(delete(tabla).where(tabla.c.mongo_id == uid))
     return {"status": "ok"}
 
 
 def obtener_zoom(usuario_id: str) -> int:
     """Devuelve el nivel de zoom de página guardado para el usuario (o el default)."""
-    try:
-        oid = ObjectId(usuario_id)
-    except (InvalidId, TypeError):
+    uid = _id_valido(usuario_id)
+    if uid is None:
         return ZOOM_DEFAULT
-    db = get_db()
-    usuario = db.usuarios.find_one({"_id": oid}, {"zoom_pct": 1})
-    if not usuario:
+    db    = get_db()
+    tabla = get_table("usuarios")
+    fila = db.execute(select(tabla.c.zoom_pct).where(tabla.c.mongo_id == uid)).mappings().first()
+    if not fila:
         return ZOOM_DEFAULT
-    zoom = usuario.get("zoom_pct")
-    if isinstance(zoom, int) and ZOOM_MIN <= zoom <= ZOOM_MAX:
-        return zoom
+    zoom = fila["zoom_pct"]
+    if zoom is not None and ZOOM_MIN <= int(zoom) <= ZOOM_MAX:
+        return int(zoom)
     return ZOOM_DEFAULT
 
 
 def guardar_zoom(usuario_id: str, zoom) -> dict:
     """Persiste el nivel de zoom elegido por el usuario, para que se mantenga entre sesiones."""
-    try:
-        oid = ObjectId(usuario_id)
-    except (InvalidId, TypeError):
+    uid = _id_valido(usuario_id)
+    if uid is None:
         return {"status": "error", "mensaje": "Sesión inválida"}
     try:
         zoom_int = int(zoom)
@@ -347,6 +379,7 @@ def guardar_zoom(usuario_id: str, zoom) -> dict:
         return {"status": "error", "mensaje": "Zoom inválido"}
 
     zoom_int = max(ZOOM_MIN, min(ZOOM_MAX, zoom_int))
-    db = get_db()
-    db.usuarios.update_one({"_id": oid}, {"$set": {"zoom_pct": zoom_int}})
+    db    = get_db()
+    tabla = get_table("usuarios")
+    db.execute(update(tabla).where(tabla.c.mongo_id == uid).values(zoom_pct=zoom_int))
     return {"status": "ok", "zoom": zoom_int}

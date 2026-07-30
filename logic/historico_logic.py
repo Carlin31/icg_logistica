@@ -17,6 +17,7 @@ Cada documento:
 
 import io
 import csv
+import hashlib
 import math
 import time
 import json as _json
@@ -35,7 +36,9 @@ _OSRM_TIMEOUT     = 20
 _OSRM_MAX_RETRIES = 3
 _OSRM_RETRY_DELAY = 1.5
 
-from db import get_db
+from sqlalchemy import select, insert, update, delete, or_
+
+from db import get_db, get_table, transaccion
 from logic.vrp_logic import (
     build_template_from_history,
     generate_routes_vrp,
@@ -61,9 +64,9 @@ except ImportError:
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-def _parse_oid(doc_id: str):
+def _id_valido(doc_id: str) -> "str | None":
     try:
-        return ObjectId(doc_id)
+        return str(ObjectId(doc_id))
     except (InvalidId, TypeError):
         return None
 
@@ -125,12 +128,27 @@ def listar_rutas_historicas(tipo_registro: str | None = None) -> list:
     Mismo criterio que el VRP para que el número mostrado en la UI sea fiel al peso real.
     """
     try:
-        db   = get_db()
-        filtro = {"tipo_registro": tipo_registro} if tipo_registro else {"$or": [{"tipo_registro": {"$exists": False}}, {"tipo_registro": {"$ne": "mayoristas"}}]}
-        docs = list(db["rutas_historicas"].find(filtro, {"filas": 0}))
+        db    = get_db()
+        tabla = get_table("rutas_historicas")
+        cols  = [c for c in tabla.columns if c.name != "filas"]
+        stmt  = select(*cols)
+        if tipo_registro:
+            stmt = stmt.where(tabla.c.tipo_registro == tipo_registro)
+        else:
+            stmt = stmt.where(or_(tabla.c.tipo_registro.is_(None), tabla.c.tipo_registro != "mayoristas"))
+        docs = [dict(r) for r in db.execute(stmt).mappings()]
         docs.sort(key=_sort_key_historico)
         for doc in docs:
-            doc["_id"] = str(doc["_id"])
+            doc["_id"] = doc.pop("mongo_id")
+            # `dias` se guarda como JSON string en SQL Server (en Mongo era
+            # lista nativa). Se parsea a arreglo para conservar el contrato del
+            # front, que usa .map()/.join() sobre este campo.
+            dias_raw = doc.get("dias")
+            if isinstance(dias_raw, str):
+                try:
+                    doc["dias"] = _json.loads(dias_raw) if dias_raw else []
+                except (ValueError, TypeError):
+                    doc["dias"] = []
         return docs
     except Exception as e:
         print(f"[listar_rutas_historicas] {e}")
@@ -139,7 +157,7 @@ def listar_rutas_historicas(tipo_registro: str | None = None) -> list:
 
 def cargar_csv_historico(csv_bytes: bytes, nombre: str) -> dict:
     """
-    Parsea un CSV de rutas históricas y lo guarda en MongoDB.
+    Parsea un CSV de rutas históricas y lo guarda en SQL Server.
     Formato esperado: id_sucursal, vehiculo, dia_semana, secuencia_visita, kg_entrega
     """
     if not _PANDAS:
@@ -165,20 +183,22 @@ def cargar_csv_historico(csv_bytes: bytes, nombre: str) -> dict:
         n_rut   = int(df.groupby(["vehiculo", "dia_semana"]).ngroups)
         dias    = _dias_desde_filas(filas)
 
-        db  = get_db()
-        doc = {
-            "nombre":       nombre,
-            "filas":        filas,
-            "n_sucursales": n_suc,
-            "n_rutas":      n_rut,
-            "dias":         dias,
-            "cargado_en":   datetime.now().isoformat(),
-            "confirmada":   False,
-        }
-        res = db["rutas_historicas"].insert_one(doc)
+        db       = get_db()
+        tabla    = get_table("rutas_historicas")
+        nuevo_id = str(ObjectId())
+        db.execute(insert(tabla).values(
+            mongo_id=nuevo_id,
+            nombre=nombre,
+            filas=_json.dumps(filas, ensure_ascii=False),
+            n_sucursales=n_suc,
+            n_rutas=n_rut,
+            dias=_json.dumps(dias, ensure_ascii=False),
+            cargado_en=datetime.now().isoformat(),
+            confirmada=False,
+        ))
         return {
             "status":       "ok",
-            "id":           str(res.inserted_id),
+            "id":           nuevo_id,
             "n_sucursales": n_suc,
             "n_rutas":      n_rut,
         }
@@ -187,12 +207,13 @@ def cargar_csv_historico(csv_bytes: bytes, nombre: str) -> dict:
 
 
 def eliminar_historico(hist_id: str) -> dict:
-    oid = _parse_oid(hist_id)
+    oid = _id_valido(hist_id)
     if not oid:
         return {"status": "error", "mensaje": "ID inválido"}
     try:
-        db = get_db()
-        db["rutas_historicas"].delete_one({"_id": oid})
+        db    = get_db()
+        tabla = get_table("rutas_historicas")
+        db.execute(delete(tabla).where(tabla.c.mongo_id == oid))
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -207,13 +228,19 @@ def obtener_historicos_como_dfs(tipo_registro: str | None = None) -> list:
     if not _PANDAS:
         return []
     try:
-        db   = get_db()
-        filtro = {"tipo_registro": tipo_registro} if tipo_registro else {"$or": [{"tipo_registro": {"$exists": False}}, {"tipo_registro": {"$ne": "mayoristas"}}]}
-        docs = list(db["rutas_historicas"].find(filtro))
+        db    = get_db()
+        tabla = get_table("rutas_historicas")
+        stmt  = select(tabla)
+        if tipo_registro:
+            stmt = stmt.where(tabla.c.tipo_registro == tipo_registro)
+        else:
+            stmt = stmt.where(or_(tabla.c.tipo_registro.is_(None), tabla.c.tipo_registro != "mayoristas"))
+        docs = [dict(r) for r in db.execute(stmt).mappings()]
         docs.sort(key=_sort_key_historico)
         dfs  = []
         for doc in docs:
-            filas = [f for f in doc.get("filas", []) if f.get("tipo") != "mayorista"]
+            filas_raw = _json.loads(doc["filas"]) if doc.get("filas") else []
+            filas = [f for f in filas_raw if f.get("tipo") != "mayorista"]
             if filas:
                 dfs.append(pd.DataFrame(filas))
         return dfs
@@ -225,18 +252,60 @@ def obtener_historicos_como_dfs(tipo_registro: str | None = None) -> list:
 # ── Generación VRP desde historial ────────────────────────────────────────────
 
 def obtener_reporte_vrp(logistica_id: str) -> dict:
-    """Devuelve el último reporte VRP generado para la logística activa."""
-    oid = _parse_oid(logistica_id)
+    """
+    Devuelve el último reporte VRP generado para la logística activa.
+
+    Reconstruye `reporte` desde `vrp_reportes_resumen` (fuente='vrp_reportes')
+    -- la columna JSON `vrp_reportes.reporte` queda sin usar, superada por la
+    tabla normalizada, igual criterio que en el resto de la migración.
+    `vrp_reportes_rutas`/`_sucursales`/`_mayoristas` y las tablas
+    `vrp_reportes_afinidad`/`asignaciones_vrp_afinidad_preview`/
+    `vrp_reportes_json_invalido` se crearon en la planeación original pero
+    nunca tuvieron código real que las poblara ni en Mongo ni ahora
+    (confirmado contra el historial de git: el único documento real era
+    `vrp_reportes` con `reporte`+`consolidaciones`+`lambda_afinidad`+
+    `generado_en`, sin `detalle_por_dia` -- no hay de dónde normalizar esas
+    tablas hijas). Quedan creadas pero vacías, igual que `cache_osrm` antes
+    de tener su primer consumidor real.
+    """
+    oid = _id_valido(logistica_id)
     if not oid:
         return {}
     try:
-        db  = get_db()
-        doc = db["vrp_reportes"].find_one({"logistica_id": oid})
-        if not doc:
+        db     = get_db()
+        t_base = get_table("vrp_reportes")
+        base   = db.execute(select(t_base).where(t_base.c.logistica_id == oid)).mappings().first()
+        if not base:
             return {}
-        doc.pop("_id", None)
-        doc["logistica_id"] = str(doc["logistica_id"])
-        return doc
+
+        t_resumen  = get_table("vrp_reportes_resumen")
+        reporte_id = base["mongo_id"]
+        reporte    = []
+        for f in db.execute(
+            select(t_resumen).where(t_resumen.c.reporte_id == reporte_id, t_resumen.c.fuente == "vrp_reportes")
+        ).mappings():
+            reporte.append({
+                "vehiculo":     f["vehiculo"],
+                "dia_semana":   f["dia_semana"],
+                "sucursales":   f["sucursales"],
+                "kg_total":     f["kg_total"],
+                "kg_hist_avg":  f["kg_hist_avg"],
+                "desviacion_%": f["desviacion_pct"],
+                "capacidad_kg": f["capacidad_kg"],
+                "uso_%":        f["uso_pct"],
+                "is_small":     bool(f["is_small"]) if f["is_small"] is not None else None,
+                "m3_total":     f["m3_total"],
+                "estado":       f["estado"],
+                "notas":        f["notas"],
+            })
+
+        return {
+            "logistica_id":    str(base["logistica_id"]),
+            "reporte":         reporte,
+            "consolidaciones": [],
+            "lambda_afinidad": base["lambda_afinidad"],
+            "generado_en":     base["generado_en"],
+        }
     except Exception:
         return {}
 
@@ -250,12 +319,20 @@ def obtener_reporte_vrp(logistica_id: str) -> dict:
 # también en las colecciones _preview para poder comparar con el algoritmo anterior.
 
 def _historiales_crudos_sucursales() -> list:
-    """Documentos crudos de rutas_historicas (solo filas de sucursal) para construir_afinidad()."""
-    db = get_db()
-    filtro = {"$or": [{"tipo_registro": {"$exists": False}}, {"tipo_registro": {"$ne": "mayoristas"}}]}
-    docs = list(db["rutas_historicas"].find(filtro))
+    """
+    Documentos crudos de rutas_historicas (solo filas de sucursal) para
+    construir_afinidad(). Adelantada a SQL Server junto con el resto del
+    CRUD de rutas_historicas (Fase 7) aunque la usa generar_rutas_vrp_afinidad
+    (Fase 8, aún Mongo) -- necesario para que lea los mismos datos frescos
+    que ya solo se escriben en SQL desde esta fase.
+    """
+    db    = get_db()
+    tabla = get_table("rutas_historicas")
+    stmt  = select(tabla).where(or_(tabla.c.tipo_registro.is_(None), tabla.c.tipo_registro != "mayoristas"))
+    docs  = [dict(r) for r in db.execute(stmt).mappings()]
     for doc in docs:
-        doc["filas"] = [f for f in doc.get("filas", []) if f.get("tipo") != "mayorista"]
+        filas_raw   = _json.loads(doc["filas"]) if doc.get("filas") else []
+        doc["filas"] = [f for f in filas_raw if f.get("tipo") != "mayorista"]
     return [d for d in docs if d["filas"]]
 
 
@@ -747,6 +824,120 @@ def _consolidar_aisladas(
     return {k: v for k, v in groups.items() if v}
 
 
+def _guardar_detalle_vrp_en_asignaciones(logistica_id_str: str, detalle_por_dia: dict, guardado_en: str) -> None:
+    """
+    Escribe el resultado de generar_rutas_vrp_afinidad() en SQL Server
+    (`asignaciones` + `asignaciones_rutas` + `asignaciones_sucursales`),
+    con el mismo patrón de reemplazo completo que
+    `asignacion_logic.guardar_asignacion()` -- ver nota Fase 7 en
+    MIGRACION_STATUS.md: aunque el resto de generar_rutas_vrp_afinidad()
+    sigue en Mongo (Fase 8 pendiente), `asignaciones` ya es SQL-only desde
+    Fase 6 y nadie más lee la versión Mongo, así que este único write se
+    adelantó para no perder el resultado silenciosamente.
+    """
+    t_base = get_table("asignaciones")
+    t_ar   = get_table("asignaciones_rutas")
+    t_as   = get_table("asignaciones_sucursales")
+
+    with transaccion() as conn:
+        fila_base = conn.execute(select(t_base.c.mongo_id).where(t_base.c.logistica_id == logistica_id_str)).first()
+        if fila_base:
+            asignacion_id = fila_base.mongo_id
+            conn.execute(update(t_base).where(t_base.c.mongo_id == asignacion_id).values(guardado_en=guardado_en))
+        else:
+            asignacion_id = str(ObjectId())
+            conn.execute(insert(t_base).values(
+                mongo_id=asignacion_id, logistica_id=logistica_id_str, guardado_en=guardado_en,
+            ))
+
+        conn.execute(delete(t_ar).where(t_ar.c.logistica_id == logistica_id_str))
+        conn.execute(delete(t_as).where(t_as.c.logistica_id == logistica_id_str))
+
+        filas_ar, filas_as = [], []
+        for dia, rutas_del_dia in detalle_por_dia.items():
+            for ruta_id, det in rutas_del_dia.items():
+                filas_ar.append({
+                    "asignacion_id":          asignacion_id,
+                    "logistica_id":           logistica_id_str,
+                    "dia_semana":             dia,
+                    "ruta_key":               ruta_id,
+                    "nombre_ruta":            det.get("nombre_ruta"),
+                    "vehiculo_placas":        det.get("vehiculo_placas"),
+                    "vehiculo_abreviatura":   det.get("vehiculo_abreviatura"),
+                    "capacidad_ton":          det.get("capacidad_ton"),
+                    "peso_total_kg":          det.get("peso_total_kg"),
+                    "porcentaje_utilizacion": det.get("porcentaje_utilizacion"),
+                    "hora_salida":            det.get("hora_salida"),
+                    "hora_regreso_estimada":  det.get("hora_regreso_estimada"),
+                    "cumple_horario":         det.get("cumple_horario"),
+                    "vrp_estado":             det.get("vrp_estado"),
+                })
+                for s in (det.get("sucursales") or []):
+                    filas_as.append({
+                        "asignacion_id": asignacion_id, "logistica_id": logistica_id_str,
+                        "dia_semana": dia, "ruta_key": ruta_id,
+                        "num_tienda": s.get("num_tienda"), "nombre": s.get("nombre"),
+                        "orden": s.get("orden"), "peso_kg": s.get("peso_kg"),
+                    })
+
+        if filas_ar:
+            conn.execute(insert(t_ar), filas_ar)
+        if filas_as:
+            conn.execute(insert(t_as), filas_as)
+
+
+def _guardar_reporte_vrp_en_sql(logistica_id_str: str, report_rows: list, lambda_afinidad: float, generado_en: str) -> str:
+    """
+    Escribe el reporte de generar_rutas_vrp_afinidad() en `vrp_reportes`
+    (fila base) + `vrp_reportes_resumen` (fuente='vrp_reportes', reemplazo
+    completo). El documento Mongo original solo tenía `reporte`
+    (la lista plana que aquí se normaliza) + `consolidaciones` (siempre
+    `[]`) + `lambda_afinidad` + `generado_en` -- sin `detalle_por_dia` --
+    así que no hay datos de origen para poblar `vrp_reportes_rutas`/
+    `_sucursales`/`_mayoristas` (quedan vacías, ver nota en
+    obtener_reporte_vrp). Devuelve el `reporte_id` (mongo_id de la fila base).
+    """
+    t_base    = get_table("vrp_reportes")
+    t_resumen = get_table("vrp_reportes_resumen")
+
+    with transaccion() as conn:
+        fila_base = conn.execute(select(t_base.c.mongo_id).where(t_base.c.logistica_id == logistica_id_str)).first()
+        if fila_base:
+            reporte_id = fila_base.mongo_id
+            conn.execute(update(t_base).where(t_base.c.mongo_id == reporte_id).values(
+                generado_en=generado_en, lambda_afinidad=lambda_afinidad,
+            ))
+        else:
+            reporte_id = str(ObjectId())
+            conn.execute(insert(t_base).values(
+                mongo_id=reporte_id, logistica_id=logistica_id_str,
+                generado_en=generado_en, lambda_afinidad=lambda_afinidad,
+            ))
+
+        conn.execute(delete(t_resumen).where(t_resumen.c.reporte_id == reporte_id, t_resumen.c.fuente == "vrp_reportes"))
+
+        filas = [{
+            "reporte_id":     reporte_id,
+            "fuente":         "vrp_reportes",
+            "vehiculo":       r.get("vehiculo"),
+            "dia_semana":     r.get("dia_semana"),
+            "sucursales":     r.get("sucursales"),
+            "kg_total":       r.get("kg_total"),
+            "kg_hist_avg":    r.get("kg_hist_avg"),
+            "desviacion_pct": r.get("desviacion_%"),
+            "capacidad_kg":   r.get("capacidad_kg"),
+            "uso_pct":        r.get("uso_%"),
+            "estado":         r.get("estado"),
+            "notas":          r.get("notas"),
+            "is_small":       r.get("is_small"),
+            "m3_total":       r.get("m3_total"),
+        } for r in report_rows]
+        if filas:
+            conn.execute(insert(t_resumen), filas)
+
+    return reporte_id
+
+
 def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) -> dict:
     """
     Reproduce los patrones históricos validados adaptados al pedido actual.
@@ -780,7 +971,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     6. Secuencia histórica conservada; inserción por proximidad para paradas
        sin historial de orden.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     if not _PANDAS:
@@ -797,14 +988,15 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
         }
 
     # ── 2. Pedidos actuales (idéntico a generar_rutas_vrp) ─────────────────────
-    ext_doc = db["extraccion"].find_one({"logistica_id": oid})
-    if not ext_doc:
+    t_ext   = get_table("extraccion")
+    ext_row = db.execute(select(t_ext).where(t_ext.c.logistica_id == oid)).mappings().first()
+    if not ext_row:
         return {
             "status":  "error",
             "mensaje": "No hay datos de extracción para esta logística. Completa la sección Extracción primero.",
         }
 
-    datos        = ext_doc.get("datos", {})
+    datos        = _json.loads(ext_row["datos"]) if ext_row.get("datos") else {}
     pedidos_dict = {}
     for _, valores in datos.items():
         id_suc = valores.get("id_sucursal")
@@ -819,8 +1011,9 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     if not pedidos_dict:
         return {"status": "error", "mensaje": "No hay sucursales con peso en la extracción."}
 
+    datos_volumen   = _json.loads(ext_row["datos_volumen"]) if ext_row.get("datos_volumen") else {}
     volumenes_dict: dict = {}
-    for _, valores in ext_doc.get("datos_volumen", {}).items():
+    for _, valores in datos_volumen.items():
         id_suc = valores.get("id_sucursal")
         vol    = float(valores.get("total_m3") or 0)
         if id_suc is not None:
@@ -837,7 +1030,8 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     # ── 3. Coordenadas y nombres de sucursales ─────────────────────────────────
     coords_dict = {}
     suc_nombres = {}
-    for suc in db["sucursales"].find({}):
+    t_suc = get_table("sucursales")
+    for suc in db.execute(select(t_suc)).mappings():
         nt  = suc.get("num_tienda")
         lat = suc.get("latitud")
         lon = suc.get("longitud")
@@ -1041,32 +1235,10 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             "vrp_estado":             vrp_estado,
         }
 
-    # ── 8. Guardar en producción ─────────────────────────────────────────────
+    # ── 8. Guardar en producción (SQL Server) ─────────────────────────────────
     now_iso = datetime.now().isoformat()
-    asig_doc = {
-        "logistica_id":    oid,
-        "detalle_por_dia": detalle_por_dia,
-        "generado_por":    "vrp_afinidad",
-        "lambda_afinidad": lambda_afinidad,
-        "n_historicos":    len(historiales),
-        "guardado_en":     now_iso,
-    }
-    db["asignaciones"].update_one(
-        {"logistica_id": oid},
-        {"$set": asig_doc},
-        upsert=True,
-    )
-    db["vrp_reportes"].update_one(
-        {"logistica_id": oid},
-        {"$set": {
-            "logistica_id":    oid,
-            "reporte":         report_rows,
-            "consolidaciones": [],
-            "lambda_afinidad": lambda_afinidad,
-            "generado_en":     now_iso,
-        }},
-        upsert=True,
-    )
+    _guardar_detalle_vrp_en_asignaciones(oid, detalle_por_dia, now_iso)
+    _guardar_reporte_vrp_en_sql(oid, report_rows, lambda_afinidad, now_iso)
 
     return {
         "status":            "ok",
@@ -1156,17 +1328,21 @@ def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_
         n_may = len(set(str(f.get("id_cliente") or "") for f in filas_may if f.get("id_cliente")))
         dias  = _dias_desde_filas(filas)
 
-        db = get_db()
+        db    = get_db()
+        tabla = get_table("rutas_historicas")
 
         fecha_inicio = ""
         fecha_fin    = ""
         try:
-            oid_log = _parse_oid(str(logistica_id))
+            oid_log = _id_valido(str(logistica_id))
             if oid_log:
-                log_doc = db["logisticas"].find_one({"_id": oid_log})
-                if log_doc:
-                    fecha_inicio = log_doc.get("fecha_inicio", "")
-                    fecha_fin    = log_doc.get("fecha_fin", "")
+                tabla_log = get_table("logisticas")
+                log_fila  = db.execute(
+                    select(tabla_log.c.fecha_inicio, tabla_log.c.fecha_fin).where(tabla_log.c.mongo_id == oid_log)
+                ).mappings().first()
+                if log_fila:
+                    fecha_inicio = log_fila["fecha_inicio"] or ""
+                    fecha_fin    = log_fila["fecha_fin"] or ""
         except Exception:
             pass
 
@@ -1176,27 +1352,44 @@ def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_
         if nombre_auto:
             nombre = nombre_auto
 
-        doc = {
-            "nombre":        nombre,
-            "filas":         filas,
-            "n_sucursales":  n_suc,
-            "n_mayoristas":  n_may,
-            "n_rutas":       n_rut,
-            "dias":          dias,
-            "logistica_id":  str(logistica_id),
-            "fecha_inicio":  fecha_inicio,
-            "fecha_fin":     fecha_fin,
-            "cargado_en":    cargado_en,
-            "confirmada":    True,
-            "tipo_registro": tipo_registro,
-        }
-        # Upsert: si ya existe un historial confirmado para esta logística, actualizarlo
-        res = db["rutas_historicas"].update_one(
-            {"logistica_id": str(logistica_id), "confirmada": True, "tipo_registro": {"$ne": "mayoristas"}},
-            {"$set": doc},
-            upsert=True,
+        valores = dict(
+            nombre=nombre,
+            filas=_json.dumps(filas, ensure_ascii=False),
+            n_sucursales=n_suc,
+            n_mayoristas=n_may,
+            n_rutas=n_rut,
+            dias=_json.dumps(dias, ensure_ascii=False),
+            logistica_id=str(logistica_id),
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+            cargado_en=cargado_en,
+            confirmada=True,
+            tipo_registro=tipo_registro,
         )
-        doc_id = str(res.upserted_id) if res.upserted_id else ""
+
+        # Upsert: si ya existe un historial confirmado (no-mayoristas) para esta
+        # logística, actualizarlo; si no, insertar uno nuevo. Cuando
+        # tipo_registro == "mayoristas" el filtro de abajo nunca encuentra
+        # coincidencia (excluye explícitamente mayoristas) -- por diseño,
+        # siempre inserta, igual que en el Mongo original (y que
+        # mayoristas_logic._guardar_historico_mayoristas, su reimplementación
+        # SQL adelantada en Fase 3/4).
+        with transaccion() as conn:
+            existente = conn.execute(
+                select(tabla.c.mongo_id).where(
+                    tabla.c.logistica_id == str(logistica_id),
+                    tabla.c.confirmada == True,  # noqa: E712
+                    or_(tabla.c.tipo_registro.is_(None), tabla.c.tipo_registro != "mayoristas"),
+                )
+            ).first()
+
+            if existente:
+                doc_id = ""
+                conn.execute(update(tabla).where(tabla.c.mongo_id == existente.mongo_id).values(**valores))
+            else:
+                doc_id = str(ObjectId())
+                conn.execute(insert(tabla).values(mongo_id=doc_id, **valores))
+
         return {"status": "ok", "id": doc_id}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1224,13 +1417,15 @@ def sugerir_vehiculos_optimos(routes_info: list) -> dict:
     db = get_db()
 
     # ── 1. Construir grupos históricos por (vehiculo, dia) con su set de sucursales ──
-    docs = list(db["rutas_historicas"].find({}))
+    tabla = get_table("rutas_historicas")
+    docs  = [dict(r) for r in db.execute(select(tabla)).mappings()]
     docs.sort(key=_sort_key_historico)  # más antiguo → más reciente por fecha real
     n    = len(docs)
     hist_groups = []  # [{sucursales: set, vehiculo: str, dia: str, weight: float}]
     for i, doc in enumerate(docs):
-        weight = float(i + 1)  # recencia: más reciente → mayor peso
-        filas  = [f for f in doc.get("filas", []) if f.get("tipo") != "mayorista"]
+        weight    = float(i + 1)  # recencia: más reciente → mayor peso
+        filas_raw = _json.loads(doc["filas"]) if doc.get("filas") else []
+        filas     = [f for f in filas_raw if f.get("tipo") != "mayorista"]
         grupos = _dd(set)
         for f in filas:
             key = (str(f.get("vehiculo", "")), _normalizar_dia(str(f.get("dia_semana", ""))))
@@ -1246,8 +1441,9 @@ def sugerir_vehiculos_optimos(routes_info: list) -> dict:
     # 3.5-4 t; para cualquier otro, es exactamente su capacidad nominal.
     veh_info = {}        # abrev → {placas, capacidad_kg}
     all_vehiculos = []
-    for v in db["vehiculos"].find({}):
-        abrev   = v.get("abreviatura") or v.get("nombre_corto") or ""
+    tabla_veh = get_table("vehiculos")
+    for v in db.execute(select(tabla_veh)).mappings():
+        abrev   = v.get("abreviatura") or ""
         placas  = v.get("placas") or ""
         cap_ton = float(v.get("capacidad_toneladas") or 0)
         cap_kg  = capacidad_efectiva_kg(cap_ton * 1000)
@@ -1373,14 +1569,24 @@ def _consultar_osrm_geometria(wp: list, db) -> tuple:
     Devuelve (polyline, distancia_km, duracion_min, origen, from_cache).
     Flujo: caché → OSRM (hasta _OSRM_MAX_RETRIES intentos) → Haversine solo si todo falla.
     Solo persiste en caché resultados reales de OSRM (nunca Haversine).
+
+    `db` es la Connection SQL (db.get_db()) que reciben los llamadores.
+    `cache_osrm` usa `clave_hash` (SHA-256 de la clave original) como parte
+    de la PK -- mismo esquema y convención que `asignacion_logic.py` (Fase 6).
     """
-    clave = _geo_cache_key(wp)
+    clave       = _geo_cache_key(wp)
+    clave_hash  = hashlib.sha256(clave.encode("utf-8")).hexdigest()
+    tabla_cache = get_table("cache_osrm")
 
     # 1. Revisar caché primero
     try:
-        doc = db["cache_osrm"].find_one({"clave": clave, "tipo": "geometria"})
-        if doc:
-            c = doc["resultado"]
+        fila = db.execute(
+            select(tabla_cache.c.resultado).where(
+                tabla_cache.c.clave_hash == clave_hash, tabla_cache.c.tipo == "geometria"
+            )
+        ).first()
+        if fila:
+            c = _json.loads(fila.resultado)
             return (c.get("polyline", []), c.get("distancia_km", 0.0),
                     c.get("duracion_min", 0.0), c.get("origen", "osrm"), True)
     except Exception:
@@ -1433,19 +1639,25 @@ def _consultar_osrm_geometria(wp: list, db) -> tuple:
     # Solo guardar en caché resultados reales de OSRM
     if origen == "osrm" and polyline:
         try:
-            db["cache_osrm"].update_one(
-                {"clave": clave, "tipo": "geometria"},
-                {"$set": {
-                    "resultado": {
-                        "polyline":     polyline,
-                        "distancia_km": distancia_km,
-                        "duracion_min": duracion_min,
-                        "origen":       origen,
-                    },
-                    "actualizado_en": datetime.now().isoformat(),
-                }},
-                upsert=True,
-            )
+            resultado_json = _json.dumps({
+                "polyline": polyline, "distancia_km": distancia_km,
+                "duracion_min": duracion_min, "origen": origen,
+            })
+            ahora  = datetime.now()
+            existe = db.execute(
+                select(tabla_cache.c.clave_hash).where(
+                    tabla_cache.c.clave_hash == clave_hash, tabla_cache.c.tipo == "geometria"
+                )
+            ).first()
+            if existe:
+                db.execute(update(tabla_cache).where(
+                    tabla_cache.c.clave_hash == clave_hash, tabla_cache.c.tipo == "geometria"
+                ).values(resultado=resultado_json, actualizado_en=ahora))
+            else:
+                db.execute(insert(tabla_cache).values(
+                    clave_hash=clave_hash, clave=clave, tipo="geometria",
+                    resultado=resultado_json, actualizado_en=ahora,
+                ))
         except Exception:
             pass
 
@@ -1458,24 +1670,27 @@ def obtener_geometrias_historico(hist_id: str) -> dict:
     Agrupa las filas por (vehiculo, dia_semana), construye waypoints
     depósito→paradas→depósito y consulta OSRM con caché en cache_osrm.
     """
-    oid = _parse_oid(hist_id)
+    oid = _id_valido(hist_id)
     if not oid:
         return {"status": "error", "mensaje": "ID inválido"}
 
     try:
-        db  = get_db()
-        doc = db["rutas_historicas"].find_one({"_id": oid})
-        if not doc:
+        db      = get_db()
+        t_hist  = get_table("rutas_historicas")
+        doc_row = db.execute(select(t_hist).where(t_hist.c.mongo_id == oid)).mappings().first()
+        if not doc_row:
             return {"status": "error", "mensaje": "Historial no encontrado"}
+        doc = dict(doc_row)
 
-        filas = doc.get("filas", [])
+        filas = _json.loads(doc["filas"]) if doc.get("filas") else []
         if not filas:
             return {"status": "ok", "rutas": [], "nombre": doc.get("nombre", "")}
 
         # Cargar coordenadas y nombres de sucursales
         coords_dict: dict = {}
         suc_nombres: dict = {}
-        for suc in db["sucursales"].find({}):
+        t_suc = get_table("sucursales")
+        for suc in db.execute(select(t_suc)).mappings():
             nt  = suc.get("num_tienda")
             lat = suc.get("latitud")
             lon = suc.get("longitud")
@@ -1495,7 +1710,8 @@ def obtener_geometrias_historico(hist_id: str) -> dict:
         # Cargar coordenadas y nombres de mayoristas
         may_coords: dict = {}
         may_nombres: dict = {}
-        for may in db["clientes_mayoristas"].find({}):
+        t_may = get_table("clientes_mayoristas")
+        for may in db.execute(select(t_may)).mappings():
             idc = may.get("id_cliente")
             lat = may.get("latitud")
             lon = may.get("longitud")
@@ -1605,19 +1821,21 @@ def stream_geometrias_historico(hist_id: str):
     def _ev(obj):
         return f"data: {_json.dumps(obj, ensure_ascii=False)}\n\n"
 
-    oid = _parse_oid(hist_id)
+    oid = _id_valido(hist_id)
     if not oid:
         yield _ev({"type": "error", "mensaje": "ID inválido"})
         return
 
     try:
-        db  = get_db()
-        doc = db["rutas_historicas"].find_one({"_id": oid})
-        if not doc:
+        db      = get_db()
+        t_hist  = get_table("rutas_historicas")
+        doc_row = db.execute(select(t_hist).where(t_hist.c.mongo_id == oid)).mappings().first()
+        if not doc_row:
             yield _ev({"type": "error", "mensaje": "Historial no encontrado"})
             return
+        doc = dict(doc_row)
 
-        filas = doc.get("filas", [])
+        filas = _json.loads(doc["filas"]) if doc.get("filas") else []
         if not filas:
             yield _ev({"type": "done", "total": 0, "n_rutas": 0, "elapsed_ms": 0})
             return
@@ -1625,7 +1843,8 @@ def stream_geometrias_historico(hist_id: str):
         # Cargar coordenadas de sucursales
         coords_dict: dict = {}
         suc_nombres: dict = {}
-        for suc in db["sucursales"].find({}):
+        t_suc = get_table("sucursales")
+        for suc in db.execute(select(t_suc)).mappings():
             nt  = suc.get("num_tienda")
             lat = suc.get("latitud")
             lon = suc.get("longitud")
@@ -1645,7 +1864,8 @@ def stream_geometrias_historico(hist_id: str):
         # Cargar coordenadas de mayoristas
         may_coords: dict = {}
         may_nombres: dict = {}
-        for may in db["clientes_mayoristas"].find({}):
+        t_may = get_table("clientes_mayoristas")
+        for may in db.execute(select(t_may)).mappings():
             idc = may.get("id_cliente")
             lat = may.get("latitud")
             lon = may.get("longitud")

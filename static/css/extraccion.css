@@ -202,6 +202,8 @@
 .ext-badge--icg      { background: #dbeafe; color: #1e40af; }
 .ext-badge--proalmex { background: #dcfce7; color: #15803d; }
 .ext-badge--bimbo    { background: #fef9c3; color: #78350f; }
+/* Pedido sin peso capturado en el origen (p. ej. mercancía pendiente de surtir) */
+.ext-badge--pendiente { background: #ffedd5; color: #9a3412; }
 
 .ext-perfil-filename {
   font-size: 0.84rem;

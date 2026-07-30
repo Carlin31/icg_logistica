@@ -13,8 +13,13 @@ class LectorProalmex:
     # Sufijos de columnas auxiliares que aparecen pegadas al nombre de una
     # sucursal (ej. "Tiendas Lores IMPORTE", "Tiendas Lores INV. DISPONIBLE",
     # "Tiendas Lores INV. PROALMEX", "Tiendas Lores TOTAL CAJAS") y no
-    # representan piezas de pedido reales.
-    SUFIJOS_EXCLUIR = ('IMPORTE', 'INV. DISPONIBLE', 'INV. PROALMEX', 'TOTAL CAJAS')
+    # representan piezas de pedido reales. 'INV. BODEGA' y 'OBSERVACIONES' son
+    # columnas de inventario/notas del Excel, no sucursales: sin ellas se
+    # colaban como destinos falsos con id_sucursal 'N/A' (ver calculadora.py).
+    SUFIJOS_EXCLUIR = (
+        'IMPORTE', 'INV. DISPONIBLE', 'INV. PROALMEX', 'INV. BODEGA',
+        'TOTAL CAJAS', 'OBSERVACIONES',
+    )
 
     @staticmethod
     def leer_y_normalizar(archivo) -> pd.DataFrame:

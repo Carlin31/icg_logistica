@@ -3,26 +3,30 @@ logic/modificacion_logic.py
 Lógica de negocio para la Sección — Modificación manual de rutas.
 
 Lee datos desde:
-  - `asignaciones`           → vehículos y días asignados (guardados en Asignación)
-  - `distribucion_mayoristas`→ mayoristas por ruta (orden, peso, coords)
-  - `rutas_config`           → sucursales con coordenadas
-  - `extraccion`             → pesos de sucursales
-  - `vehiculos`              → flota activa
+  - `asignaciones` (+ tablas normalizadas) → vehículos y días asignados (guardados en Asignación)
+  - `mayoristas_logic.calcular_distribucion_mayoristas` → mayoristas por ruta (orden, peso, coords)
+  - `rutas_config` (+ `rutas_config_sucursales`) → sucursales con coordenadas
+  - `extraccion`   → pesos de sucursales
+  - `vehiculos`    → flota activa
 Guarda en:
-  - `modificaciones_rutas`   (con logistica_id)
+  - `modificaciones_rutas` (+ `modificacion_rutas`, `modificacion_ruta_sucursales`,
+    `modificacion_ruta_mayoristas`) — con logistica_id
 
-No se usan archivos JSON ni las colecciones validaciones/reordenamientos.
+No se usan archivos JSON ni las tablas validaciones/reordenamientos.
 """
+import json
 import math
 import time
 import urllib.request
 import urllib.error
 import concurrent.futures
 from datetime import datetime
+
 from bson import ObjectId
 from bson.errors import InvalidId
+from sqlalchemy import select, insert, update, delete, or_, func
 
-from db import get_db
+from db import get_db, get_table, transaccion
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _integrar_paradas
 
 # ── Constantes ────────────────────────────────────────────────
@@ -40,24 +44,19 @@ OSRM_RETRY_DELAY = 1.5
 ORDEN_DIAS = ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"]
 
 
-def _parse_oid(doc_id: str) -> ObjectId | None:
+def _id_valido(doc_id: str) -> "str | None":
     try:
-        return ObjectId(doc_id)
+        return str(ObjectId(doc_id))
     except (InvalidId, TypeError):
         return None
-
-
-def _serialize(doc: dict) -> dict:
-    doc = dict(doc)
-    if "_id" in doc and isinstance(doc["_id"], ObjectId):
-        doc["_id"] = str(doc["_id"])
-    return doc
 
 
 def _obtener_config_general() -> dict:
     try:
         db = get_db()
-        return db["configuracion"].find_one({"_tipo": {"$exists": False}}) or {}
+        tabla = get_table("configuracion")
+        fila = db.execute(select(tabla)).mappings().first()
+        return dict(fila) if fila else {}
     except Exception:
         return {}
 
@@ -74,10 +73,21 @@ def _override_chofer_nombre(valor) -> str:
     return (valor or "").strip()
 
 
-def _override_chofer_id(valor) -> str | None:
+def _override_chofer_id(valor) -> "str | None":
     if isinstance(valor, dict):
         return valor.get("chofer_id")
     return None
+
+
+def _clave_a_python(clave: str):
+    """
+    asignaciones_mayoristas_overrides.clave es texto puro (SQL no distingue
+    tipos como Mongo). Reconstituye la distinción original documento(str) vs
+    id_cliente(int, legado) con el mismo criterio verificado contra datos
+    reales: los documento son alfanuméricos (p. ej. "AA1153"), el fallback
+    legado por id_cliente es siempre solo dígitos (p. ej. "270").
+    """
+    return int(clave) if clave.isdigit() else clave
 
 
 def _override_key_matches(m: dict, key) -> bool:
@@ -175,8 +185,6 @@ def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ru
     return dist
 
 
-
-
 # ── OSRM con reintentos y geometría ───────────────────────────
 
 def consultar_osrm_con_reintentos(coords: list) -> dict:
@@ -191,13 +199,12 @@ def consultar_osrm_con_reintentos(coords: list) -> dict:
         try:
             if intento > 0:
                 time.sleep(OSRM_RETRY_DELAY)
-            import json as _json
             req = urllib.request.Request(url, headers={
                 "User-Agent": "ICG-RouteModification/1.0",
                 "Accept": "application/json",
             })
             with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as resp:
-                data = _json.loads(resp.read().decode("utf-8"))
+                data = json.loads(resp.read().decode("utf-8"))
 
             if data.get("code") != "Ok" or not data.get("routes"):
                 ultimo_error = f"OSRM: {data.get('code', '?')}"
@@ -221,12 +228,11 @@ def consultar_osrm_con_reintentos(coords: list) -> dict:
     return {"error": ultimo_error or "Agotados reintentos", "origen": "osrm_error"}
 
 
-def _osrm_llamada_simple(coords: list) -> dict | None:
+def _osrm_llamada_simple(coords: list) -> "dict | None":
     """
     Una llamada OSRM directa (sin alternativas) para los waypoints dados.
     Retorna {distancia_km, traslado_min, geometry} o None si falla.
     """
-    import json as _json
     if len(coords) < 2:
         return None
     waypoints = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
@@ -237,7 +243,7 @@ def _osrm_llamada_simple(coords: list) -> dict | None:
             "Accept": "application/json",
         })
         with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
         if data.get("code") != "Ok" or not data.get("routes"):
             return None
         ruta = data["routes"][0]
@@ -256,7 +262,6 @@ def _osrm_llamada_alternativas(coords: list) -> list:
     algoritmo de OSRM garantiza que usan segmentos de calle distintos.
     Retorna lista de dicts (puede estar vacía si OSRM no encuentra alternativas).
     """
-    import json as _json
     if len(coords) < 2:
         return []
     waypoints = ";".join(f"{lon:.6f},{lat:.6f}" for lat, lon in coords)
@@ -267,7 +272,7 @@ def _osrm_llamada_alternativas(coords: list) -> list:
             "Accept": "application/json",
         })
         with urllib.request.urlopen(req, timeout=OSRM_TIMEOUT) as resp:
-            data = _json.loads(resp.read().decode("utf-8"))
+            data = json.loads(resp.read().decode("utf-8"))
         if data.get("code") != "Ok" or not data.get("routes"):
             return []
         return [{
@@ -358,7 +363,7 @@ def consultar_osrm_alternativas(coords: list, velocidad_kmh: float = 35.0) -> li
     if len(nativas) >= 3:
         return nativas[:3]
 
-    confirmadas: list[dict] = list(nativas)
+    confirmadas: list = list(nativas)
 
     # ── Fase 2: multi-busqueda cuando faltan rutas ───────────────────────
     faltan = 3 - len(confirmadas)
@@ -443,15 +448,16 @@ def _fallback_haversine(coords: list, velocidad_kmh: float = 35.0) -> dict:
     }
 
 
-# ── Helpers de lectura MongoDB ─────────────────────────────────
+# ── Helpers de lectura SQL Server ──────────────────────────────
 
 def _obtener_rutas_db() -> dict:
+    """{ruta_id_str: {"_id": ruta_id, "nombre": str}} -- solo `nombre` se consume en el resto del módulo."""
     result = {}
     try:
         db = get_db()
-        for ruta in db["rutas_config"].find({}):
-            ruta_s = _serialize(ruta)
-            result[ruta_s["_id"]] = ruta_s
+        tabla = get_table("rutas_config")
+        for r in db.execute(select(tabla.c.mongo_id, tabla.c.nombre)):
+            result[r.mongo_id] = {"_id": r.mongo_id, "nombre": r.nombre}
     except Exception as e:
         print(f"[_obtener_rutas_db] Error: {e}")
     return result
@@ -461,13 +467,13 @@ def _obtener_coordenadas_sucursales() -> dict:
     coords = {}
     try:
         db = get_db()
-        for ruta in db["rutas_config"].find({}):
-            for suc in ruta.get("sucursales", []):
-                nt  = str(suc.get("num_tienda", ""))
-                lat = suc.get("latitud")
-                lon = suc.get("longitud")
-                if nt and lat is not None and lon is not None:
-                    coords[nt] = {"latitud": float(lat), "longitud": float(lon)}
+        tabla = get_table("rutas_config_sucursales")
+        for suc in db.execute(select(tabla.c.num_tienda, tabla.c.latitud, tabla.c.longitud)):
+            nt  = str(suc.num_tienda or "")
+            lat = suc.latitud
+            lon = suc.longitud
+            if nt and lat is not None and lon is not None:
+                coords[nt] = {"latitud": float(lat), "longitud": float(lon)}
     except Exception as e:
         print(f"[_obtener_coordenadas_sucursales] Error: {e}")
     return coords
@@ -477,17 +483,17 @@ def _obtener_nombres_sucursales() -> dict:
     nombres = {}
     try:
         db = get_db()
-        for ruta in db["rutas_config"].find({}):
-            for suc in ruta.get("sucursales", []):
-                nt = str(suc.get("num_tienda", ""))
-                if nt and nt not in nombres:
-                    nombres[nt] = (
-                        suc.get("nombre_base")
-                        or suc.get("nombre_tienda")
-                        or suc.get("nombre_pedido")
-                        or suc.get("nombre")
-                        or ""
-                    )
+        tabla = get_table("rutas_config_sucursales")
+        for suc in db.execute(select(tabla)):
+            nt = str(suc.num_tienda or "")
+            if nt and nt not in nombres:
+                nombres[nt] = (
+                    suc.nombre_base
+                    or suc.nombre_tienda
+                    or suc.nombre_pedido
+                    or suc.nombre
+                    or ""
+                )
     except Exception as e:
         print(f"[_obtener_nombres_sucursales] Error: {e}")
     return nombres
@@ -497,37 +503,39 @@ def obtener_sucursales_disponibles() -> list:
     sucursales = {}
     try:
         db = get_db()
-        for ruta in db["rutas_config"].find({}):
-            for suc in ruta.get("sucursales", []):
-                nt = str(suc.get("num_tienda", ""))
-                if nt and nt not in sucursales:
-                    sucursales[nt] = {
-                        "num_tienda": suc.get("num_tienda"),
-                        "nombre": (
-                            suc.get("nombre_base")
-                            or suc.get("nombre_tienda")
-                            or suc.get("nombre_pedido")
-                            or suc.get("nombre", "")
-                        ),
-                        "latitud":  suc.get("latitud"),
-                        "longitud": suc.get("longitud"),
-                    }
+        tabla = get_table("rutas_config_sucursales")
+        for suc in db.execute(select(tabla)):
+            nt = str(suc.num_tienda or "")
+            if nt and nt not in sucursales:
+                sucursales[nt] = {
+                    "num_tienda": suc.num_tienda,
+                    "nombre": (
+                        suc.nombre_base
+                        or suc.nombre_tienda
+                        or suc.nombre_pedido
+                        or suc.nombre
+                        or ""
+                    ),
+                    "latitud":  suc.latitud,
+                    "longitud": suc.longitud,
+                }
     except Exception as e:
         print(f"[obtener_sucursales_disponibles] Error: {e}")
     return list(sucursales.values())
 
 
 def obtener_pesos(logistica_id: str) -> dict:
-    """Lee los pesos desde la colección `extraccion` para la logística activa."""
-    oid = _parse_oid(logistica_id)
+    """Lee los pesos desde `extraccion.datos` (columna JSON) para la logística activa."""
+    oid = _id_valido(logistica_id)
     if not oid:
         return {}
     try:
         db  = get_db()
-        doc = db["extraccion"].find_one({"logistica_id": oid})
-        if not doc:
+        tabla = get_table("extraccion")
+        fila = db.execute(select(tabla.c.datos).where(tabla.c.logistica_id == oid)).mappings().first()
+        if not fila or not fila["datos"]:
             return {}
-        data  = doc.get("datos", {})
+        data  = json.loads(fila["datos"])
         pesos = {}
         for nombre, valores in data.items():
             id_suc = valores.get("id_sucursal")
@@ -540,20 +548,20 @@ def obtener_pesos(logistica_id: str) -> dict:
         return {}
 
 
-def _vehiculo_serializar(v: dict) -> dict:
-    """Normaliza un documento de la colección `vehiculos` a los campos usados en la app."""
-    cap = v.get("capacidad_toneladas") or 0
+def _vehiculo_serializar(v) -> dict:
+    """Normaliza una fila de la tabla `vehiculos` a los campos usados en la app."""
+    cap = v["capacidad_toneladas"] or 0
     return {
-        "_id":           str(v["_id"]),
-        "placas":        v.get("placas", ""),
+        "_id":           v["mongo_id"],
+        "placas":        v["placas"] or "",
         # abreviatura es el campo canónico; descripcion como fallback
-        "abrev":         v.get("abreviatura", "") or v.get("descripcion", ""),
-        "descripcion":   v.get("descripcion", ""),
-        "chofer":        v.get("chofer", "") or "",
-        "chofer_id":     str(v["chofer_id"]) if v.get("chofer_id") else None,
+        "abrev":         v["abreviatura"] or v["descripcion"] or "",
+        "descripcion":   v["descripcion"] or "",
+        "chofer":        v["chofer"] or "",
+        "chofer_id":     v["chofer_id"],
         "capacidad_ton": float(cap),
-        "volumen_m3":    float(v.get("volumen_m3") or 0),
-        "tipo":          v.get("categoria", "") or "",
+        "volumen_m3":    float(v["volumen_m3"] or 0),
+        "tipo":          v["categoria"] or "",
     }
 
 
@@ -561,8 +569,11 @@ def obtener_vehiculos() -> list:
     """Devuelve la flota activa de vehículos (sin datos de ocupación)."""
     try:
         db   = get_db()
-        docs = list(db["vehiculos"].find({"activo": {"$ne": False}}))
-        return [_vehiculo_serializar(v) for v in docs]
+        tabla = get_table("vehiculos")
+        filas = db.execute(
+            select(tabla).where(or_(tabla.c.activo == True, tabla.c.activo.is_(None)))  # noqa: E712
+        ).mappings().all()
+        return [_vehiculo_serializar(v) for v in filas]
     except Exception as e:
         print(f"[obtener_vehiculos modificacion] Error: {e}")
         return []
@@ -571,7 +582,7 @@ def obtener_vehiculos() -> list:
 def obtener_disponibilidad_vehiculos(logistica_id: str) -> list:
     """
     Devuelve la flota activa enriquecida con ocupación por día, leída
-    directamente desde `asignaciones.detalle_por_dia` en MongoDB.
+    directamente desde `asignaciones_rutas` en SQL Server.
 
     Campos de ocupación por vehículo:
       · ocupacion   : { dia → { ruta_id, ruta_nombre } }
@@ -579,14 +590,17 @@ def obtener_disponibilidad_vehiculos(logistica_id: str) -> list:
       · dias_libres  : [días hábiles L-S sin ruta]
       · pct_semana  : % de días hábiles ocupados (sobre 6 días L-S)
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     db  = get_db()
 
     # ── 1. Flota activa indexada por placas ───────────────────
     vehiculos: dict = {}
     try:
-        for v in db["vehiculos"].find({"activo": {"$ne": False}}):
-            placas = v.get("placas", "")
+        tabla_veh = get_table("vehiculos")
+        for v in db.execute(
+            select(tabla_veh).where(or_(tabla_veh.c.activo == True, tabla_veh.c.activo.is_(None)))  # noqa: E712
+        ).mappings():
+            placas = v["placas"] or ""
             if placas:
                 vd = _vehiculo_serializar(v)
                 vd["ocupacion"] = {}   # { dia: { ruta_id, ruta_nombre } }
@@ -594,22 +608,17 @@ def obtener_disponibilidad_vehiculos(logistica_id: str) -> list:
     except Exception as e:
         print(f"[obtener_disponibilidad_vehiculos] Error al leer vehículos: {e}")
 
-    # ── 2. Ocupación desde asignaciones ───────────────────────
+    # ── 2. Ocupación desde asignaciones_rutas ─────────────────
     if oid:
         try:
-            doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
-            if doc_asig:
-                detalle_por_dia = doc_asig.get("detalle_por_dia", {})
-                for dia, rutas_del_dia in detalle_por_dia.items():
-                    if not isinstance(rutas_del_dia, dict):
-                        continue
-                    for ruta_id, det in rutas_del_dia.items():
-                        placas = det.get("vehiculo_placas") or ""
-                        if placas and placas in vehiculos:
-                            vehiculos[placas]["ocupacion"][dia] = {
-                                "ruta_id":     ruta_id,
-                                "ruta_nombre": det.get("nombre_ruta") or ruta_id,
-                            }
+            tabla_ar = get_table("asignaciones_rutas")
+            for r in db.execute(select(tabla_ar).where(tabla_ar.c.logistica_id == oid)):
+                placas = r.vehiculo_placas or ""
+                if placas and placas in vehiculos:
+                    vehiculos[placas]["ocupacion"][r.dia_semana] = {
+                        "ruta_id":     r.ruta_key,
+                        "ruta_nombre": r.nombre_ruta or r.ruta_key,
+                    }
         except Exception as e:
             print(f"[obtener_disponibilidad_vehiculos] Error al leer asignaciones: {e}")
 
@@ -640,20 +649,15 @@ def obtener_disponibilidad_vehiculos(logistica_id: str) -> list:
 
 def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     """
-    Lee desde la colección `asignaciones` el estado guardado en Asignación.
+    Lee desde `asignaciones_rutas`/`asignaciones_sucursales`/`asignaciones_mayoristas`
+    el estado guardado en Asignación (equivalente a `asignaciones.detalle_por_dia`
+    en el esquema Mongo original: { dia: { ruta_id: {...} } }).
 
-    Estructura de asignaciones.detalle_por_dia (guardado desde asignacion.js):
-        { dia: { ruta_id: { nombre_ruta, vehiculo_placas, vehiculo_abreviatura,
-                            capacidad_ton, peso_total_kg, porcentaje_utilizacion,
-                            hora_salida, hora_regreso_estimada, cumple_horario,
-                            sucursales: [{num_tienda, nombre, orden, peso_kg, ...}]
-                            (sin latitud/longitud — se toman de rutas_config)
-                          } } }
-
-    Combina sucursales (coordenadas de rutas_config) y mayoristas
-    (distribucion_mayoristas), respetando el orden original de MongoDB.
+    Combina sucursales (coordenadas de `rutas_config_sucursales`) y mayoristas
+    (`mayoristas_logic.calcular_distribucion_mayoristas`), respetando el orden
+    guardado.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido."}
 
@@ -662,9 +666,9 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
 
     db = get_db()
 
-    # ── 1. Leer documento de asignación ───────────────────────
-    doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
-    if not doc_asig:
+    # ── 1. ¿Existe una asignación guardada? ───────────────────
+    tabla_asig = get_table("asignaciones")
+    if not db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first():
         dist_vacia = calcular_distribucion_mayoristas(logistica_id)
         return {
             "status":                "ok",
@@ -676,125 +680,129 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             "rutas_confirmadas":     [],
         }
 
-    # detalle_por_dia = { dia: { ruta_id: { ... } } }  ← dict anidado, NO lista
-    detalle_por_dia  = doc_asig.get("detalle_por_dia", {})
-    chofer_overrides = doc_asig.get("chofer_overrides", {}) or {}
-    orden_overrides  = doc_asig.get("orden_overrides", {}) or {}
+    # chofer_overrides / orden_overrides desde tablas normalizadas
+    chofer_overrides: dict = {}
+    t_chof_ov = get_table("asignaciones_chofer_overrides")
+    for r in db.execute(select(t_chof_ov).where(t_chof_ov.c.logistica_id == oid)):
+        chofer_overrides[r.ruta_key] = {"nombre": r.nombre, "chofer_id": r.chofer_id}
 
-    # Chofer por defecto de cada vehículo (colección `vehiculos`), por placas
+    orden_overrides: dict = {}
+    t_orden_ov = get_table("asignaciones_orden_overrides")
+    for r in db.execute(select(t_orden_ov).where(t_orden_ov.c.logistica_id == oid)):
+        orden_overrides.setdefault(r.ruta_key, []).append({"tipo": r.tipo, "key": r.item_key, "orden": r.orden})
+
+    # Chofer por defecto de cada vehículo (tabla `vehiculos`), por placas
     chofer_por_placas: dict = {}
     try:
-        for v in db["vehiculos"].find({}, {"placas": 1, "chofer": 1, "chofer_id": 1}):
-            plac = v.get("placas", "")
+        tabla_veh = get_table("vehiculos")
+        for v in db.execute(select(tabla_veh.c.placas, tabla_veh.c.chofer, tabla_veh.c.chofer_id)):
+            plac = v.placas or ""
             if plac:
-                chofer_por_placas[plac] = {
-                    "nombre":    (v.get("chofer", "") or "").strip(),
-                    "chofer_id": str(v["chofer_id"]) if v.get("chofer_id") else None,
-                }
+                chofer_por_placas[plac] = {"nombre": (v.chofer or "").strip(), "chofer_id": v.chofer_id}
     except Exception as e:
         print(f"[obtener_rutas_para_modificar] chofer_por_placas error: {e}")
 
-    # ── 2. Datos de rutas y coordenadas desde rutas_config ────
+    # ── 2. Coordenadas y nombres desde rutas_config ───────────
     coords_map = _obtener_coordenadas_sucursales()   # { num_tienda_str: {latitud, longitud} }
-    rutas_db   = _obtener_rutas_db()                 # { ruta_id_str: doc }
+    rutas_db   = _obtener_rutas_db()                 # { ruta_id_str: {nombre} }
 
-    # Mapa de coordenadas por sucursal desglosado por ruta (más preciso que coords_map)
-    # { ruta_id_str: { num_tienda_str: (lat, lon) } }
+    # Mapa de coordenadas por sucursal desglosado por rutas_config._id.
+    # NOTA: nunca hace match contra los ruta_id de asignaciones (son espacios
+    # de ID distintos: "vrpaf_..."/"manual_..." vs mongo_id de rutas_config)
+    # -- ya era así en el Mongo original, es un fallback heredado que
+    # siempre queda vacío en la práctica. Se preserva tal cual.
     coords_por_ruta: dict = {}
     try:
-        db_tmp = get_db()
-        for rdoc in db_tmp["rutas_config"].find({}, {"_id": 1, "sucursales": 1}):
-            rid_key = str(rdoc["_id"])
-            cmap: dict = {}
-            for suc in rdoc.get("sucursales", []):
-                nt  = str(suc.get("num_tienda", ""))
-                lat = suc.get("latitud")
-                lon = suc.get("longitud")
-                if nt and lat is not None and lon is not None:
-                    cmap[nt] = (float(lat), float(lon))
+        tabla_rc  = get_table("rutas_config")
+        tabla_rcs = get_table("rutas_config_sucursales")
+        sucs_por_rc: dict = {}
+        for s in db.execute(select(tabla_rcs.c.ruta_config_id, tabla_rcs.c.num_tienda, tabla_rcs.c.latitud, tabla_rcs.c.longitud)):
+            if s.num_tienda is None or s.latitud is None or s.longitud is None:
+                continue
+            sucs_por_rc.setdefault(s.ruta_config_id, {})[str(s.num_tienda)] = (float(s.latitud), float(s.longitud))
+        for r in db.execute(select(tabla_rc.c.mongo_id)):
+            cmap = sucs_por_rc.get(r.mongo_id)
             if cmap:
-                coords_por_ruta[rid_key] = cmap
+                coords_por_ruta[r.mongo_id] = cmap
     except Exception as e:
         print(f"[obtener_rutas_para_modificar] coords_por_ruta error: {e}")
 
     # ── 3. Preconstruir sucursales para cálculo de mayoristas ───
-    # Mapa de nombres canónicos desde rutas_config (fuente de verdad)
     nombres_map = _obtener_nombres_sucursales()   # { num_tienda_str: nombre }
+
+    tabla_ar = get_table("asignaciones_rutas")
+    tabla_as = get_table("asignaciones_sucursales")
+
+    filas_rutas = db.execute(select(tabla_ar).where(tabla_ar.c.logistica_id == oid)).mappings().all()
+    sucs_por_ruta_key: dict = {}
+    for s in db.execute(select(tabla_as).where(tabla_as.c.logistica_id == oid)):
+        sucs_por_ruta_key.setdefault(s.ruta_key, []).append(s)
 
     sucursales_por_ruta: dict = {}
     meta_por_ruta: dict = {}
     procesadas: set = set()
 
-    for dia, rutas_del_dia in detalle_por_dia.items():
-        if not isinstance(rutas_del_dia, dict):
+    for det in filas_rutas:
+        ruta_id = det["ruta_key"]
+        if not ruta_id or ruta_id in procesadas:
             continue
+        procesadas.add(ruta_id)
 
-        for ruta_id, det in rutas_del_dia.items():
-            if not ruta_id or ruta_id in procesadas:
-                continue
-            procesadas.add(ruta_id)
+        dia          = det["dia_semana"]
+        placas       = det["vehiculo_placas"]        or ""
+        veh_abrev    = det["vehiculo_abreviatura"]    or ""
+        cap_ton      = det["capacidad_ton"]
+        peso_kg      = float(det["peso_total_kg"]     or 0)
+        pct          = float(det["porcentaje_utilizacion"] or 0)
+        hora_salida  = det["hora_salida"]             or "08:00"
+        hora_regreso = det["hora_regreso_estimada"]   or ""
+        cumple_h     = det["cumple_horario"]
+        if cumple_h is None:
+            cumple_h = True
+        nombre_r     = det["nombre_ruta"] or rutas_db.get(ruta_id, {}).get("nombre", ruta_id)
 
-            # Campos del detalle (nombres exactos guardados por asignacion.js)
-            placas       = det.get("vehiculo_placas")        or ""
-            veh_abrev    = det.get("vehiculo_abreviatura")   or ""
-            cap_ton      = det.get("capacidad_ton")
-            peso_kg      = float(det.get("peso_total_kg")    or 0)
-            pct          = float(det.get("porcentaje_utilizacion") or 0)
-            hora_salida  = det.get("hora_salida")            or "08:00"
-            hora_regreso = det.get("hora_regreso_estimada")  or ""
-            cumple_h     = det.get("cumple_horario")
-            if cumple_h is None:
-                cumple_h = True
-            nombre_r     = (
-                det.get("nombre_ruta")
-                or rutas_db.get(ruta_id, {}).get("nombre", ruta_id)
-            )
+        cmap_ruta = coords_por_ruta.get(ruta_id, {})
 
-            # Sucursales: guardadas sin coordenadas → agregar desde rutas_config
-            sucursales_guardadas = det.get("sucursales") or []
-            cmap_ruta            = coords_por_ruta.get(ruta_id, {})
+        sucursales_norm: list = []
+        for i, suc in enumerate(sucs_por_ruta_key.get(ruta_id, []), start=1):
+            nt = str(suc.num_tienda or "")
+            if nt in cmap_ruta:
+                lat, lon = cmap_ruta[nt]
+            elif nt in coords_map:
+                lat = coords_map[nt]["latitud"]
+                lon = coords_map[nt]["longitud"]
+            else:
+                lat, lon = None, None
 
-            sucursales_norm: list = []
-            for i, suc in enumerate(sucursales_guardadas):
-                nt    = str(suc.get("num_tienda", ""))
-                # Buscar coordenadas: 1° en el mapa de la ruta, 2° en el mapa global
-                if nt in cmap_ruta:
-                    lat, lon = cmap_ruta[nt]
-                elif nt in coords_map:
-                    lat = coords_map[nt]["latitud"]
-                    lon = coords_map[nt]["longitud"]
-                else:
-                    lat, lon = None, None
+            peso_suc  = float(suc.peso_kg or 0)
+            orden_suc = suc.orden if suc.orden is not None else i
+            nombre_raw = suc.nombre or ""
+            nombre_suc = nombre_raw if (nombre_raw and nombre_raw != "Sucursal") \
+                         else nombres_map.get(nt, "")
+            sucursales_norm.append({
+                "tipo":         "sucursal",
+                "num_tienda":   suc.num_tienda,
+                "nombre":       nombre_suc,
+                "orden":        orden_suc,
+                "peso_kg":      peso_suc,
+                "descarga_min": round(min(peso_suc * min_descarga, MAX_DESCARGA_POR_SUCURSAL), 1),
+                "latitud":      float(lat) if lat is not None else None,
+                "longitud":     float(lon) if lon is not None else None,
+            })
 
-                peso_suc  = float(suc.get("peso_kg", 0))
-                orden_suc = suc.get("orden", i + 1)
-                nombre_raw = suc.get("nombre") or ""
-                nombre_suc = nombre_raw if (nombre_raw and nombre_raw != "Sucursal") \
-                             else nombres_map.get(nt, "")
-                sucursales_norm.append({
-                    "tipo":         "sucursal",
-                    "num_tienda":   suc.get("num_tienda"),
-                    "nombre":       nombre_suc,
-                    "orden":        orden_suc,
-                    "peso_kg":      peso_suc,
-                    "descarga_min": round(min(peso_suc * min_descarga, MAX_DESCARGA_POR_SUCURSAL), 1),
-                    "latitud":      float(lat) if lat is not None else None,
-                    "longitud":     float(lon) if lon is not None else None,
-                })
-
-            sucursales_por_ruta[ruta_id] = sucursales_norm
-            meta_por_ruta[ruta_id] = {
-                "dia":          dia,
-                "placas":       placas,
-                "veh_abrev":    veh_abrev,
-                "cap_ton":      cap_ton,
-                "peso_kg":      peso_kg,
-                "pct":          pct,
-                "hora_salida":  hora_salida,
-                "hora_regreso": hora_regreso,
-                "cumple_h":     cumple_h,
-                "nombre_r":     nombre_r,
-            }
+        sucursales_por_ruta[ruta_id] = sucursales_norm
+        meta_por_ruta[ruta_id] = {
+            "dia":          dia,
+            "placas":       placas,
+            "veh_abrev":    veh_abrev,
+            "cap_ton":      cap_ton,
+            "peso_kg":      peso_kg,
+            "pct":          pct,
+            "hora_salida":  hora_salida,
+            "hora_regreso": hora_regreso,
+            "cumple_h":     cumple_h,
+            "nombre_r":     nombre_r,
+        }
 
     dist = calcular_distribucion_mayoristas(
         logistica_id,
@@ -803,7 +811,16 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             for rid, sucs in sucursales_por_ruta.items()
         ],
     )
-    overrides = doc_asig.get("mayoristas_overrides", {})
+
+    # mayoristas_overrides desde tabla normalizada (clave reconstruida a
+    # documento(str)/id_cliente(int) -- ver _clave_a_python)
+    overrides: dict = {}
+    t_may_ov = get_table("asignaciones_mayoristas_overrides")
+    for r in db.execute(select(t_may_ov).where(t_may_ov.c.logistica_id == oid)):
+        ov = overrides.setdefault(r.ruta_key, {"excluidos": [], "incluidos": []})
+        clave_py = _clave_a_python(r.clave)
+        ov["excluidos" if r.tipo_override == "excluido" else "incluidos"].append(clave_py)
+
     orden_sucursales: dict = dist.get("orden_sucursales", {})
     mayoristas_disponibles: list = dist.get("todos_mayoristas", [])
 
@@ -820,7 +837,17 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         if doc:
             todos_may_doc[doc] = dict(m)
 
-    # ── 4. Construir lista de rutas desde detalle_por_dia ─────
+    # Mayoristas guardados directamente en la ruta (equivalente a
+    # det_ruta.get("mayoristas") del esquema Mongo original)
+    mayoristas_guardados_por_ruta: dict = {}
+    t_am = get_table("asignaciones_mayoristas")
+    for m in db.execute(select(t_am).where(t_am.c.logistica_id == oid)):
+        mayoristas_guardados_por_ruta.setdefault(m.ruta_key, []).append({
+            "id_cliente": m.id_cliente, "documento": m.documento, "nombre": m.nombre,
+            "orden": m.orden, "peso_kg": m.peso_kg, "latitud": m.latitud, "longitud": m.longitud,
+        })
+
+    # ── 4. Construir lista de rutas ────────────────────────────
     rutas_normalizadas: list = []
 
     for ruta_id, meta in meta_por_ruta.items():
@@ -834,19 +861,12 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             if orden is not None:
                 s["orden"] = orden
 
-        det_ruta = None
-        for dia, rutas_del_dia in detalle_por_dia.items():
-            if isinstance(rutas_del_dia, dict) and ruta_id in rutas_del_dia:
-                det_ruta = rutas_del_dia.get(ruta_id) or {}
-                break
-
         mayoristas_norm = []
-        ruta_ov = overrides.get(ruta_id, {}) if isinstance(overrides, dict) else {}
+        ruta_ov = overrides.get(ruta_id, {})
         claves_incluidas = list(ruta_ov.get("incluidos", []) or [])
         if claves_incluidas or ruta_ov.get("excluidos"):
             vistos: set = set()
             for clave in claves_incluidas:
-                # Clave puede ser str(documento) o int(id_cliente) legacy
                 if isinstance(clave, str):
                     may = todos_may_doc.get(clave)
                 else:
@@ -859,16 +879,14 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
                     if dk not in vistos:
                         vistos.add(dk)
                         mayoristas_norm.append(dict(may))
-        elif det_ruta and isinstance(det_ruta.get("mayoristas"), list):
-            mayoristas_norm = [dict(m) for m in det_ruta.get("mayoristas", []) if isinstance(m, dict)]
+        elif ruta_id in mayoristas_guardados_por_ruta:
+            mayoristas_norm = [dict(m) for m in mayoristas_guardados_por_ruta[ruta_id]]
         else:
-            # Rutas generadas por VRP histórico/afinidad no guardan "mayoristas" en
-            # detalle_por_dia (historico_logic.py solo persiste sucursales). Usar la
-            # distribución calculada (histórico de mayoristas → proximidad geográfica)
-            # para que se muestren con la secuencia correcta.
+            # Rutas generadas por VRP histórico/afinidad no guardan mayoristas
+            # en asignaciones_mayoristas. Usar la distribución calculada
+            # (histórico de mayoristas → proximidad geográfica).
             mayoristas_norm = [dict(m) for m in dist.get("mayoristas_por_ruta", {}).get(ruta_id, [])]
 
-        # Aplicar orden entrelazado calculado geográficamente desde mayoristas_por_ruta
         may_orden_map = {
             _doc_key(m): m.get("orden")
             for m in dist.get("mayoristas_por_ruta", {}).get(ruta_id, [])
@@ -879,9 +897,6 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             if dk in may_orden_map:
                 m["orden"] = may_orden_map[dk]
 
-        # Orden manual guardado (drag & drop en Modificación) tiene prioridad
-        # sobre el orden geográfico recién calculado arriba, para que la
-        # secuencia elegida por el usuario sobreviva a una recarga de página.
         orden_ov = orden_overrides.get(ruta_id)
         if orden_ov:
             suc_orden_ov = {str(o.get("key")): o.get("orden") for o in orden_ov if o.get("tipo") == "sucursal"}
@@ -895,7 +910,6 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
                 if dk in may_orden_ov:
                     m["orden"] = may_orden_ov[dk]
 
-        meta = meta_por_ruta.get(ruta_id, {})
         placas       = meta.get("placas", "")
         veh_abrev    = meta.get("veh_abrev", "")
         cap_ton      = meta.get("cap_ton")
@@ -907,7 +921,6 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         nombre_r     = meta.get("nombre_r", ruta_id)
         dia          = meta.get("dia", "")
 
-        # Calcular peso si vino en cero o si faltan mayoristas
         peso_calc = (
             sum(s["peso_kg"] for s in sucursales_norm)
             + sum(m.get("peso_kg", 0) for m in mayoristas_norm)
@@ -970,8 +983,15 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         r["nombre"],
     ))
 
-    sucursales_pendientes = doc_asig.get("sucursales_pendientes", [])
-    rutas_confirmadas     = doc_asig.get("rutas_confirmadas", [])
+    t_sp = get_table("asignaciones_sucursales_pendientes")
+    sucursales_pendientes = [
+        {"num_tienda": p.num_tienda, "nombre": p.nombre, "latitud": p.latitud, "longitud": p.longitud, "peso_kg": p.peso_kg}
+        for p in db.execute(select(t_sp).where(t_sp.c.logistica_id == oid))
+    ]
+    t_rc_conf = get_table("asignaciones_rutas_confirmadas")
+    rutas_confirmadas = [
+        r.ruta_key for r in db.execute(select(t_rc_conf.c.ruta_key).where(t_rc_conf.c.logistica_id == oid))
+    ]
 
     return {
         "status":                "ok",
@@ -984,7 +1004,7 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     }
 
 
-# ── Cálculo de tiempos con caché MongoDB ──────────────────────
+# ── Cálculo de tiempos con caché SQL Server ────────────────────
 
 def calcular_tiempos_subruta(paradas: list, pesos: dict, hora_salida: str = "08:00") -> dict:
     """
@@ -1143,7 +1163,7 @@ def calcular_ruta_personalizada(
     via_points: list,
     pesos: dict,
     hora_salida: str = "08:00",
-    puntos_evitar: list | None = None,
+    puntos_evitar: "list | None" = None,
 ) -> dict:
     """
     Calcula una ruta OSRM con via-points (paso obligatorio) y zonas a evitar.
@@ -1259,7 +1279,6 @@ def calcular_ruta_personalizada(
 def calcular_tiempos_lote(rutas: list, pesos: dict, delay: float = 1.2) -> dict:
     """Calcula tiempos OSRM para múltiples rutas con delay entre llamadas."""
     resultados = {}
-    cfg        = _obtener_config_general()
     matriz_lat = MATRIZ_LAT_DEFAULT
     matriz_lon = MATRIZ_LON_DEFAULT
 
@@ -1277,14 +1296,6 @@ def calcular_tiempos_lote(rutas: list, pesos: dict, delay: float = 1.2) -> dict:
             }
             continue
 
-        coords = [(matriz_lat, matriz_lon)]
-        for p in paradas:
-            lat = p.get("latitud")
-            lon = p.get("longitud")
-            if lat is not None and lon is not None:
-                coords.append((float(lat), float(lon)))
-        coords.append((matriz_lat, matriz_lon))
-
         if resultados:
             time.sleep(delay)
 
@@ -1300,10 +1311,10 @@ def crear_ruta_manual(
     dia: str,
     vehiculo_placas: str,
     sucursales: list,
-    mayoristas: list | None = None,
-    nombre_ruta: str | None = None,
+    mayoristas: "list | None" = None,
+    nombre_ruta: "str | None" = None,
 ) -> dict:
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido."}
 
@@ -1322,11 +1333,13 @@ def crear_ruta_manual(
         return {"status": "error", "mensaje": "Se requiere al menos una sucursal o un mayorista."}
 
     db = get_db()
-    doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
-    if not doc_asig:
-        doc_asig = {"logistica_id": oid, "detalle_por_dia": {}, "sucursales_pendientes": [], "rutas_confirmadas": []}
-
-    veh = db["vehiculos"].find_one({"placas": placas, "activo": {"$ne": False}})
+    tabla_veh = get_table("vehiculos")
+    veh = db.execute(
+        select(tabla_veh).where(
+            tabla_veh.c.placas == placas,
+            or_(tabla_veh.c.activo == True, tabla_veh.c.activo.is_(None)),  # noqa: E712
+        )
+    ).mappings().first()
     if not veh:
         return {"status": "error", "mensaje": "Vehículo no encontrado o inactivo."}
 
@@ -1357,8 +1370,8 @@ def crear_ruta_manual(
         })
 
     ruta_id = f"manual_{ObjectId()}"
-    abrev = veh.get("abreviatura") or veh.get("descripcion") or placas
-    cap_ton = float(veh.get("capacidad_toneladas") or 0)
+    abrev = veh["abreviatura"] or veh["descripcion"] or placas
+    cap_ton = float(veh["capacidad_toneladas"] or 0)
 
     cfg = _obtener_config_general()
     min_descarga = float(cfg.get("min_descarga_por_kg") or MIN_DESCARGA_POR_KG)
@@ -1377,9 +1390,8 @@ def crear_ruta_manual(
         })
 
     may_det = []
-    may_list = may_list_raw
     seen_may: set = set()
-    for i, m in enumerate(may_list, start=1):
+    for i, m in enumerate(may_list_raw, start=1):
         if not isinstance(m, dict):
             continue
         id_cl = m.get("id_cliente")
@@ -1406,37 +1418,40 @@ def crear_ruta_manual(
     pct = round((peso_total_kg / 1000 / cap_ton) * 100, 1) if cap_ton > 0 else 0
     nombre_ruta = (nombre_ruta or "").strip() or f"{abrev} — {dia_key.capitalize()}"
 
-    detalle_por_dia = doc_asig.get("detalle_por_dia", {})
-    if dia_key not in detalle_por_dia:
-        detalle_por_dia[dia_key] = {}
+    with transaccion() as conn:
+        tabla_asig = get_table("asignaciones")
+        fila_asig = conn.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if fila_asig:
+            asignacion_id = fila_asig.mongo_id
+        else:
+            asignacion_id = str(ObjectId())
+            conn.execute(insert(tabla_asig).values(mongo_id=asignacion_id, logistica_id=oid))
 
-    detalle_por_dia[dia_key][ruta_id] = {
-        "nombre_ruta":            nombre_ruta,
-        "vehiculo_placas":        placas,
-        "vehiculo_abreviatura":   abrev,
-        "capacidad_ton":          cap_ton,
-        "peso_total_kg":          peso_total_kg,
-        "porcentaje_utilizacion": pct,
-        "hora_salida":            "08:00",
-        "hora_regreso_estimada":  "",
-        "cumple_horario":         True,
-        "sucursales":             suc_det,
-        "mayoristas":             may_det,
-    }
+        conn.execute(insert(get_table("asignaciones_rutas")).values(
+            asignacion_id=asignacion_id, logistica_id=oid, dia_semana=dia_key, ruta_key=ruta_id,
+            nombre_ruta=nombre_ruta, vehiculo_placas=placas, vehiculo_abreviatura=abrev,
+            capacidad_ton=cap_ton, peso_total_kg=peso_total_kg, porcentaje_utilizacion=pct,
+            hora_salida="08:00", hora_regreso_estimada="", cumple_horario=True,
+        ))
+        if suc_det:
+            conn.execute(insert(get_table("asignaciones_sucursales")), [
+                {"asignacion_id": asignacion_id, "logistica_id": oid, "dia_semana": dia_key, "ruta_key": ruta_id, **s}
+                for s in suc_det
+            ])
+        if may_det:
+            conn.execute(insert(get_table("asignaciones_mayoristas")), [
+                {"asignacion_id": asignacion_id, "logistica_id": oid, "dia_semana": dia_key, "ruta_key": ruta_id, **m}
+                for m in may_det
+            ])
 
-    pendientes = [
-        p for p in doc_asig.get("sucursales_pendientes", [])
-        if int(p.get("num_tienda", -1)) not in seen
-    ]
+        t_sp = get_table("asignaciones_sucursales_pendientes")
+        if seen:
+            conn.execute(delete(t_sp).where(t_sp.c.logistica_id == oid, t_sp.c.num_tienda.in_(seen)))
 
-    db["asignaciones"].update_one(
-        {"logistica_id": oid},
-        {"$set": {
-            "detalle_por_dia": detalle_por_dia,
-            "sucursales_pendientes": pendientes,
-        }},
-        upsert=True,
-    )
+        pendientes = [
+            {"num_tienda": p["num_tienda"], "nombre": p["nombre"], "latitud": p["latitud"], "longitud": p["longitud"], "peso_kg": p["peso_kg"]}
+            for p in conn.execute(select(t_sp).where(t_sp.c.logistica_id == oid)).mappings()
+        ]
 
     coords_map = _obtener_coordenadas_sucursales()
     con_coords = 0
@@ -1459,8 +1474,8 @@ def crear_ruta_manual(
             "longitud":     float(lon) if lon is not None else None,
         })
 
-    chofer_default    = (veh.get("chofer", "") or "").strip()
-    chofer_default_id = str(veh["chofer_id"]) if veh.get("chofer_id") else None
+    chofer_default    = (veh["chofer"] or "").strip()
+    chofer_default_id = veh["chofer_id"]
 
     ruta_ui = {
         "id":                    ruta_id,
@@ -1500,7 +1515,7 @@ def crear_ruta_manual(
 
 
 def eliminar_ruta_manual(logistica_id: str, ruta_id: str, dia: str) -> dict:
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido."}
 
@@ -1509,58 +1524,56 @@ def eliminar_ruta_manual(logistica_id: str, ruta_id: str, dia: str) -> dict:
         return {"status": "error", "mensaje": "Día inválido."}
 
     db = get_db()
-    doc_asig = db["asignaciones"].find_one({"logistica_id": oid})
-    if not doc_asig:
-        return {"status": "error", "mensaje": "No se encontró la asignación."}
-
-    detalle_por_dia = doc_asig.get("detalle_por_dia", {})
-    ruta_det = detalle_por_dia.get(dia_key, {}).get(ruta_id)
-    if not ruta_det:
+    tabla_ar = get_table("asignaciones_rutas")
+    existe = db.execute(
+        select(tabla_ar.c.asignacion_id).where(
+            tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia_key, tabla_ar.c.ruta_key == ruta_id
+        )
+    ).first()
+    if not existe:
         return {"status": "error", "mensaje": "Ruta no encontrada."}
 
     coords_map = _obtener_coordenadas_sucursales()
-    pendientes_map = {
-        int(p.get("num_tienda", -1)): p
-        for p in doc_asig.get("sucursales_pendientes", [])
-        if p.get("num_tienda") is not None
-    }
 
-    for s in ruta_det.get("sucursales", []):
-        try:
-            nt = int(s.get("num_tienda"))
-        except (TypeError, ValueError):
-            continue
-        if nt in pendientes_map:
-            continue
-        coord = coords_map.get(str(nt), {})
-        pendientes_map[nt] = {
-            "num_tienda": nt,
-            "nombre":     s.get("nombre") or f"Sucursal {nt}",
-            "latitud":    coord.get("latitud"),
-            "longitud":   coord.get("longitud"),
-            "peso_kg":    float(s.get("peso_kg") or 0),
+    with transaccion() as conn:
+        t_as = get_table("asignaciones_sucursales")
+        sucs_ruta = conn.execute(
+            select(t_as).where(t_as.c.logistica_id == oid, t_as.c.dia_semana == dia_key, t_as.c.ruta_key == ruta_id)
+        ).mappings().all()
+
+        t_sp = get_table("asignaciones_sucursales_pendientes")
+        pendientes_existentes = {
+            p.num_tienda for p in conn.execute(select(t_sp.c.num_tienda).where(t_sp.c.logistica_id == oid))
         }
 
-    if dia_key in detalle_por_dia and ruta_id in detalle_por_dia[dia_key]:
-        detalle_por_dia[dia_key].pop(ruta_id, None)
-        if not detalle_por_dia[dia_key]:
-            detalle_por_dia.pop(dia_key, None)
+        nuevos_pendientes = []
+        for s in sucs_ruta:
+            nt = s["num_tienda"]
+            if nt is None or nt in pendientes_existentes:
+                continue
+            coord = coords_map.get(str(nt), {})
+            nuevos_pendientes.append({
+                "asignacion_id": existe.asignacion_id, "logistica_id": oid, "num_tienda": nt,
+                "nombre":     s["nombre"] or f"Sucursal {nt}",
+                "latitud":    coord.get("latitud"),
+                "longitud":   coord.get("longitud"),
+                "peso_kg":    float(s["peso_kg"] or 0),
+            })
+        if nuevos_pendientes:
+            conn.execute(insert(t_sp), nuevos_pendientes)
 
-    rutas_confirmadas = [
-        rid for rid in doc_asig.get("rutas_confirmadas", [])
-        if rid != ruta_id
-    ]
+        conn.execute(delete(t_as).where(t_as.c.logistica_id == oid, t_as.c.dia_semana == dia_key, t_as.c.ruta_key == ruta_id))
+        t_am = get_table("asignaciones_mayoristas")
+        conn.execute(delete(t_am).where(t_am.c.logistica_id == oid, t_am.c.dia_semana == dia_key, t_am.c.ruta_key == ruta_id))
+        conn.execute(delete(tabla_ar).where(tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia_key, tabla_ar.c.ruta_key == ruta_id))
 
-    pendientes = list(pendientes_map.values())
+        t_rc = get_table("asignaciones_rutas_confirmadas")
+        conn.execute(delete(t_rc).where(t_rc.c.logistica_id == oid, t_rc.c.ruta_key == ruta_id))
 
-    db["asignaciones"].update_one(
-        {"logistica_id": oid},
-        {"$set": {
-            "detalle_por_dia": detalle_por_dia,
-            "sucursales_pendientes": pendientes,
-            "rutas_confirmadas": rutas_confirmadas,
-        }},
-    )
+        pendientes = [
+            {"num_tienda": p["num_tienda"], "nombre": p["nombre"], "latitud": p["latitud"], "longitud": p["longitud"], "peso_kg": p["peso_kg"]}
+            for p in conn.execute(select(t_sp).where(t_sp.c.logistica_id == oid)).mappings()
+        ]
 
     return {
         "status": "ok",
@@ -1578,19 +1591,21 @@ def actualizar_vehiculo_en_asignacion(
     vehiculo_abreviatura: str,
     capacidad_ton,
 ) -> dict:
-    """Persiste el cambio de vehículo en asignaciones.detalle_por_dia."""
-    oid = _parse_oid(logistica_id)
+    """Persiste el cambio de vehículo en asignaciones_rutas."""
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
         db = get_db()
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {
-                f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_placas":      vehiculo_placas or "",
-                f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_abreviatura": vehiculo_abreviatura or "",
-                f"detalle_por_dia.{dia}.{ruta_id}.capacidad_ton":        capacidad_ton,
-            }},
+        tabla = get_table("asignaciones_rutas")
+        db.execute(
+            update(tabla)
+            .where(tabla.c.logistica_id == oid, tabla.c.dia_semana == dia, tabla.c.ruta_key == ruta_id)
+            .values(
+                vehiculo_placas=vehiculo_placas or "",
+                vehiculo_abreviatura=vehiculo_abreviatura or "",
+                capacidad_ton=capacidad_ton,
+            )
         )
         return {"status": "ok"}
     except Exception as e:
@@ -1598,42 +1613,46 @@ def actualizar_vehiculo_en_asignacion(
 
 
 def actualizar_chofer_en_asignacion(
-    logistica_id: str, ruta_id: str, dia: str, chofer: str, chofer_id: str | None = None,
+    logistica_id: str, ruta_id: str, dia: str, chofer: str, chofer_id: "str | None" = None,
 ) -> dict:
     """
     Cambia el chofer asignado a una ruta puntual de un día específico.
 
-    No modifica el chofer por defecto del vehículo (colección `vehiculos`):
-    se guarda como override en `asignaciones.chofer_overrides.{ruta_id}`
-    (dict {"nombre", "chofer_id"}, igual que `mayoristas_overrides`), para
-    que sobreviva si se regenera o se vuelve a guardar la Asignación. Un
-    chofer vacío elimina el override y la ruta vuelve a usar el chofer por
-    defecto del vehículo.
+    No modifica el chofer por defecto del vehículo (tabla `vehiculos`): se
+    guarda como override en `asignaciones_chofer_overrides` (una fila por
+    ruta_key), para que sobreviva si se regenera o se vuelve a guardar la
+    Asignación. Un chofer vacío elimina el override y la ruta vuelve a usar
+    el chofer por defecto del vehículo.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
-        db  = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid}, {"chofer_overrides": 1, "detalle_por_dia": 1})
-        if not doc:
+        db = get_db()
+        tabla_asig = get_table("asignaciones")
+        fila_asig = db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if not fila_asig:
             return {"status": "error", "mensaje": "No existe una asignación guardada."}
+        asignacion_id = fila_asig.mongo_id
 
-        rutas_del_dia = (doc.get("detalle_por_dia") or {}).get(dia) or {}
-        if ruta_id not in rutas_del_dia:
+        tabla_ar = get_table("asignaciones_rutas")
+        existe_ruta = db.execute(
+            select(tabla_ar.c.ruta_key).where(
+                tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id
+            )
+        ).first()
+        if not existe_ruta:
             return {"status": "error", "mensaje": "La ruta no existe en ese día."}
 
-        overrides = dict(doc.get("chofer_overrides", {}) or {})
         chofer = (chofer or "").strip()
-        if chofer:
-            overrides[ruta_id] = {"nombre": chofer, "chofer_id": chofer_id}
-        else:
-            overrides.pop(ruta_id, None)
-
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {"chofer_overrides": overrides}},
-        )
+        t_ov = get_table("asignaciones_chofer_overrides")
+        with transaccion() as conn:
+            conn.execute(delete(t_ov).where(t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id))
+            if chofer:
+                conn.execute(insert(t_ov).values(
+                    asignacion_id=asignacion_id, logistica_id=oid, ruta_key=ruta_id,
+                    nombre=chofer, chofer_id=chofer_id,
+                ))
         return {"status": "ok", "chofer": chofer}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1648,12 +1667,12 @@ def actualizar_orden_paradas(logistica_id: str, ruta_id: str, dia: str, orden_pa
     `orden_paradas` es una lista de
         {"tipo": "sucursal"|"mayorista", "key": <num_tienda o documento/id_cliente>, "orden": int}
 
-    Se guarda en `asignaciones.orden_overrides.{ruta_id}` y tiene prioridad
-    sobre el orden geográfico que recalcula `calcular_distribucion_mayoristas()`
-    en cada lectura, para que la secuencia elegida por el usuario no se
-    pierda al recargar la página.
+    Se guarda en `asignaciones_orden_overrides` (una fila por parada) y
+    tiene prioridad sobre el orden geográfico que recalcula
+    `calcular_distribucion_mayoristas()` en cada lectura, para que la
+    secuencia elegida por el usuario no se pierda al recargar la página.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     if not isinstance(orden_paradas, list):
@@ -1669,16 +1688,26 @@ def actualizar_orden_paradas(logistica_id: str, ruta_id: str, dia: str, orden_pa
             if tipo not in ("sucursal", "mayorista") or key is None or orden is None:
                 continue
             try:
-                limpio.append({"tipo": tipo, "key": str(key), "orden": int(orden)})
+                limpio.append({"tipo": tipo, "item_key": str(key), "orden": int(orden)})
             except (TypeError, ValueError):
                 continue
 
-        db = get_db()
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {f"orden_overrides.{ruta_id}": limpio}},
-            upsert=True,
-        )
+        with transaccion() as conn:
+            tabla_asig = get_table("asignaciones")
+            fila_asig = conn.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+            if fila_asig:
+                asignacion_id = fila_asig.mongo_id
+            else:
+                asignacion_id = str(ObjectId())
+                conn.execute(insert(tabla_asig).values(mongo_id=asignacion_id, logistica_id=oid))
+
+            t_ov = get_table("asignaciones_orden_overrides")
+            conn.execute(delete(t_ov).where(t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id))
+            if limpio:
+                conn.execute(insert(t_ov), [
+                    {"asignacion_id": asignacion_id, "logistica_id": oid, "ruta_key": ruta_id, **item}
+                    for item in limpio
+                ])
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1691,10 +1720,10 @@ def cambiar_dia_ruta(
     dia_nuevo: str,
 ) -> dict:
     """
-    Mueve una ruta de un día a otro dentro de asignaciones.detalle_por_dia.
-    El vehículo asignado queda disponible en el día original y ocupado en el nuevo.
+    Mueve una ruta de un día a otro. El vehículo asignado queda disponible
+    en el día original y ocupado en el nuevo.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
 
@@ -1708,23 +1737,24 @@ def cambiar_dia_ruta(
         return {"status": "ok"}
 
     try:
-        db  = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid})
-        if not doc:
-            return {"status": "error", "mensaje": "No se encontró la asignación"}
-
-        detalle  = doc.get("detalle_por_dia", {})
-        ruta_det = detalle.get(dia_actual_k, {}).get(ruta_id)
-        if ruta_det is None:
+        db = get_db()
+        tabla_ar = get_table("asignaciones_rutas")
+        existe = db.execute(
+            select(tabla_ar.c.ruta_key).where(
+                tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia_actual_k, tabla_ar.c.ruta_key == ruta_id
+            )
+        ).first()
+        if existe is None:
             return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia_actual_k}"}
 
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {
-                "$set":   {f"detalle_por_dia.{dia_nuevo_k}.{ruta_id}": ruta_det},
-                "$unset": {f"detalle_por_dia.{dia_actual_k}.{ruta_id}": ""},
-            },
-        )
+        with transaccion() as conn:
+            for nombre_tabla in ("asignaciones_rutas", "asignaciones_sucursales", "asignaciones_mayoristas"):
+                t = get_table(nombre_tabla)
+                conn.execute(
+                    update(t)
+                    .where(t.c.logistica_id == oid, t.c.dia_semana == dia_actual_k, t.c.ruta_key == ruta_id)
+                    .values(dia_semana=dia_nuevo_k)
+                )
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1741,59 +1771,58 @@ def quitar_sucursal_de_asignacion(
     peso_kg: float,
 ) -> dict:
     """
-    Elimina una sucursal de la ruta indicada dentro de asignaciones.detalle_por_dia
-    y la registra en asignaciones.sucursales_pendientes para que persista entre recargas.
+    Elimina una sucursal de la ruta indicada y la registra en
+    asignaciones_sucursales_pendientes para que persista entre recargas.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
-        db  = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid})
-        if not doc:
+        db = get_db()
+        tabla_asig = get_table("asignaciones")
+        fila_asig = db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if not fila_asig:
             return {"status": "error", "mensaje": "No se encontró la asignación"}
+        asignacion_id = fila_asig.mongo_id
 
-        detalle  = doc.get("detalle_por_dia", {})
-        ruta_det = detalle.get(dia, {}).get(ruta_id)
+        tabla_ar = get_table("asignaciones_rutas")
+        ruta_det = db.execute(
+            select(tabla_ar).where(tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id)
+        ).mappings().first()
         if ruta_det is None:
             return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia}"}
 
-        # Quitar la sucursal de la lista
         nt = int(num_tienda)
-        ruta_det["sucursales"] = [
-            s for s in ruta_det.get("sucursales", [])
-            if int(s.get("num_tienda", -1)) != nt
-        ]
-        # Re-numerar orden
-        for i, s in enumerate(ruta_det["sucursales"]):
-            s["orden"] = i + 1
 
-        # Recalcular peso y utilización
-        peso_total = sum(float(s.get("peso_kg") or 0) for s in ruta_det["sucursales"])
-        ruta_det["peso_total_kg"] = peso_total
-        cap_kg = float(ruta_det.get("capacidad_ton") or 0) * 1000
-        ruta_det["porcentaje_utilizacion"] = round(peso_total / cap_kg * 100, 1) if cap_kg > 0 else 0
+        with transaccion() as conn:
+            t_as = get_table("asignaciones_sucursales")
+            conn.execute(delete(t_as).where(
+                t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id, t_as.c.num_tienda == nt
+            ))
 
-        # Añadir a pendientes (sin duplicar)
-        pendientes = [
-            p for p in doc.get("sucursales_pendientes", [])
-            if int(p.get("num_tienda", -1)) != nt
-        ]
-        pendientes.append({
-            "num_tienda": nt,
-            "nombre":     nombre,
-            "latitud":    latitud,
-            "longitud":   longitud,
-            "peso_kg":    float(peso_kg),
-        })
+            restantes = conn.execute(
+                select(t_as).where(t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id)
+                .order_by(t_as.c.orden)
+            ).mappings().all()
+            for i, s in enumerate(restantes, start=1):
+                if s["orden"] != i:
+                    conn.execute(update(t_as).where(
+                        t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id, t_as.c.num_tienda == s["num_tienda"]
+                    ).values(orden=i))
 
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {
-                f"detalle_por_dia.{dia}.{ruta_id}": ruta_det,
-                "sucursales_pendientes":             pendientes,
-            }},
-        )
+            peso_total = sum(float(s["peso_kg"] or 0) for s in restantes)
+            cap_kg = float(ruta_det["capacidad_ton"] or 0) * 1000
+            pct = round(peso_total / cap_kg * 100, 1) if cap_kg > 0 else 0
+            conn.execute(update(tabla_ar).where(
+                tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id
+            ).values(peso_total_kg=peso_total, porcentaje_utilizacion=pct))
+
+            t_sp = get_table("asignaciones_sucursales_pendientes")
+            conn.execute(delete(t_sp).where(t_sp.c.logistica_id == oid, t_sp.c.num_tienda == nt))
+            conn.execute(insert(t_sp).values(
+                asignacion_id=asignacion_id, logistica_id=oid, num_tienda=nt, nombre=nombre,
+                latitud=latitud, longitud=longitud, peso_kg=float(peso_kg),
+            ))
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1810,56 +1839,57 @@ def agregar_sucursal_a_asignacion(
     peso_kg: float,
 ) -> dict:
     """
-    Añade una sucursal a la ruta indicada dentro de asignaciones.detalle_por_dia
-    y la elimina de asignaciones.sucursales_pendientes.
+    Añade una sucursal a la ruta indicada y la elimina de
+    asignaciones_sucursales_pendientes.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
-        db  = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid})
-        if not doc:
+        db = get_db()
+        tabla_asig = get_table("asignaciones")
+        fila_asig = db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if not fila_asig:
             return {"status": "error", "mensaje": "No se encontró la asignación"}
+        asignacion_id = fila_asig.mongo_id
 
-        detalle  = doc.get("detalle_por_dia", {})
-        ruta_det = detalle.get(dia, {}).get(ruta_id)
+        tabla_ar = get_table("asignaciones_rutas")
+        ruta_det = db.execute(
+            select(tabla_ar).where(tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id)
+        ).mappings().first()
         if ruta_det is None:
             return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia}"}
 
-        nt         = int(num_tienda)
+        nt = int(num_tienda)
         # Garantizar nombre correcto: si viene vacío o es el placeholder "Sucursal",
         # resolverlo desde rutas_config (fuente de verdad)
         nombre_final = nombre if (nombre and nombre != "Sucursal") \
                        else _obtener_nombres_sucursales().get(str(nt), "")
-        sucursales = [s for s in ruta_det.get("sucursales", [])
-                      if int(s.get("num_tienda", -1)) != nt]
-        max_orden  = max((int(s.get("orden") or 0) for s in sucursales), default=0)
-        sucursales.append({
-            "num_tienda": nt,
-            "nombre":     nombre_final,
-            "orden":      max_orden + 1,
-            "peso_kg":    float(peso_kg),
-        })
-        ruta_det["sucursales"] = sucursales
 
-        peso_total = sum(float(s.get("peso_kg") or 0) for s in sucursales)
-        ruta_det["peso_total_kg"] = peso_total
-        cap_kg = float(ruta_det.get("capacidad_ton") or 0) * 1000
-        ruta_det["porcentaje_utilizacion"] = round(peso_total / cap_kg * 100, 1) if cap_kg > 0 else 0
+        with transaccion() as conn:
+            t_as = get_table("asignaciones_sucursales")
+            conn.execute(delete(t_as).where(
+                t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id, t_as.c.num_tienda == nt
+            ))
+            max_orden = conn.execute(
+                select(func.max(t_as.c.orden)).where(t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id)
+            ).scalar() or 0
+            conn.execute(insert(t_as).values(
+                asignacion_id=asignacion_id, logistica_id=oid, dia_semana=dia, ruta_key=ruta_id,
+                num_tienda=nt, nombre=nombre_final, orden=max_orden + 1, peso_kg=float(peso_kg),
+            ))
 
-        pendientes = [
-            p for p in doc.get("sucursales_pendientes", [])
-            if int(p.get("num_tienda", -1)) != nt
-        ]
+            peso_total = conn.execute(
+                select(func.sum(t_as.c.peso_kg)).where(t_as.c.logistica_id == oid, t_as.c.dia_semana == dia, t_as.c.ruta_key == ruta_id)
+            ).scalar() or 0.0
+            cap_kg = float(ruta_det["capacidad_ton"] or 0) * 1000
+            pct = round(peso_total / cap_kg * 100, 1) if cap_kg > 0 else 0
+            conn.execute(update(tabla_ar).where(
+                tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id
+            ).values(peso_total_kg=peso_total, porcentaje_utilizacion=pct))
 
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {
-                f"detalle_por_dia.{dia}.{ruta_id}": ruta_det,
-                "sucursales_pendientes":             pendientes,
-            }},
-        )
+            t_sp = get_table("asignaciones_sucursales_pendientes")
+            conn.execute(delete(t_sp).where(t_sp.c.logistica_id == oid, t_sp.c.num_tienda == nt))
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1875,32 +1905,39 @@ def quitar_mayorista_de_ruta(
 ) -> dict:
     """
     Persiste el retiro de un documento de mayorista de una ruta en
-    asignaciones.mayoristas_overrides[ruta_id].excluidos.
+    asignaciones_mayoristas_overrides (tipo_override='excluido').
     La clave almacenada es `documento` (str) si está presente; si no, `id_cliente` (int, legacy).
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
         db = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid})
-        if not doc:
+        tabla_asig = get_table("asignaciones")
+        fila_asig = db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if not fila_asig:
             return {"status": "error", "mensaje": "No se encontró la asignación"}
+        asignacion_id = fila_asig.mongo_id
 
-        overrides = doc.get("mayoristas_overrides", {})
-        ruta_ov = overrides.get(ruta_id, {"excluidos": [], "incluidos": []})
-        # Clave primaria: documento (str) o id_cliente (int) como fallback
-        clave = documento if documento else int(id_cliente)
+        clave = documento if documento else str(int(id_cliente))
 
-        if clave not in ruta_ov.get("excluidos", []):
-            ruta_ov.setdefault("excluidos", []).append(clave)
-        ruta_ov["incluidos"] = [x for x in ruta_ov.get("incluidos", []) if x != clave]
-        overrides[ruta_id] = ruta_ov
-
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {"mayoristas_overrides": overrides}},
-        )
+        t_ov = get_table("asignaciones_mayoristas_overrides")
+        with transaccion() as conn:
+            conn.execute(delete(t_ov).where(
+                t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id,
+                t_ov.c.clave == clave, t_ov.c.tipo_override == "incluido",
+            ))
+            existe = conn.execute(
+                select(t_ov.c.clave).where(
+                    t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id,
+                    t_ov.c.clave == clave, t_ov.c.tipo_override == "excluido",
+                )
+            ).first()
+            if not existe:
+                conn.execute(insert(t_ov).values(
+                    asignacion_id=asignacion_id, logistica_id=oid, ruta_key=ruta_id,
+                    tipo_override="excluido", clave=clave,
+                ))
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -1924,77 +1961,92 @@ def agregar_mayorista_a_ruta(
     Si el nuevo peso total supera la capacidad del vehículo, busca el vehículo
     más pequeño disponible y lo asigna automáticamente.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
         db = get_db()
-        doc = db["asignaciones"].find_one({"logistica_id": oid})
-        if not doc:
+        tabla_asig = get_table("asignaciones")
+        fila_asig = db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+        if not fila_asig:
             return {"status": "error", "mensaje": "No se encontró la asignación"}
+        asignacion_id = fila_asig.mongo_id
 
-        detalle = doc.get("detalle_por_dia", {})
-        ruta_det = detalle.get(dia, {}).get(ruta_id)
+        tabla_ar = get_table("asignaciones_rutas")
+        ruta_det = db.execute(
+            select(tabla_ar).where(tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id)
+        ).mappings().first()
         if ruta_det is None:
             return {"status": "error", "mensaje": f"Ruta {ruta_id} no encontrada en {dia}"}
 
-        # Clave primaria: documento (str) o id_cliente (int) como fallback
-        clave = documento if documento else int(id_cliente)
-        overrides = doc.get("mayoristas_overrides", {})
+        clave = documento if documento else str(int(id_cliente))
 
-        # Limpiar este documento de cualquier override previo en OTRAS rutas
-        for rid, ov in overrides.items():
-            if rid != ruta_id:
-                ov["incluidos"] = [x for x in ov.get("incluidos", []) if x != clave]
-
-        # En esta ruta: quitar de excluidos y añadir a incluidos
-        ruta_ov = overrides.setdefault(ruta_id, {"excluidos": [], "incluidos": []})
-        ruta_ov["excluidos"] = [x for x in ruta_ov.get("excluidos", []) if x != clave]
-        if clave not in ruta_ov.get("incluidos", []):
-            ruta_ov.setdefault("incluidos", []).append(clave)
-
-        # Verificar capacidad y buscar vehículo alternativo si hace falta
         nuevo_peso_kg = float(peso_ruta_actual) + float(peso_kg)
-        cap_ton = float(ruta_det.get("capacidad_ton") or 0)
+        cap_ton = float(ruta_det["capacidad_ton"] or 0)
         vehiculo_cambiado = False
         nuevo_vehiculo = None
 
-        if cap_ton > 0 and (nuevo_peso_kg / 1000) > cap_ton:
-            placas_en_dia = {
-                v.get("vehiculo_placas", "")
-                for rid2, v in detalle.get(dia, {}).items()
-                if rid2 != ruta_id
-            }
-            candidatos = sorted(
-                [
-                    v for v in db["vehiculos"].find({"activo": {"$ne": False}})
-                    if float(v.get("capacidad_toneladas") or 0) * 1000 >= nuevo_peso_kg
-                    and (v.get("placas") or "") not in placas_en_dia
-                    and v.get("placas") != ruta_det.get("vehiculo_placas")
-                ],
-                key=lambda v: float(v.get("capacidad_toneladas") or 0),
-            )
-            if candidatos:
-                mejor = candidatos[0]
-                abrev = mejor.get("abreviatura") or mejor.get("descripcion") or mejor.get("placas", "")
-                cap_nueva = float(mejor.get("capacidad_toneladas") or 0)
-                vehiculo_cambiado = True
-                nuevo_vehiculo = {
-                    "placas":        mejor.get("placas", ""),
-                    "abrev":         abrev,
-                    "capacidad_ton": cap_nueva,
+        with transaccion() as conn:
+            t_ov = get_table("asignaciones_mayoristas_overrides")
+            # Limpiar este documento de cualquier override "incluido" previo en OTRAS rutas
+            conn.execute(delete(t_ov).where(
+                t_ov.c.logistica_id == oid, t_ov.c.ruta_key != ruta_id,
+                t_ov.c.clave == clave, t_ov.c.tipo_override == "incluido",
+            ))
+            # En esta ruta: quitar de excluidos, añadir a incluidos (si no estaba)
+            conn.execute(delete(t_ov).where(
+                t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id,
+                t_ov.c.clave == clave, t_ov.c.tipo_override == "excluido",
+            ))
+            existe_incluido = conn.execute(
+                select(t_ov.c.clave).where(
+                    t_ov.c.logistica_id == oid, t_ov.c.ruta_key == ruta_id,
+                    t_ov.c.clave == clave, t_ov.c.tipo_override == "incluido",
+                )
+            ).first()
+            if not existe_incluido:
+                conn.execute(insert(t_ov).values(
+                    asignacion_id=asignacion_id, logistica_id=oid, ruta_key=ruta_id,
+                    tipo_override="incluido", clave=clave,
+                ))
+
+            # Verificar capacidad y buscar vehículo alternativo si hace falta
+            if cap_ton > 0 and (nuevo_peso_kg / 1000) > cap_ton:
+                t_veh = get_table("vehiculos")
+                placas_en_dia = {
+                    r.vehiculo_placas for r in conn.execute(
+                        select(tabla_ar.c.vehiculo_placas).where(
+                            tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key != ruta_id
+                        )
+                    )
                 }
+                candidatos = sorted(
+                    [
+                        v for v in conn.execute(
+                            select(t_veh).where(or_(t_veh.c.activo == True, t_veh.c.activo.is_(None)))  # noqa: E712
+                        ).mappings()
+                        if float(v["capacidad_toneladas"] or 0) * 1000 >= nuevo_peso_kg
+                        and (v["placas"] or "") not in placas_en_dia
+                        and v["placas"] != ruta_det["vehiculo_placas"]
+                    ],
+                    key=lambda v: float(v["capacidad_toneladas"] or 0),
+                )
+                if candidatos:
+                    mejor = candidatos[0]
+                    abrev = mejor["abreviatura"] or mejor["descripcion"] or mejor["placas"] or ""
+                    cap_nueva = float(mejor["capacidad_toneladas"] or 0)
+                    vehiculo_cambiado = True
+                    nuevo_vehiculo = {"placas": mejor["placas"] or "", "abrev": abrev, "capacidad_ton": cap_nueva}
 
-        update_set: dict = {"mayoristas_overrides": overrides}
-        if vehiculo_cambiado and nuevo_vehiculo:
-            update_set[f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_placas"]      = nuevo_vehiculo["placas"]
-            update_set[f"detalle_por_dia.{dia}.{ruta_id}.vehiculo_abreviatura"] = nuevo_vehiculo["abrev"]
-            update_set[f"detalle_por_dia.{dia}.{ruta_id}.capacidad_ton"]        = nuevo_vehiculo["capacidad_ton"]
+            if vehiculo_cambiado and nuevo_vehiculo:
+                conn.execute(update(tabla_ar).where(
+                    tabla_ar.c.logistica_id == oid, tabla_ar.c.dia_semana == dia, tabla_ar.c.ruta_key == ruta_id
+                ).values(
+                    vehiculo_placas=nuevo_vehiculo["placas"],
+                    vehiculo_abreviatura=nuevo_vehiculo["abrev"],
+                    capacidad_ton=nuevo_vehiculo["capacidad_ton"],
+                ))
 
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": update_set},
-        )
         return {
             "status":           "ok",
             "vehiculo_cambiado": vehiculo_cambiado,
@@ -2008,19 +2060,27 @@ def agregar_mayorista_a_ruta(
 
 def actualizar_rutas_confirmadas(logistica_id: str, ruta_ids: list) -> dict:
     """
-    Persiste el estado de confirmación de rutas en asignaciones.rutas_confirmadas.
+    Persiste el estado de confirmación de rutas en asignaciones_rutas_confirmadas.
     ruta_ids es la lista completa de IDs confirmados en este momento.
     """
-    oid = _parse_oid(logistica_id)
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido"}
     try:
-        db = get_db()
-        db["asignaciones"].update_one(
-            {"logistica_id": oid},
-            {"$set": {"rutas_confirmadas": list(ruta_ids)}},
-            upsert=True,
-        )
+        with transaccion() as conn:
+            tabla_asig = get_table("asignaciones")
+            fila_asig = conn.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first()
+            if fila_asig:
+                asignacion_id = fila_asig.mongo_id
+            else:
+                asignacion_id = str(ObjectId())
+                conn.execute(insert(tabla_asig).values(mongo_id=asignacion_id, logistica_id=oid))
+
+            t_rc = get_table("asignaciones_rutas_confirmadas")
+            conn.execute(delete(t_rc).where(t_rc.c.logistica_id == oid))
+            filas = [{"asignacion_id": asignacion_id, "logistica_id": oid, "ruta_key": rid} for rid in ruta_ids]
+            if filas:
+                conn.execute(insert(t_rc), filas)
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
@@ -2029,38 +2089,163 @@ def actualizar_rutas_confirmadas(logistica_id: str, ruta_ids: list) -> dict:
 # ── Guardar / recuperar modificación ──────────────────────────
 
 def guardar_modificacion(payload: dict, logistica_id: str) -> dict:
-    """Persiste la modificación en la colección `modificaciones_rutas`."""
-    oid = _parse_oid(logistica_id)
+    """
+    Persiste la modificación en `modificaciones_rutas` (fila base) +
+    `modificacion_rutas`/`modificacion_ruta_sucursales`/`modificacion_ruta_mayoristas`
+    (una fila por ruta/sucursal/mayorista de payload["rutas_confirmadas"]).
+
+    Reemplazo completo (como el $set atómico de un solo documento en Mongo):
+    todo en una sola transacción.
+    """
+    oid = _id_valido(logistica_id)
     if not oid:
         return {"status": "error", "mensaje": "logistica_id inválido."}
 
-    payload["guardado_en"]  = datetime.now().isoformat()
-    payload["logistica_id"] = oid
+    guardado_en = datetime.now().isoformat()
+    fecha_modificacion = payload.get("fecha_modificacion")
+    rutas_confirmadas = payload.get("rutas_confirmadas") or []
+    if not isinstance(rutas_confirmadas, list):
+        rutas_confirmadas = []
 
     try:
-        db = get_db()
-        db["modificaciones_rutas"].update_one(
-            {"logistica_id": oid},
-            {"$set": payload},
-            upsert=True,
-        )
+        with transaccion() as conn:
+            tabla_base = get_table("modificaciones_rutas")
+            fila_base = conn.execute(select(tabla_base.c.mongo_id).where(tabla_base.c.logistica_id == oid)).first()
+            if fila_base:
+                modificacion_id = fila_base.mongo_id
+                conn.execute(update(tabla_base).where(tabla_base.c.mongo_id == modificacion_id).values(
+                    fecha_modificacion=fecha_modificacion, guardado_en=guardado_en,
+                ))
+            else:
+                modificacion_id = str(ObjectId())
+                conn.execute(insert(tabla_base).values(
+                    mongo_id=modificacion_id, logistica_id=oid,
+                    fecha_modificacion=fecha_modificacion, guardado_en=guardado_en,
+                ))
+
+            t_hdr = get_table("modificacion_rutas")
+            t_suc = get_table("modificacion_ruta_sucursales")
+            t_may = get_table("modificacion_ruta_mayoristas")
+
+            conn.execute(delete(t_suc).where(t_suc.c.modificacion_id == modificacion_id))
+            conn.execute(delete(t_may).where(t_may.c.modificacion_id == modificacion_id))
+            conn.execute(delete(t_hdr).where(t_hdr.c.modificacion_id == modificacion_id))
+
+            filas_hdr, filas_suc, filas_may = [], [], []
+            for ruta in rutas_confirmadas:
+                if not isinstance(ruta, dict):
+                    continue
+                ruta_key = ruta.get("id")
+                if not ruta_key:
+                    continue
+                filas_hdr.append({
+                    "modificacion_id": modificacion_id, "logistica_id": oid, "guardado_en": guardado_en,
+                    "ruta_key": ruta_key,
+                    "nombre": ruta.get("nombre"), "tipo": ruta.get("tipo"), "dia": ruta.get("dia"),
+                    "vehiculo_abrev": ruta.get("vehiculo_abrev"), "vehiculo_placas": ruta.get("vehiculo_placas"),
+                    "chofer": ruta.get("chofer"), "chofer_id": ruta.get("chofer_id"),
+                    "chofer_personalizado": bool(ruta.get("chofer_personalizado")),
+                    "capacidad_ton": ruta.get("capacidad_ton"), "peso_kg": ruta.get("peso_kg"),
+                    "peso_ton": ruta.get("peso_ton"), "pct_utilizacion": ruta.get("pct_utilizacion"),
+                    "conduccion_min": ruta.get("conduccion_min"), "descarga_min": ruta.get("descarga_min"),
+                    "extra_min": ruta.get("extra_min"), "total_min": ruta.get("total_min"),
+                    "distancia_km": ruta.get("distancia_km"), "hora_salida": ruta.get("hora_salida"),
+                    "hora_regreso": ruta.get("hora_regreso"), "origen_tiempo": ruta.get("origen_tiempo"),
+                    "es_personalizada": bool(ruta.get("es_personalizada")),
+                    "num_sucursales": ruta.get("num_sucursales"),
+                    "geometria_osrm_json": json.dumps(ruta.get("geometria_osrm")) if ruta.get("geometria_osrm") is not None else None,
+                    "via_points_json":     json.dumps(ruta.get("via_points"))     if ruta.get("via_points")     is not None else None,
+                    "puntos_evitar_json":  json.dumps(ruta.get("puntos_evitar"))  if ruta.get("puntos_evitar")  is not None else None,
+                })
+                for s in (ruta.get("sucursales") or []):
+                    if not isinstance(s, dict):
+                        continue
+                    filas_suc.append({
+                        "modificacion_id": modificacion_id, "ruta_key": ruta_key,
+                        "num_tienda": s.get("num_tienda"), "nombre": s.get("nombre"), "orden": s.get("orden"),
+                        "peso_kg": s.get("peso_kg"), "descarga_min": s.get("descarga_min"),
+                        "latitud": s.get("latitud"), "longitud": s.get("longitud"),
+                    })
+                for m in (ruta.get("mayoristas") or []):
+                    if not isinstance(m, dict):
+                        continue
+                    filas_may.append({
+                        "modificacion_id": modificacion_id, "ruta_key": ruta_key,
+                        "id_cliente": m.get("id_cliente"), "documento": m.get("documento"), "nombre": m.get("nombre"),
+                        "orden": m.get("orden"), "peso_kg": m.get("peso_kg"),
+                        "latitud": m.get("latitud"), "longitud": m.get("longitud"),
+                    })
+
+            if filas_hdr:
+                conn.execute(insert(t_hdr), filas_hdr)
+            if filas_suc:
+                conn.execute(insert(t_suc), filas_suc)
+            if filas_may:
+                conn.execute(insert(t_may), filas_may)
+
         return {"status": "ok"}
     except Exception as e:
         return {"status": "error", "mensaje": str(e)}
 
 
 def obtener_modificacion_previa(logistica_id: str) -> dict:
-    """Devuelve la modificación guardada para la logística activa."""
-    oid = _parse_oid(logistica_id)
+    """Devuelve la modificación guardada para la logística activa, reconstruyendo
+    rutas_confirmadas desde las tablas normalizadas."""
+    oid = _id_valido(logistica_id)
     if not oid:
         return {}
     try:
-        db  = get_db()
-        doc = db["modificaciones_rutas"].find_one({"logistica_id": oid})
-        if not doc:
+        db = get_db()
+        tabla_base = get_table("modificaciones_rutas")
+        base = db.execute(select(tabla_base).where(tabla_base.c.logistica_id == oid)).mappings().first()
+        if not base:
             return {}
-        doc.pop("_id", None)
+
+        modificacion_id = base["mongo_id"]
+        t_hdr = get_table("modificacion_rutas")
+        t_suc = get_table("modificacion_ruta_sucursales")
+        t_may = get_table("modificacion_ruta_mayoristas")
+
+        sucs_por_ruta: dict = {}
+        for s in db.execute(select(t_suc).where(t_suc.c.modificacion_id == modificacion_id)).mappings():
+            sucs_por_ruta.setdefault(s["ruta_key"], []).append({
+                "num_tienda": s["num_tienda"], "nombre": s["nombre"], "orden": s["orden"],
+                "peso_kg": s["peso_kg"], "descarga_min": s["descarga_min"],
+                "latitud": s["latitud"], "longitud": s["longitud"],
+            })
+
+        mays_por_ruta: dict = {}
+        for m in db.execute(select(t_may).where(t_may.c.modificacion_id == modificacion_id)).mappings():
+            mays_por_ruta.setdefault(m["ruta_key"], []).append({
+                "id_cliente": m["id_cliente"], "documento": m["documento"], "nombre": m["nombre"],
+                "orden": m["orden"], "peso_kg": m["peso_kg"], "latitud": m["latitud"], "longitud": m["longitud"],
+            })
+
+        rutas_confirmadas = []
+        for r in db.execute(select(t_hdr).where(t_hdr.c.modificacion_id == modificacion_id)).mappings():
+            ruta_key = r["ruta_key"]
+            rutas_confirmadas.append({
+                "id": ruta_key, "nombre": r["nombre"], "tipo": r["tipo"], "dia": r["dia"],
+                "vehiculo_abrev": r["vehiculo_abrev"], "vehiculo_placas": r["vehiculo_placas"],
+                "chofer": r["chofer"], "chofer_id": r["chofer_id"],
+                "chofer_personalizado": bool(r["chofer_personalizado"]),
+                "capacidad_ton": r["capacidad_ton"], "peso_kg": r["peso_kg"], "peso_ton": r["peso_ton"],
+                "pct_utilizacion": r["pct_utilizacion"], "conduccion_min": r["conduccion_min"],
+                "descarga_min": r["descarga_min"], "extra_min": r["extra_min"], "total_min": r["total_min"],
+                "distancia_km": r["distancia_km"], "hora_salida": r["hora_salida"], "hora_regreso": r["hora_regreso"],
+                "origen_tiempo": r["origen_tiempo"], "es_personalizada": bool(r["es_personalizada"]),
+                "num_sucursales": r["num_sucursales"],
+                "geometria_osrm": json.loads(r["geometria_osrm_json"]) if r["geometria_osrm_json"] else None,
+                "via_points":     json.loads(r["via_points_json"])     if r["via_points_json"]     else None,
+                "puntos_evitar":  json.loads(r["puntos_evitar_json"])  if r["puntos_evitar_json"]  else None,
+                "sucursales": sucs_por_ruta.get(ruta_key, []),
+                "mayoristas": mays_por_ruta.get(ruta_key, []),
+            })
+
+        doc = dict(base)
+        doc.pop("mongo_id", None)
         doc["logistica_id"] = str(doc["logistica_id"])
+        doc["rutas_confirmadas"] = rutas_confirmadas
         return doc
     except Exception:
         return {}

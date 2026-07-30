@@ -2,16 +2,17 @@
 logic/pdf_logic.py
 Reporte de pesos — paleta azul, diseño compacto a dos columnas.
 
-Fuente de datos: colección `modificaciones_rutas` (MongoDB),
+Fuente de datos: `modificaciones_rutas` (+ tablas normalizadas) en SQL Server,
 filtrada por logistica_id proveniente de la sesión Flask.
-
-No se leen archivos JSON.
 """
+import json
 import os
 import re
 from datetime import datetime
+
 from bson import ObjectId
 from bson.errors import InvalidId
+from sqlalchemy import select
 
 from reportlab.lib.pagesizes import LETTER, portrait
 from reportlab.lib import colors
@@ -22,8 +23,9 @@ from reportlab.platypus import (
     Table, TableStyle, Paragraph, Spacer, KeepTogether,
 )
 
-from db import get_db
+from db import get_db, get_table
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
+from logic.modificacion_logic import obtener_modificacion_previa
 from logic.groq_logic import generar_nombre_poblacion
 
 # ── Directorio temporal para el PDF generado ─────────────────
@@ -81,9 +83,9 @@ AUX_PESO_2_MIN = 1500
 AUX_SUC_2_MIN = 5
 
 
-def _parse_oid(doc_id: str) -> ObjectId | None:
+def _id_valido(doc_id: str) -> "str | None":
     try:
-        return ObjectId(doc_id)
+        return str(ObjectId(doc_id))
     except (InvalidId, TypeError):
         return None
 
@@ -139,12 +141,12 @@ def _leer_poblaciones(db, id_clientes: list) -> dict:
         return {}
     resultado: dict = {}
     try:
-        for doc in db["clientes_mayoristas"].find(
-            {"id_cliente": {"$in": id_clientes}},
-            {"id_cliente": 1, "poblacion": 1},
+        tabla = get_table("clientes_mayoristas")
+        for row in db.execute(
+            select(tabla.c.id_cliente, tabla.c.poblacion).where(tabla.c.id_cliente.in_(id_clientes))
         ):
-            id_cl = int(doc.get("id_cliente") or 0)
-            pob   = str(doc.get("poblacion") or "").strip().upper()
+            id_cl = int(row.id_cliente or 0)
+            pob   = str(row.poblacion or "").strip().upper()
             resultado[id_cl] = pob
     except Exception as e:
         print(f"[_leer_poblaciones] {e}")
@@ -261,13 +263,14 @@ def _agrupar_may_por_poblacion(paradas: list, pob_map: dict) -> list:
     return result
 
 
-def _volumenes_suc(db, oid: ObjectId) -> dict:
-    """Returns {num_tienda_int: total_m3} from extraccion.datos_volumen."""
+def _volumenes_suc(db, oid: str) -> dict:
+    """Returns {num_tienda_int: total_m3} from extraccion.datos_volumen (columna JSON)."""
     resultado: dict = {}
     try:
-        ext = db["extraccion"].find_one({"logistica_id": oid})
-        if ext:
-            for _, valores in ext.get("datos_volumen", {}).items():
+        tabla = get_table("extraccion")
+        fila = db.execute(select(tabla.c.datos_volumen).where(tabla.c.logistica_id == oid)).mappings().first()
+        if fila and fila["datos_volumen"]:
+            for _, valores in json.loads(fila["datos_volumen"]).items():
                 id_suc = valores.get("id_sucursal")
                 vol_m3 = valores.get("total_m3", 0)
                 if id_suc is not None:
@@ -283,7 +286,7 @@ def _volumenes_suc(db, oid: ObjectId) -> dict:
 # ── Tabla de un vehículo ──────────────────────────────────────
 def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                     veh_chofer: str = "", veh_ton: float = 0.0, db=None,
-                    vol_map: dict | None = None) -> list:
+                    vol_map: "dict | None" = None) -> list:
     rutas_ord = sorted(rutas, key=lambda r: ORDEN_DIA.get(r.get("dia", "").lower(), 99))
 
     conductor = veh_chofer or veh_placas
@@ -467,114 +470,90 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
 
 # ── Función principal ─────────────────────────────────────────
-def _mayoristas_por_ruta_db(db) -> dict:
-    """
-    Lee `distribucion_mayoristas` y devuelve un mapa
-    { ruta_id_str: [ { nombre, peso_kg, orden, tipo:'mayorista' } ] }.
-
-    Se usa para enriquecer el fallback que lee desde `asignaciones`
-    (en ese camino las rutas no tienen mayoristas embebidos).
-    """
-    resultado: dict = {}
-    try:
-        dist = db["distribucion_mayoristas"].find_one({"_key": "ultimo"})
-        if not dist:
-            return resultado
-        for ruta in dist.get("rutas", []):
-            rid  = str(ruta.get("_id", ""))
-            mays = []
-            for p in ruta.get("paradas_integradas", []):
-                if p.get("tipo") != "mayorista":
-                    continue
-                id_cl = p.get("id_cliente")
-                mays.append({
-                    "tipo":       "mayorista",
-                    "id_cliente": id_cl,
-                    "documento":  p.get("documento", ""),
-                    "nombre":     p.get("nombre_base") or p.get("nombre", ""),
-                    "peso_kg":    float(p.get("peso_kg", 0)),
-                    "orden":      p.get("orden"),
-                })
-            if mays:
-                resultado[rid] = mays
-    except Exception as e:
-        print(f"[_mayoristas_por_ruta_db] Error: {e}")
-    return resultado
-
+# NOTA: `_mayoristas_por_ruta_db()` (leía `distribucion_mayoristas`) se
+# eliminó en la migración a SQL Server -- estaba definida pero sin ninguna
+# llamada en todo el repo (código muerto, confirmado por búsqueda exhaustiva
+# antes de migrar). El flujo real de mayoristas para el fallback de
+# asignaciones ya pasa por `calcular_distribucion_mayoristas()`.
 
 def _rutas_desde_asignaciones(db, oid) -> list:
     """
-    Construye la lista de rutas para el PDF a partir de la colección
-    `asignaciones` (guardada en el Paso 3 — Asignación).
+    Construye la lista de rutas para el PDF a partir de `asignaciones_rutas`
+    + `asignaciones_sucursales` (guardadas en el Paso 3 — Asignación).
 
     Se usa como fallback cuando `modificaciones_rutas` no existe, permitiendo
     generar el PDF sin haber pasado por la etapa de Modificación.
-    Incluye mayoristas desde `distribucion_mayoristas`.
+    Incluye mayoristas vía `calcular_distribucion_mayoristas()`.
     """
-    doc = db["asignaciones"].find_one({"logistica_id": oid})
-    if not doc:
+    tabla_ar = get_table("asignaciones_rutas")
+    filas_rutas = db.execute(select(tabla_ar).where(tabla_ar.c.logistica_id == oid)).mappings().all()
+    if not filas_rutas:
         return []
 
     coords_map: dict = {}
     try:
-        for rdoc in db["rutas_config"].find({}, {"sucursales": 1}):
-            for suc in rdoc.get("sucursales", []):
-                nt = str(suc.get("num_tienda", ""))
-                lat = suc.get("latitud")
-                lon = suc.get("longitud")
-                if nt and lat is not None and lon is not None:
-                    coords_map[nt] = (float(lat), float(lon))
+        tabla_rcs = get_table("rutas_config_sucursales")
+        for suc in db.execute(select(tabla_rcs.c.num_tienda, tabla_rcs.c.latitud, tabla_rcs.c.longitud)):
+            nt = str(suc.num_tienda or "")
+            if nt and suc.latitud is not None and suc.longitud is not None:
+                coords_map[nt] = (float(suc.latitud), float(suc.longitud))
     except Exception:
         coords_map = {}
 
+    chofer_overrides: dict = {}
+    t_chov = get_table("asignaciones_chofer_overrides")
+    for r in db.execute(select(t_chov).where(t_chov.c.logistica_id == oid)):
+        chofer_overrides[r.ruta_key] = {"nombre": r.nombre, "chofer_id": r.chofer_id}
+
+    tabla_as = get_table("asignaciones_sucursales")
+    sucs_por_ruta: dict = {}
+    for s in db.execute(select(tabla_as).where(tabla_as.c.logistica_id == oid)):
+        sucs_por_ruta.setdefault(s.ruta_key, []).append(s)
+
     rutas: list = []
     rutas_base: list = []
-    detalle = doc.get("detalle_por_dia", {})
-    chofer_overrides = doc.get("chofer_overrides", {}) or {}
-    for dia, rutas_dia in detalle.items():
-        if not isinstance(rutas_dia, dict):
-            continue
-        for ruta_id, info in rutas_dia.items():
-            if not isinstance(info, dict):
-                continue
-            suc_list = []
-            for i, s in enumerate(info.get("sucursales", [])):
-                nt = s.get("num_tienda")
-                lat, lon = None, None
-                if nt is not None:
-                    coord = coords_map.get(str(nt))
-                    if coord:
-                        lat, lon = coord
-                suc_list.append({
-                    "tipo":    "sucursal",
-                    "num_tienda": nt,
-                    "orden":   s.get("orden", i + 1),
-                    "nombre":  s.get("nombre") or s.get("nombre_tienda") or s.get("nombre_pedido") or "—",
-                    "peso_kg": float(s.get("peso_kg", 0) or 0),
-                    "latitud": lat,
-                    "longitud": lon,
-                })
+    for info in filas_rutas:
+        ruta_id = info["ruta_key"]
+        dia     = info["dia_semana"]
 
-            rutas.append({
-                "id":               ruta_id,
-                "nombre":           info.get("nombre_ruta", ""),
-                "tipo":             "autorizada",
-                "dia":              dia,
-                "vehiculo_abrev":   info.get("vehiculo_abreviatura") or "S/N",
-                "vehiculo_placas":  info.get("vehiculo_placas") or "—",
-                "capacidad_ton":    float(info.get("capacidad_ton") or 0),
-                "peso_kg":          float(info.get("peso_total_kg") or 0),
-                "pct_utilizacion":  float(info.get("porcentaje_utilizacion") or 0),
-                "chofer_override":  chofer_overrides.get(ruta_id),
-                "sucursales":       suc_list,
-                "mayoristas":       [],
+        suc_list = []
+        for i, s in enumerate(sucs_por_ruta.get(ruta_id, [])):
+            nt = s.num_tienda
+            lat, lon = None, None
+            if nt is not None:
+                coord = coords_map.get(str(nt))
+                if coord:
+                    lat, lon = coord
+            suc_list.append({
+                "tipo":     "sucursal",
+                "num_tienda": nt,
+                "orden":    s.orden if s.orden is not None else i + 1,
+                "nombre":   s.nombre or "—",
+                "peso_kg":  float(s.peso_kg or 0),
+                "latitud":  lat,
+                "longitud": lon,
             })
 
-            rutas_base.append({
-                "_id":        ruta_id,
-                "sucursales": suc_list,
-                "cap_ton":    info.get("capacidad_ton"),
-            })
+        rutas.append({
+            "id":               ruta_id,
+            "nombre":           info["nombre_ruta"] or "",
+            "tipo":             "autorizada",
+            "dia":              dia,
+            "vehiculo_abrev":   info["vehiculo_abreviatura"] or "S/N",
+            "vehiculo_placas":  info["vehiculo_placas"] or "—",
+            "capacidad_ton":    float(info["capacidad_ton"] or 0),
+            "peso_kg":          float(info["peso_total_kg"] or 0),
+            "pct_utilizacion":  float(info["porcentaje_utilizacion"] or 0),
+            "chofer_override":  chofer_overrides.get(ruta_id),
+            "sucursales":       suc_list,
+            "mayoristas":       [],
+        })
+
+        rutas_base.append({
+            "_id":        ruta_id,
+            "sucursales": suc_list,
+            "cap_ton":    info["capacidad_ton"],
+        })
 
     if rutas_base:
         dist = calcular_distribucion_mayoristas(str(oid), rutas_base)
@@ -614,17 +593,19 @@ def _filtrar_mayoristas_con_pedidos(rutas: list) -> None:
         ]
 
 
-def _pesos_mayoristas(db, oid: ObjectId) -> dict:
+def _pesos_mayoristas(db, oid: str) -> dict:
     """
-    Lee `extraccion.mayoristas` y devuelve {documento_str: peso_kg}.
+    Lee `extraccion.mayoristas` (columna JSON) y devuelve {documento_str: peso_kg}.
     Se usa para enriquecer los mayoristas cuyo peso_kg llegó como 0 desde
-    `distribucion_mayoristas` (que no almacena pesos individuales).
+    la distribución calculada (que no almacena pesos individuales para el
+    camino de `asignaciones`).
     """
     resultado: dict = {}
     try:
-        ext = db["extraccion"].find_one({"logistica_id": oid})
-        if ext:
-            for m in ext.get("mayoristas", []):
+        tabla = get_table("extraccion")
+        fila = db.execute(select(tabla.c.mayoristas).where(tabla.c.logistica_id == oid)).mappings().first()
+        if fila and fila["mayoristas"]:
+            for m in json.loads(fila["mayoristas"]):
                 doc = str(m.get("documento") or m.get("codigo") or m.get("id_cliente") or "")
                 if doc:
                     try:
@@ -641,24 +622,26 @@ def generar_pdf(datos_sesion: dict) -> str:
     Genera el reporte PDF de pesos.
 
     Fuente de datos (en orden de preferencia):
-      1. `modificaciones_rutas` — datos confirmados tras la etapa de Modificación.
-      2. `asignaciones`         — fallback si Modificación no fue guardada.
-         Permite generar el PDF directamente después de la etapa de Asignación.
+      1. `modificaciones_rutas` (+ tablas normalizadas) — datos confirmados
+         tras la etapa de Modificación.
+      2. `asignaciones` (+ tablas normalizadas) — fallback si Modificación
+         no fue guardada. Permite generar el PDF directamente después de la
+         etapa de Asignación.
 
     Devuelve la ruta absoluta al PDF generado en static/temp/.
     """
     os.makedirs(TEMP_DIR, exist_ok=True)
 
     logistica_id = datos_sesion.get("id")
-    oid = _parse_oid(logistica_id) if logistica_id else None
+    oid = _id_valido(logistica_id) if logistica_id else None
     if not oid:
         raise ValueError("No hay logística activa o su ID es inválido.")
 
     db  = get_db()
 
     # ── 1. Intentar leer desde modificaciones_rutas ───────────────
-    doc  = db["modificaciones_rutas"].find_one({"logistica_id": oid})
-    rutas: list = doc.get("rutas_confirmadas", []) if doc else []
+    mod_doc = obtener_modificacion_previa(oid)
+    rutas: list = mod_doc.get("rutas_confirmadas", []) if mod_doc else []
 
     # ── 2. Fallback a asignaciones si no hay modificaciones ───────
     if not rutas:
@@ -671,9 +654,9 @@ def generar_pdf(datos_sesion: dict) -> str:
         )
 
     # ── 3. Enriquecer peso_kg de mayoristas desde extraccion ─────
-    # distribucion_mayoristas no guarda pesos individuales, por lo que
-    # los mayoristas suelen llegar con peso_kg=0.  Se corrige leyendo
-    # la colección extraccion (campo mayoristas[].peso_total_kg).
+    # La distribución calculada no guarda pesos individuales, por lo que
+    # los mayoristas suelen llegar con peso_kg=0. Se corrige leyendo
+    # extraccion.mayoristas (columna JSON, campo peso_total_kg).
     pesos_may = _pesos_mayoristas(db, oid)
     if pesos_may:
         for ruta in rutas:
@@ -724,15 +707,20 @@ def generar_pdf(datos_sesion: dict) -> str:
         )
     ])
 
-    # Mapa placas → chofer desde la colección `vehiculos`
+    # Mapa placas → chofer desde la tabla `vehiculos` (solo activo=True
+    # estricto, a propósito distinto del "$ne:False" usado en otros módulos)
     chofer_por_placas: dict = {}
     try:
-        for v in db["vehiculos"].find({"activo": True}, {"placas": 1, "chofer": 1, "capacidad_toneladas": 1}):
-            plac = v.get("placas", "")
+        tabla_veh = get_table("vehiculos")
+        for v in db.execute(
+            select(tabla_veh.c.placas, tabla_veh.c.chofer, tabla_veh.c.capacidad_toneladas)
+            .where(tabla_veh.c.activo == True)  # noqa: E712
+        ):
+            plac = v.placas or ""
             if plac:
                 chofer_por_placas[plac] = {
-                    "chofer": v.get("chofer", "") or "",
-                    "ton":    float(v.get("capacidad_toneladas") or 0),
+                    "chofer": v.chofer or "",
+                    "ton":    float(v.capacidad_toneladas or 0),
                 }
     except Exception as e:
         print(f"[generar_pdf] Error al leer choferes: {e}")
