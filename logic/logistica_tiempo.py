@@ -17,11 +17,13 @@ trámites+descarga proporcional al peso, con piso y techo.
 TIEMPO_ENTREGA_ESTRICTO = True
 
 # Descarga por parada (min): clamp(piso + peso_kg × TASA, piso, techo)
-DESCARGA_PISO_SUCURSAL   = 60.0
-DESCARGA_TECHO_SUCURSAL  = 120.0
-DESCARGA_PISO_MAYORISTA  = 90.0
-DESCARGA_TECHO_MAYORISTA = 120.0
-TASA_DESCARGA_MIN_POR_KG = 0.05   # con piso 60, ~1200 kg alcanza el techo
+# Calibrado para un promedio ~50 min/parada (así una ruta agrupada alcanza a
+# entregar ~13 paradas dentro del horario). Ajustar si cambia la operación.
+DESCARGA_PISO_SUCURSAL   = 40.0
+DESCARGA_TECHO_SUCURSAL  = 90.0
+DESCARGA_PISO_MAYORISTA  = 40.0
+DESCARGA_TECHO_MAYORISTA = 90.0
+TASA_DESCARGA_MIN_POR_KG = 0.05   # con piso 40, ~1000 kg alcanza el techo
 
 
 def tiempo_descarga_min(peso_kg, es_mayorista: bool = False) -> float:

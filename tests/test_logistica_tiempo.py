@@ -3,24 +3,24 @@ from logic.logistica_tiempo import tiempo_descarga_min, evaluar_llegadas
 
 
 def test_descarga_clamp_sucursal():
-    assert tiempo_descarga_min(0, es_mayorista=False) == 60.0        # piso
-    assert tiempo_descarga_min(100000, es_mayorista=False) == 120.0  # techo
-    assert tiempo_descarga_min(600, es_mayorista=False) == 90.0      # 60 + 600*0.05
+    assert tiempo_descarga_min(0, es_mayorista=False) == 40.0        # piso
+    assert tiempo_descarga_min(100000, es_mayorista=False) == 90.0   # techo
+    assert tiempo_descarga_min(600, es_mayorista=False) == 70.0      # 40 + 600*0.05
 
 
-def test_descarga_piso_mayorista():
-    assert tiempo_descarga_min(0, es_mayorista=True) == 90.0         # piso mayorista
-    assert tiempo_descarga_min(100000, es_mayorista=True) == 120.0   # techo
+def test_descarga_clamp_mayorista():
+    assert tiempo_descarga_min(0, es_mayorista=True) == 40.0         # piso
+    assert tiempo_descarga_min(100000, es_mayorista=True) == 90.0    # techo
 
 
 def test_llegadas_acumuladas():
     # salida 07:00 = 420 min; cierre 20:00 = 1200 min. 3 paradas peso 0 (descarga=piso 60).
     paradas = [{"nombre": "A", "peso_kg": 0}, {"nombre": "B", "peso_kg": 0}, {"nombre": "C", "peso_kg": 0}]
-    tramos = [30, 30, 30, 30]  # el último (regreso) se ignora
+    tramos = [30, 30, 30, 30]  # el último (regreso) se ignora; descarga(peso 0)=piso 40
     out = evaluar_llegadas(paradas, tramos, 420, 1200)
     assert out[0]["hora_llegada_min"] == 450   # 420 + 30
-    assert out[1]["hora_llegada_min"] == 540   # 450 + 60(desc A) + 30
-    assert out[2]["hora_llegada_min"] == 630   # 540 + 60(desc B) + 30
+    assert out[1]["hora_llegada_min"] == 520   # 450 + 40(desc A) + 30
+    assert out[2]["hora_llegada_min"] == 590   # 520 + 40(desc B) + 30
     assert all(p["entregable_por_tiempo"] for p in out)
 
 
