@@ -11,6 +11,27 @@ trámites+descarga proporcional al peso, con piso y techo.
 - `evaluar_llegadas(paradas, tramos_min, salida, cierre)` → anexa a cada parada
   su hora de llegada acumulada y si es entregable a tiempo.
 """
+import math
+
+
+def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (math.sin(dlat / 2) ** 2
+         + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2))
+         * math.sin(dlon / 2) ** 2)
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def hhmm_a_min(hhmm, default: int = 0) -> int:
+    """'HH:MM' → minutos desde 00:00. Devuelve `default` si no parsea."""
+    try:
+        h, m = str(hhmm).split(":")
+        return int(h) * 60 + int(m)
+    except (ValueError, AttributeError, TypeError):
+        return default
+
 
 # Interruptor: True = modelo real (descarga piso+peso×tasa; deadline por llegada).
 # False = el resto del sistema sigue con su cálculo anterior (este módulo no se usa).
@@ -66,3 +87,35 @@ def evaluar_llegadas(paradas: list, tramos_min: list,
         # tiempo consumido en esta parada antes de salir a la siguiente
         t += tiempo_descarga_min(p.get("peso_kg", 0), p.get("es_mayorista", False))
     return resultado
+
+
+def _latlon(p: dict):
+    lat = p.get("latitud", p.get("lat"))
+    lon = p.get("longitud", p.get("lon"))
+    if lat is None or lon is None:
+        return None
+    return (float(lat), float(lon))
+
+
+def evaluar_ruta_por_tiempo(paradas: list, depot: tuple, hora_salida_min: float,
+                            hora_limite_min: float, velocidad_kmh: float = 35.0) -> list:
+    """
+    Evalúa las llegadas de una ruta calculando el traslado por HAVERSINE
+    (rápido, sin OSRM: en rutas agrupadas el tiempo lo domina la descarga).
+
+    paradas   : en orden, con lat/lon (latitud/longitud o lat/lon), peso_kg,
+                es_mayorista.
+    depot     : (lat, lon) de la matriz.
+    Retorna evaluar_llegadas(...) sobre esta ruta.
+    """
+    vel = velocidad_kmh if (velocidad_kmh and velocidad_kmh > 0) else 35.0
+    tramos: list = []
+    prev = depot
+    for p in paradas:
+        ll = _latlon(p)
+        if ll is None or prev is None:
+            tramos.append(0.0)   # sin coords: no se puede medir el tramo
+        else:
+            tramos.append(_haversine_km(prev[0], prev[1], ll[0], ll[1]) / vel * 60.0)
+            prev = ll
+    return evaluar_llegadas(paradas, tramos, hora_salida_min, hora_limite_min)

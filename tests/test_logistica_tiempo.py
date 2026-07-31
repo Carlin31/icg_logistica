@@ -36,3 +36,30 @@ def test_determinismo():
     paradas = [{"peso_kg": 100}, {"peso_kg": 200, "es_mayorista": True}]
     tramos = [10, 20, 30]
     assert evaluar_llegadas(paradas, tramos, 420, 1200) == evaluar_llegadas(paradas, tramos, 420, 1200)
+
+
+from logic.logistica_tiempo import hhmm_a_min, evaluar_ruta_por_tiempo
+
+
+def test_hhmm_a_min():
+    assert hhmm_a_min("07:00") == 420
+    assert hhmm_a_min("20:00") == 1200
+    assert hhmm_a_min("basura", default=99) == 99
+
+
+def test_evaluar_ruta_por_tiempo_marca_tarde():
+    depot = (18.87, -96.95)
+    # dos paradas muy cercanas (traslado ~minutos); descarga(peso 0)=40 domina.
+    paradas = [{"latitud": 18.88, "longitud": -96.95, "peso_kg": 0},
+               {"latitud": 18.89, "longitud": -96.95, "peso_kg": 0}]
+    out = evaluar_ruta_por_tiempo(paradas, depot, 420, 450, velocidad_kmh=35)
+    assert out[0]["entregable_por_tiempo"] is True    # llega ~422 <= 450
+    assert out[1]["entregable_por_tiempo"] is False   # ~422 + 40(desc) + viaje > 450
+
+
+def test_evaluar_ruta_sin_coords_no_rompe():
+    depot = (18.87, -96.95)
+    paradas = [{"peso_kg": 100}, {"latitud": 18.88, "longitud": -96.95, "peso_kg": 0}]
+    out = evaluar_ruta_por_tiempo(paradas, depot, 420, 1200, velocidad_kmh=35)
+    assert len(out) == 2
+    assert all("entregable_por_tiempo" in p for p in out)
