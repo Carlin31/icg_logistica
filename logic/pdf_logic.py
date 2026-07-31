@@ -27,6 +27,10 @@ from db import get_db, get_table
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
 from logic.modificacion_logic import obtener_modificacion_previa
 from logic.groq_logic import generar_nombre_poblacion
+from logic.logistica_tiempo import (
+    TIEMPO_ENTREGA_ESTRICTO, evaluar_ruta_por_tiempo, evaluar_llegadas, hhmm_a_min,
+)
+from logic.asignacion_logic import consultar_osrm
 
 # ── Directorio temporal para el PDF generado ─────────────────
 # Se usa /tmp para compatibilidad con entornos de producción (Render, etc.)
@@ -65,6 +69,9 @@ C_BLANCO   = colors.white
 C_MAY_BG   = colors.HexColor("#FFF7ED")   # fondo fila mayorista
 C_MAY_TEXT = colors.HexColor("#EA580C")   # texto naranja
 C_MAY_SUBTOT = colors.HexColor("#FFEDD5") # subtotal cuando hay mayoristas
+# ── Rojo para paradas no entregables por tiempo (Fase A) ──────
+C_TARDE_BG   = colors.HexColor("#FEE2E2")  # fondo fila fuera de horario
+C_TARDE_TEXT = colors.HexColor("#B91C1C")  # texto rojo
 
 ORDEN_DIA = {"lunes": 1, "martes": 2, "miercoles": 3, "jueves": 4, "viernes": 5}
 ABREV_DIA = {
@@ -257,6 +264,7 @@ def _agrupar_may_por_poblacion(paradas: list, pob_map: dict) -> list:
                 "orden":           group[0].get("orden"),
                 "peso_kg":         sum(float(m.get("peso_kg") or 0) for m in group),
                 "_display_nombre": nombre_display,
+                "_entregable":     all(m.get("_entregable", True) for m in group),
             })
         i = j
 
@@ -286,7 +294,8 @@ def _volumenes_suc(db, oid: str) -> dict:
 # ── Tabla de un vehículo ──────────────────────────────────────
 def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                     veh_chofer: str = "", veh_ton: float = 0.0, db=None,
-                    vol_map: "dict | None" = None) -> list:
+                    vol_map: "dict | None" = None,
+                    cfg_tiempo: "dict | None" = None) -> list:
     rutas_ord = sorted(rutas, key=lambda r: ORDEN_DIA.get(r.get("dia", "").lower(), 99))
 
     conductor = veh_chofer or veh_placas
@@ -340,6 +349,40 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         else:
             paradas = sorted(sucs + mays, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
 
+        # Fase A — tiempo de entrega: sobre las paradas ordenadas (antes de
+        # agrupar), marcar las que no se alcanzan a entregar antes del cierre.
+        if cfg_tiempo and cfg_tiempo.get("activo"):
+            dcfg  = cfg_tiempo.get("dias", {}).get(dia, {})
+            h_sal = hhmm_a_min(dcfg.get("hora_salida"), 420)
+            h_lim = hhmm_a_min(dcfg.get("hora_limite"), 1080)
+            depot = cfg_tiempo.get("depot")
+            paradas_t = [{
+                "latitud": p.get("latitud"), "longitud": p.get("longitud"),
+                "peso_kg": p.get("peso_kg", 0),
+                "es_mayorista": p["_tipo"] == "mayorista",
+            } for p in paradas]
+            # Traslado real por OSRM (cacheado): matriz→p1→…→pn→matriz. Una parada
+            # sin coords repite el punto previo (tramo 0). Si OSRM falla, haversine.
+            tramos = None
+            try:
+                pts, prev = [depot], depot
+                for p in paradas:
+                    la, lo = p.get("latitud"), p.get("longitud")
+                    if la is not None and lo is not None:
+                        prev = (float(la), float(lo))
+                    pts.append(prev)
+                pts.append(depot)
+                r = consultar_osrm(pts)
+                if "error" not in r and r.get("tramos_min"):
+                    tramos = r["tramos_min"]
+            except Exception:
+                tramos = None
+            evals = (evaluar_llegadas(paradas_t, tramos, h_sal, h_lim) if tramos
+                     else evaluar_ruta_por_tiempo(paradas_t, depot, h_sal, h_lim,
+                                                  cfg_tiempo.get("velocidad", 35.0)))
+            for p, e in zip(paradas, evals):
+                p["_entregable"] = e["entregable_por_tiempo"]
+
         # Agrupar mayoristas consecutivos de la misma poblacion (BB2872/73/74_CTES. AYOZINTEPEC)
         if db is not None and any(p["_tipo"] == "mayorista" for p in paradas):
             may_ids = list({int(p.get("id_cliente") or 0)
@@ -356,6 +399,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
         for i, p in enumerate(paradas):
             es_may = p["_tipo"] == "mayorista"
+            entregable = p.get("_entregable", True)
             p_kg   = float(p.get("peso_kg", 0))
             pct_r  = (p_kg / peso_ruta * 100) if peso_ruta else 0
 
@@ -367,26 +411,28 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                 nt     = p.get("num_tienda")
                 p_vol  = vol_map.get(int(nt), 0.0) if nt is not None else 0.0
 
+            if not entregable:
+                nombre = f"{nombre}  ·  FUERA DE HORARIO"
+
             vol_txt = f"{p_vol:.3f}" if p_vol > 0 else "—"
+            # Rojo si no es entregable por tiempo; si no, naranja mayorista / negro sucursal.
+            col = C_TARDE_TEXT if not entregable else (C_MAY_TEXT if es_may else colors.black)
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(aux_txt, sz=SZ_DAT, bold=True) if i == 0 else "",
-                _pc(str(p.get("orden", i + 1)), sz=SZ_DAT,
-                    color=C_MAY_TEXT if es_may else colors.black),
-                _p(nombre, sz=SZ_DAT,
-                   color=C_MAY_TEXT if es_may else colors.black,
-                   bold=es_may),
-                _pr(f"{int(p_kg):,}", sz=SZ_DAT,
-                    color=C_MAY_TEXT if es_may else colors.black),
-                _pr(vol_txt, sz=SZ_DAT,
-                    color=C_MAY_TEXT if es_may else colors.black),
-                _pc(f"{pct_r:.0f}%", sz=SZ_DAT,
-                    color=C_MAY_TEXT if es_may else colors.black),
+                _pc(str(p.get("orden", i + 1)), sz=SZ_DAT, color=col),
+                _p(nombre, sz=SZ_DAT, color=col, bold=es_may or (not entregable)),
+                _pr(f"{int(p_kg):,}", sz=SZ_DAT, color=col),
+                _pr(vol_txt, sz=SZ_DAT, color=col),
+                _pc(f"{pct_r:.0f}%", sz=SZ_DAT, color=col),
             ])
 
             ridx = 2 + len(data_rows) - 1
-            if es_may:
+            if not entregable:
+                # Fondo rojo: parada que no se alcanza a entregar antes del cierre
+                style_extra.append(("BACKGROUND", (0, ridx), (-1, ridx), C_TARDE_BG))
+            elif es_may:
                 # Fondo naranja para toda la fila de mayorista
                 style_extra.append(("BACKGROUND", (0, ridx), (-1, ridx), C_MAY_BG))
             elif es_sub:
@@ -406,6 +452,9 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         if n_may:
             lbl_partes.append(f"{n_may} may.")
         total_lbl = f"TOTAL {dia_lbl}  ·  " + "  +  ".join(lbl_partes)
+        n_tarde = sum(1 for p in paradas if not p.get("_entregable", True))
+        if n_tarde:
+            total_lbl += f"  ·  {n_tarde} FUERA DE HORARIO"
 
         vol_ruta = sum(
             vol_map.get(int(p.get("num_tienda")), 0.0)
@@ -725,6 +774,26 @@ def generar_pdf(datos_sesion: dict) -> str:
     except Exception as e:
         print(f"[generar_pdf] Error al leer choferes: {e}")
 
+    # Fase A — config de tiempo de entrega (para marcar paradas fuera de horario).
+    # Degradación segura: ante cualquier error, no se marca nada.
+    cfg_tiempo = None
+    if TIEMPO_ENTREGA_ESTRICTO:
+        try:
+            cfg_row = db.execute(select(get_table("configuracion"))).mappings().first() or {}
+            depot = (float(cfg_row.get("matriz_lat") or 18.87329315661368),
+                     float(cfg_row.get("matriz_lon") or -96.9491574270346))
+            cd = cfg_row.get("config_dias")
+            cd = json.loads(cd) if isinstance(cd, str) else (cd or {})
+            cfg_tiempo = {
+                "activo":    True,
+                "depot":     depot,
+                "velocidad": float(cfg_row.get("velocidad_kmh") or 35.0),
+                "dias":      cd,
+            }
+        except Exception as e:  # noqa: BLE001
+            print(f"[generar_pdf] tiempo de entrega desactivado por error: {e}")
+            cfg_tiempo = None
+
     # Agrupar por (vehículo, chofer efectivo): una ruta con chofer
     # personalizado (cambiado solo para ese día/ruta en Modificación) recibe
     # su propio bloque dentro del mismo vehículo, sin afectar las demás rutas.
@@ -747,7 +816,7 @@ def generar_pdf(datos_sesion: dict) -> str:
     elements = []
     for clave in sorted(grupos, key=lambda k: (k[0] or "", k[1] or "")):
         info = grupos[clave]
-        elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db, vol_map))
+        elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db, vol_map, cfg_tiempo))
 
     doc_pdf.build(elements)
     return filepath
