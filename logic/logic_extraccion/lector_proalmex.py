@@ -21,6 +21,15 @@ class LectorProalmex:
         'TOTAL CAJAS', 'OBSERVACIONES',
     )
 
+    # Palabras clave de estas mismas columnas auxiliares, buscadas como
+    # substring (no solo como sufijo exacto): variantes reales del Excel como
+    # 'INV. EN BODEGA' (con 'EN' insertado) no terminan en 'INV. BODEGA' y se
+    # colaban con id_sucursal 'N/A' pese a SUFIJOS_EXCLUIR (caso real,
+    # logística 27-31 jul 2026). 'BODEGA' e 'IMPORTE' ya cubren sus
+    # variantes exactas de SUFIJOS_EXCLUIR; no se repiten para no perder la
+    # documentación de cada caso real arriba.
+    PALABRAS_EXCLUIR = ('BODEGA', 'DISPONIBLE', 'OBSERVACIONES')
+
     @staticmethod
     def leer_y_normalizar(archivo) -> pd.DataFrame:
         """
@@ -43,6 +52,7 @@ class LectorProalmex:
                 col for col in df.columns
                 if str(col).strip() not in LectorProalmex.COLUMNAS_EXCLUIR
                 and not str(col).strip().upper().endswith(LectorProalmex.SUFIJOS_EXCLUIR)
+                and not any(p in str(col).strip().upper() for p in LectorProalmex.PALABRAS_EXCLUIR)
             ]
 
             # Preservar Descripción y Tamaño (si existe) como identificadores
