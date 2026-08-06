@@ -89,3 +89,15 @@ def evaluar_ruta_completa(paradas: list, dia: str, cfg_tiempo: dict,
     return (evaluar_llegadas(paradas_t, tramos, h_sal, h_lim) if tramos
             else evaluar_ruta_por_tiempo(paradas_t, depot, h_sal, h_lim,
                                          cfg_tiempo.get("velocidad", 35.0)))
+
+
+def _pct_utilizacion(peso_kg: float, capacidad_ton) -> float:
+    cap_kg = float(capacidad_ton or 0) * 1000
+    return round(float(peso_kg) / cap_kg * 100, 1) if cap_kg > 0 else 0.0
+
+
+def _cabe_por_peso(ruta: dict, peso_extra: float, umbral_pct: float) -> bool:
+    """True si, tras sumar `peso_extra` al peso ya cargado de `ruta`, la
+    utilización resultante no supera `umbral_pct`."""
+    peso_total = float(ruta.get("peso_kg", 0)) + float(peso_extra)
+    return _pct_utilizacion(peso_total, ruta.get("capacidad_ton")) <= umbral_pct

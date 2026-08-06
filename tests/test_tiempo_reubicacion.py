@@ -65,3 +65,23 @@ def test_afinidad_historica_por_sucursal_compone_helpers(monkeypatch):
     monkeypatch.setattr(historico_logic, "_historiales_crudos_sucursales", lambda: historiales_falsos)
     out = historico_logic.afinidad_historica_por_sucursal()
     assert out[42][("F 350_1", "MARTES")] == 2  # mediana de 1 y 3
+
+
+from logic.tiempo_reubicacion import _normalizar_veh, _pct_utilizacion, _cabe_por_peso
+
+
+def test_normalizar_veh_ignora_espacios_y_mayusculas():
+    assert _normalizar_veh("F 350_2") == _normalizar_veh("F350_2") == "F350_2"
+    assert _normalizar_veh(None) == ""
+
+
+def test_pct_utilizacion():
+    assert _pct_utilizacion(1750, 3.5) == 50.0
+    assert _pct_utilizacion(100, 0) == 0.0  # sin capacidad registrada -> 0, no división por cero
+    assert _pct_utilizacion(100, None) == 0.0
+
+
+def test_cabe_por_peso_respeta_umbral():
+    ruta = {"peso_kg": 2000, "capacidad_ton": 2.5}  # 80% ya usado
+    assert _cabe_por_peso(ruta, 100, 85.0) is True    # 2100/2500=84% <= 85%
+    assert _cabe_por_peso(ruta, 200, 85.0) is False   # 2200/2500=88% > 85%
