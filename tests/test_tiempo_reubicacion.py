@@ -137,3 +137,97 @@ def test_recalcular_peso_ruta_suma_sucursales_y_mayoristas():
     _recalcular_peso_ruta(ruta)
     assert ruta["peso_kg"] == 1050.0
     assert ruta["pct_utilizacion"] == _pct_utilizacion(1050.0, 3.5)
+
+
+from logic.tiempo_reubicacion import (
+    _clave_afinidad_para, _candidatas_con_afinidad, _mejor_candidata, _menos_mala,
+)
+
+CFG_AMPLIO = {
+    "activo": True, "depot": (18.87, -96.94), "velocidad": 35.0,
+    "dias": {
+        "martes": {"hora_salida": "07:00", "hora_limite": "20:00"},
+        "jueves": {"hora_salida": "07:00", "hora_limite": "20:00"},
+    },
+}
+
+AFINIDAD = {42: {("F 350_1", "MARTES"): 1, ("F 350_2", "JUEVES"): 2}}
+
+
+def test_clave_afinidad_para_sucursal_es_su_num_tienda():
+    parada = {"num_tienda": 42}
+    assert _clave_afinidad_para(parada, "sucursal", {"sucursales": []}, AFINIDAD) == 42
+
+
+def test_clave_afinidad_para_mayorista_ancla_a_sucursal_cercana_con_afinidad():
+    ruta = {"sucursales": [
+        {"num_tienda": 42, "latitud": 18.90, "longitud": -96.95},
+        {"num_tienda": 99, "latitud": 0.0, "longitud": 0.0},  # sin afinidad, lejos
+    ]}
+    mayorista = {"id_cliente": 7, "latitud": 18.901, "longitud": -96.951}
+    assert _clave_afinidad_para(mayorista, "mayorista", ruta, AFINIDAD) == 42
+
+
+def test_clave_afinidad_para_mayorista_sin_coords_es_none():
+    assert _clave_afinidad_para({"id_cliente": 7}, "mayorista", {"sucursales": []}, AFINIDAD) is None
+
+
+def test_candidatas_con_afinidad_filtra_por_dia_y_afinidad():
+    rutas = [
+        {"id": "R_ORIGEN", "dia": "martes",  "vehiculo_abrev": "F 350_1"},
+        {"id": "R_MISMO_DIA_AFIN", "dia": "martes", "vehiculo_abrev": "F 350_1"},
+        {"id": "R_OTRO_VEH", "dia": "martes", "vehiculo_abrev": "F 350_9"},
+        {"id": "R_OTRO_DIA_AFIN", "dia": "jueves", "vehiculo_abrev": "F350_2"},
+    ]
+    mismo_dia = _candidatas_con_afinidad(42, rutas, AFINIDAD, "R_ORIGEN", True, "martes")
+    assert [r["id"] for r in mismo_dia] == ["R_MISMO_DIA_AFIN"]
+
+    otro_dia = _candidatas_con_afinidad(42, rutas, AFINIDAD, "R_ORIGEN", False, "martes")
+    assert [r["id"] for r in otro_dia] == ["R_OTRO_DIA_AFIN"]  # 'F350_2' normaliza igual que 'F 350_2'
+
+
+# El peso de "Vecina" debe IGUALAR peso_kg (no un valor fijo aparte):
+# _menos_mala compara vía _simular_insercion -> _recalcular_peso_ruta,
+# que sobreescribe peso_kg sumando las paradas reales. Si "Vecina" fuera
+# un peso fijo distinto del peso_kg declarado, la simulacion perderia la
+# diferencia entre rutas y el test de _menos_mala compararia valores
+# identicos sin importar el peso_kg pedido.
+def _ruta_destino(id_, dia="martes", peso_kg=0, capacidad_ton=3.5):
+    return {
+        "id": id_, "dia": dia, "vehiculo_abrev": "F 350_1",
+        "capacidad_ton": capacidad_ton, "peso_kg": peso_kg,
+        "pct_utilizacion": _pct_utilizacion(peso_kg, capacidad_ton),
+        "sucursales": [
+            {"num_tienda": 5, "nombre": "Vecina", "orden": 1, "peso_kg": peso_kg,
+             "latitud": 18.90, "longitud": -96.95},
+        ],
+        "mayoristas": [],
+    }
+
+
+def test_mejor_candidata_respeta_umbral_y_tiempo():
+    parada = {"num_tienda": 42, "nombre": "Nueva", "peso_kg": 100,
+              "latitud": 18.901, "longitud": -96.951}
+    llena  = _ruta_destino("LLENA", peso_kg=3300)   # 3400/3500=97% > 85%
+    libre  = _ruta_destino("LIBRE", peso_kg=1000)   # 1100/3500=31% <= 85%
+    elegida = _mejor_candidata([llena, libre], parada, "sucursal", 100.0,
+                               CFG_AMPLIO, None, 85.0)
+    assert elegida["id"] == "LIBRE"
+
+
+def test_mejor_candidata_none_si_ninguna_cumple():
+    parada = {"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}
+    llena = _ruta_destino("LLENA", peso_kg=3300)
+    assert _mejor_candidata([llena], parada, "sucursal", 100.0, CFG_AMPLIO, None, 85.0) is None
+
+
+def test_menos_mala_elige_menor_pct_resultante():
+    parada = {"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}
+    mas_llena  = _ruta_destino("MAS_LLENA", peso_kg=3300)
+    menos_llena = _ruta_destino("MENOS_LLENA", peso_kg=3000)
+    elegida = _menos_mala([mas_llena, menos_llena], parada, "sucursal", CFG_AMPLIO, None)
+    assert elegida["id"] == "MENOS_LLENA"
+
+
+def test_menos_mala_none_si_no_hay_candidatas():
+    assert _menos_mala([], {}, "sucursal", CFG_AMPLIO, None) is None

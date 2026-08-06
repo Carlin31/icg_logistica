@@ -14,6 +14,7 @@ respaldo — mismo criterio que ya usa Fase A. La persistencia (guardar en
 `modificaciones_rutas`) queda a cargo de quien llama a
 `resolver_fuera_de_horario`, no de este módulo.
 """
+import copy
 import math
 
 from logic.logistica_tiempo import evaluar_llegadas, evaluar_ruta_por_tiempo, hhmm_a_min
@@ -161,3 +162,101 @@ def _recalcular_peso_ruta(ruta: dict) -> None:
     peso += sum(float(p.get("peso_kg") or 0) for p in ruta.get("mayoristas", []))
     ruta["peso_kg"] = peso
     ruta["pct_utilizacion"] = _pct_utilizacion(peso, ruta.get("capacidad_ton"))
+
+
+def _clave_afinidad_para(parada: dict, tipo: str, ruta: dict, afinidad: dict) -> "int | None":
+    """
+    Llave de búsqueda en `afinidad` para `parada`:
+    - Sucursal: su propio num_tienda.
+    - Mayorista: el num_tienda de la sucursal de la MISMA ruta geográficamente
+      más cercana que sí tenga afinidad histórica registrada — ancla
+      conceptualmente igual a como enganche_zona ancla mayoristas a una
+      sucursal del grupo destino, sin activar ese motor.
+    None si no hay coordenadas o no se encuentra ancla.
+    """
+    if tipo == "sucursal":
+        nt = parada.get("num_tienda")
+        return int(nt) if nt is not None else None
+
+    lat, lon = parada.get("latitud"), parada.get("longitud")
+    if lat is None or lon is None:
+        return None
+    mejor_sid, mejor_dist = None, float("inf")
+    for s in ruta.get("sucursales", []):
+        nt = s.get("num_tienda")
+        if nt is None or int(nt) not in afinidad:
+            continue
+        la, lo = s.get("latitud"), s.get("longitud")
+        if la is None or lo is None:
+            continue
+        d = _haversine_km(float(lat), float(lon), float(la), float(lo))
+        if d < mejor_dist:
+            mejor_dist, mejor_sid = d, int(nt)
+    return mejor_sid
+
+
+def _candidatas_con_afinidad(num_tienda, rutas: list, afinidad: dict, ruta_origen_id,
+                             mismo_dia: bool, dia_origen: str) -> list:
+    """Rutas de `rutas` (excluye la de origen) con las que `num_tienda`
+    tiene afinidad histórica real. `mismo_dia=True` sólo día == dia_origen;
+    False sólo días distintos. Orden estable por id (determinismo)."""
+    if num_tienda is None:
+        return []
+    prefs = afinidad.get(int(num_tienda), {})
+    if not prefs:
+        return []
+    vehs_dias = {(_normalizar_veh(v), d) for (v, d) in prefs}
+    candidatas = []
+    for r in rutas:
+        if r.get("id") == ruta_origen_id:
+            continue
+        es_mismo_dia = (r.get("dia", "") == dia_origen)
+        if es_mismo_dia != mismo_dia:
+            continue
+        clave = (_normalizar_veh(r.get("vehiculo_abrev")), str(r.get("dia", "")).upper())
+        if clave in vehs_dias:
+            candidatas.append(r)
+    return sorted(candidatas, key=lambda r: str(r.get("id", "")))
+
+
+def _simular_insercion(ruta: dict, parada: dict, tipo: str) -> dict:
+    """Copia profunda de `ruta` con `parada` insertada y peso recalculado —
+    para evaluar el efecto de un movimiento sin mutar la ruta real todavía."""
+    ruta_sim = copy.deepcopy(ruta)
+    _insertar_en_ruta(ruta_sim, parada, tipo)
+    _recalcular_peso_ruta(ruta_sim)
+    return ruta_sim
+
+
+def _sin_fuera_de_horario(ruta: dict, cfg_tiempo: dict, consultar_osrm_fn) -> bool:
+    combinado = _paradas_ordenadas(ruta)
+    if not combinado:
+        return True
+    evals = evaluar_ruta_completa(combinado, ruta.get("dia", ""), cfg_tiempo, consultar_osrm_fn)
+    return all(e["entregable_por_tiempo"] for e in evals)
+
+
+def _mejor_candidata(candidatas: list, parada: dict, tipo: str, peso_extra: float,
+                     cfg_tiempo: dict, consultar_osrm_fn, umbral_pct: float) -> "dict | None":
+    """Primera candidata (orden estable) que, tras insertar la parada, queda
+    ≤ umbral_pct de utilización Y no genera un nuevo FUERA DE HORARIO."""
+    for ruta in candidatas:
+        if not _cabe_por_peso(ruta, peso_extra, umbral_pct):
+            continue
+        ruta_sim = _simular_insercion(ruta, parada, tipo)
+        if _sin_fuera_de_horario(ruta_sim, cfg_tiempo, consultar_osrm_fn):
+            return ruta
+    return None
+
+
+def _menos_mala(candidatas: list, parada: dict, tipo: str,
+                cfg_tiempo: dict, consultar_osrm_fn) -> "dict | None":
+    """Último recurso: entre TODAS las candidatas con afinidad (aunque no
+    cumplan 85 %/tiempo), la que quede con menor % de utilización tras
+    insertar la parada. Nunca sale de `candidatas` (siempre con afinidad)."""
+    mejor, mejor_pct = None, float("inf")
+    for ruta in candidatas:
+        ruta_sim = _simular_insercion(ruta, parada, tipo)
+        if ruta_sim["pct_utilizacion"] < mejor_pct:
+            mejor, mejor_pct = ruta, ruta_sim["pct_utilizacion"]
+    return mejor
