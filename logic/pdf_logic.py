@@ -731,6 +731,16 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     # (previsualización en memoria; la regla dura del proyecto prohíbe
     # persistir ahí). Degradación segura: ante cualquier error, las rutas
     # quedan como Fase A las entregó (sin reubicar).
+    #
+    # Nota (encontrada en la revisión de calidad del Task 7): tras mover una
+    # parada, esta pasada NO recalcula hora_salida/hora_regreso/distancia_km/
+    # conduccion_min/total_min de las rutas tocadas (solo peso/%utilización y
+    # las paradas en sí) — mismo comportamiento ya aceptado en
+    # agregar_sucursal_a_asignacion/quitar_sucursal_de_asignacion de
+    # modificacion_logic.py, que tampoco recalculan esos campos. La lista de
+    # paradas que ve el conductor SÍ queda correcta (es lo que importa para
+    # la entrega); las estimaciones de hora de salida/regreso pueden quedar
+    # desactualizadas hasta el siguiente guardado completo de Modificación.
     if cfg_tiempo and not rutas_inyectadas:
         try:
             afinidad = afinidad_historica_por_sucursal()
@@ -742,7 +752,10 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
                                            or datetime.now().isoformat(),
                     "rutas_confirmadas": rutas,
                 }
-                guardar_modificacion(payload, logistica_id)
+                resultado_guardado = guardar_modificacion(payload, logistica_id)
+                if resultado_guardado.get("status") != "ok":
+                    print(f"[generar_pdf] guardar_modificacion falló tras reubicar "
+                          f"fuera de horario: {resultado_guardado.get('mensaje')}")
         except Exception as e:  # noqa: BLE001
             print(f"[generar_pdf] reubicación fuera de horario omitida por error: {e}")
 
