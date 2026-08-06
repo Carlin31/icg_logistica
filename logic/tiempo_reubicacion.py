@@ -17,6 +17,7 @@ respaldo — mismo criterio que ya usa Fase A. La persistencia (guardar en
 import math
 
 from logic.logistica_tiempo import evaluar_llegadas, evaluar_ruta_por_tiempo, hhmm_a_min
+from logic.mayoristas_logic import _insertar_pos_proxima
 
 UMBRAL_PCT_DESTINO = 85.0
 # Salvaguarda anti-bucle: tope de movimientos por ruta origen en una sola
@@ -101,3 +102,62 @@ def _cabe_por_peso(ruta: dict, peso_extra: float, umbral_pct: float) -> bool:
     utilización resultante no supera `umbral_pct`."""
     peso_total = float(ruta.get("peso_kg", 0)) + float(peso_extra)
     return _pct_utilizacion(peso_total, ruta.get("capacidad_ton")) <= umbral_pct
+
+
+def _paradas_ordenadas(ruta: dict) -> list:
+    """Sucursales + mayoristas de `ruta`, cada uno con `_tipo`, ordenados por
+    `orden` (mismo criterio que pdf_logic._tabla_vehiculo)."""
+    sucs = [dict(p, _tipo="sucursal")  for p in ruta.get("sucursales", [])]
+    mays = [dict(p, _tipo="mayorista") for p in ruta.get("mayoristas",  [])]
+    return sorted(sucs + mays, key=lambda p: p.get("orden") if p.get("orden") is not None else 9999)
+
+
+def _reindexar(ruta: dict, combinado: list) -> None:
+    """Reescribe ruta['sucursales']/['mayoristas'] a partir de `combinado`
+    (lista con '_tipo'), renumerando 'orden' 1..N en el orden dado."""
+    sucursales, mayoristas = [], []
+    for i, p in enumerate(combinado, start=1):
+        q = dict(p)
+        q["orden"] = i
+        tipo = q.pop("_tipo", "sucursal")
+        (mayoristas if tipo == "mayorista" else sucursales).append(q)
+    ruta["sucursales"] = sucursales
+    ruta["mayoristas"] = mayoristas
+
+
+def _insertar_en_ruta(ruta: dict, parada: dict, tipo: str) -> None:
+    """Inserta `parada` en `ruta`, en la posición geográficamente más
+    cercana a sus vecinos actuales (mismo criterio que ya usa el proyecto
+    para insertar mayoristas por proximidad)."""
+    combinado = _paradas_ordenadas(ruta)
+    idx = _insertar_pos_proxima(combinado, parada)
+    nueva = dict(parada)
+    nueva["_tipo"] = tipo
+    combinado.insert(idx, nueva)
+    _reindexar(ruta, combinado)
+
+
+def _misma_parada(p: dict, parada: dict, tipo: str) -> bool:
+    if p.get("_tipo") != tipo:
+        return False
+    if tipo == "mayorista":
+        return ((p.get("id_cliente"), p.get("documento"))
+                == (parada.get("id_cliente"), parada.get("documento")))
+    return p.get("num_tienda") == parada.get("num_tienda")
+
+
+def _quitar_de_ruta(ruta: dict, parada: dict, tipo: str) -> None:
+    """Elimina `parada` de `ruta` (por num_tienda si es sucursal, por
+    id_cliente/documento si es mayorista) y renumera el orden restante."""
+    combinado = [p for p in _paradas_ordenadas(ruta) if not _misma_parada(p, parada, tipo)]
+    _reindexar(ruta, combinado)
+
+
+def _recalcular_peso_ruta(ruta: dict) -> None:
+    """Recalcula peso_kg y pct_utilizacion de `ruta` desde sus paradas
+    actuales — misma fórmula que agregar/quitar_sucursal_a_asignacion en
+    modificacion_logic.py."""
+    peso = sum(float(p.get("peso_kg") or 0) for p in ruta.get("sucursales", []))
+    peso += sum(float(p.get("peso_kg") or 0) for p in ruta.get("mayoristas", []))
+    ruta["peso_kg"] = peso
+    ruta["pct_utilizacion"] = _pct_utilizacion(peso, ruta.get("capacidad_ton"))

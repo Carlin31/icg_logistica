@@ -85,3 +85,55 @@ def test_cabe_por_peso_respeta_umbral():
     ruta = {"peso_kg": 2000, "capacidad_ton": 2.5}  # 80% ya usado
     assert _cabe_por_peso(ruta, 100, 85.0) is True    # 2100/2500=84% <= 85%
     assert _cabe_por_peso(ruta, 200, 85.0) is False   # 2200/2500=88% > 85%
+
+
+from logic.tiempo_reubicacion import (
+    _paradas_ordenadas, _insertar_en_ruta, _quitar_de_ruta, _recalcular_peso_ruta,
+)
+
+
+def _ruta_ejemplo():
+    return {
+        "id": "R1", "dia": "martes", "vehiculo_abrev": "F 350_1",
+        "capacidad_ton": 3.5, "peso_kg": 1000, "pct_utilizacion": 28.6,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "A", "orden": 1, "peso_kg": 500,
+             "latitud": 18.90, "longitud": -96.95},
+            {"num_tienda": 2, "nombre": "B", "orden": 2, "peso_kg": 500,
+             "latitud": 18.91, "longitud": -96.95},
+        ],
+        "mayoristas": [],
+    }
+
+
+def test_paradas_ordenadas_combina_e_intercala_por_orden():
+    ruta = _ruta_ejemplo()
+    ruta["mayoristas"] = [{"id_cliente": 9, "documento": "BB1", "orden": 3,
+                            "peso_kg": 50, "latitud": 18.92, "longitud": -96.95}]
+    combinado = _paradas_ordenadas(ruta)
+    assert [p.get("_tipo") for p in combinado] == ["sucursal", "sucursal", "mayorista"]
+
+
+def test_insertar_en_ruta_posicion_geografica_y_reindexa():
+    ruta = _ruta_ejemplo()
+    nueva_sucursal = {"num_tienda": 3, "nombre": "C", "peso_kg": 300,
+                       "latitud": 18.902, "longitud": -96.95}  # mas cerca de A(1) que de B(2), sin ambiguedad de float
+    _insertar_en_ruta(ruta, nueva_sucursal, "sucursal")
+    ordenes = [(s["num_tienda"], s["orden"]) for s in ruta["sucursales"]]
+    assert ordenes == [(1, 1), (3, 2), (2, 3)]
+
+
+def test_quitar_de_ruta_reindexa_lo_restante():
+    ruta = _ruta_ejemplo()
+    _quitar_de_ruta(ruta, {"num_tienda": 1}, "sucursal")
+    assert [s["num_tienda"] for s in ruta["sucursales"]] == [2]
+    assert ruta["sucursales"][0]["orden"] == 1
+
+
+def test_recalcular_peso_ruta_suma_sucursales_y_mayoristas():
+    ruta = _ruta_ejemplo()
+    ruta["mayoristas"] = [{"id_cliente": 9, "documento": "BB1", "orden": 3,
+                            "peso_kg": 50, "latitud": 18.92, "longitud": -96.95}]
+    _recalcular_peso_ruta(ruta)
+    assert ruta["peso_kg"] == 1050.0
+    assert ruta["pct_utilizacion"] == _pct_utilizacion(1050.0, 3.5)
