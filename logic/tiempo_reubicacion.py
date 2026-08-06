@@ -17,7 +17,6 @@ respaldo — mismo criterio que ya usa Fase A. La persistencia (guardar en
 import math
 
 from logic.logistica_tiempo import evaluar_llegadas, evaluar_ruta_por_tiempo, hhmm_a_min
-from logic.mayoristas_logic import _insertar_pos_proxima
 
 UMBRAL_PCT_DESTINO = 85.0
 # Salvaguarda anti-bucle: tope de movimientos por ruta origen en una sola
