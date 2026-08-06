@@ -52,3 +52,16 @@ def test_evaluar_ruta_completa_detecta_fuera_de_horario():
     ]
     out = evaluar_ruta_completa(paradas, "martes", cfg, None)
     assert out[1]["entregable_por_tiempo"] is False
+
+
+import logic.historico_logic as historico_logic
+
+
+def test_afinidad_historica_por_sucursal_compone_helpers(monkeypatch):
+    historiales_falsos = [{"filas": [
+        {"id_sucursal": 42, "vehiculo": "F 350_1", "dia_semana": "martes", "secuencia_visita": 1},
+        {"id_sucursal": 42, "vehiculo": "F 350_1", "dia_semana": "martes", "secuencia_visita": 3},
+    ]}]
+    monkeypatch.setattr(historico_logic, "_historiales_crudos_sucursales", lambda: historiales_falsos)
+    out = historico_logic.afinidad_historica_por_sucursal()
+    assert out[42][("F 350_1", "MARTES")] == 2  # mediana de 1 y 3

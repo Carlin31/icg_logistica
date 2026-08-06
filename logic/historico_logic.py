@@ -394,6 +394,19 @@ def _extraer_secuencias_historicas(historiales: list) -> dict:
     return result
 
 
+def afinidad_historica_por_sucursal() -> dict:
+    """
+    {num_tienda: {(vehiculo, DIA): secuencia_mediana}} — con qué vehículo/día
+    viajó cada sucursal en las 9 semanas canónicas confirmadas de
+    `rutas_historicas`. Wrapper público de dos funciones ya usadas por
+    `generar_rutas_vrp_afinidad`, para que Fase B
+    (`logic/tiempo_reubicacion.py`, fuera de este módulo) consulte la
+    afinidad histórica real sin duplicar la lectura ni tocar las funciones
+    privadas existentes.
+    """
+    return _extraer_secuencias_historicas(_historiales_crudos_sucursales())
+
+
 # Umbrales para decidir si una ruta histórica "se parece lo suficiente" al
 # pedido actual como para copiarse tal cual, en vez de pasar por el algoritmo
 # de afinidad. Ambos deben cumplirse (cobertura Y similitud de peso).
