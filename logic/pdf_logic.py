@@ -27,9 +27,8 @@ from db import get_db, get_table
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
 from logic.modificacion_logic import obtener_modificacion_previa
 from logic.groq_logic import generar_nombre_poblacion
-from logic.logistica_tiempo import (
-    TIEMPO_ENTREGA_ESTRICTO, evaluar_ruta_por_tiempo, evaluar_llegadas, hhmm_a_min,
-)
+from logic.logistica_tiempo import TIEMPO_ENTREGA_ESTRICTO
+from logic.tiempo_reubicacion import evaluar_ruta_completa
 from logic.asignacion_logic import consultar_osrm
 
 # ── Directorio temporal para el PDF generado ─────────────────
@@ -351,35 +350,9 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
         # Fase A — tiempo de entrega: sobre las paradas ordenadas (antes de
         # agrupar), marcar las que no se alcanzan a entregar antes del cierre.
+        # (Fase B, en generar_pdf, ya intentó reubicar las que no cabían.)
         if cfg_tiempo and cfg_tiempo.get("activo"):
-            dcfg  = cfg_tiempo.get("dias", {}).get(dia, {})
-            h_sal = hhmm_a_min(dcfg.get("hora_salida"), 420)
-            h_lim = hhmm_a_min(dcfg.get("hora_limite"), 1080)
-            depot = cfg_tiempo.get("depot")
-            paradas_t = [{
-                "latitud": p.get("latitud"), "longitud": p.get("longitud"),
-                "peso_kg": p.get("peso_kg", 0),
-                "es_mayorista": p["_tipo"] == "mayorista",
-            } for p in paradas]
-            # Traslado real por OSRM (cacheado): matriz→p1→…→pn→matriz. Una parada
-            # sin coords repite el punto previo (tramo 0). Si OSRM falla, haversine.
-            tramos = None
-            try:
-                pts, prev = [depot], depot
-                for p in paradas:
-                    la, lo = p.get("latitud"), p.get("longitud")
-                    if la is not None and lo is not None:
-                        prev = (float(la), float(lo))
-                    pts.append(prev)
-                pts.append(depot)
-                r = consultar_osrm(pts)
-                if "error" not in r and r.get("tramos_min"):
-                    tramos = r["tramos_min"]
-            except Exception:
-                tramos = None
-            evals = (evaluar_llegadas(paradas_t, tramos, h_sal, h_lim) if tramos
-                     else evaluar_ruta_por_tiempo(paradas_t, depot, h_sal, h_lim,
-                                                  cfg_tiempo.get("velocidad", 35.0)))
+            evals = evaluar_ruta_completa(paradas, dia, cfg_tiempo, consultar_osrm)
             for p, e in zip(paradas, evals):
                 p["_entregable"] = e["entregable_por_tiempo"]
 
