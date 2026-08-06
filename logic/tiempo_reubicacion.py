@@ -26,6 +26,15 @@ UMBRAL_PCT_DESTINO = 85.0
 # FUERA DE HORARIO).
 MAX_MOVIMIENTOS_POR_RUTA = 20
 
+# Interruptor dedicado de Fase B (reubicación + persistencia). Independiente
+# de TIEMPO_ENTREGA_ESTRICTO (Fase A, en logistica_tiempo.py — solo marca,
+# no mueve ni persiste): apagar este interruptor deja el marcado de Fase A
+# intacto pero desactiva la reubicación de Fase B, sin tocar Fase A. Mismo
+# patrón que REBALANCEO_GEOGRAFICO/MAYORISTAS_GEOGRAFICO/CONVRP_ACTIVO en
+# este proyecto — Fase B es la primera de estas fases que escribe en BD,
+# por eso necesita su propio apagador.
+TIEMPO_REUBICACION_ACTIVA = True
+
 
 def _haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     r = 6371.0
@@ -278,7 +287,7 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
            misma forma que arma pdf_logic.generar_pdf().
     afinidad: historico_logic.afinidad_historica_por_sucursal().
     """
-    if not (cfg_tiempo and cfg_tiempo.get("activo")):
+    if not (TIEMPO_REUBICACION_ACTIVA and cfg_tiempo and cfg_tiempo.get("activo")):
         return False
 
     cambio = False

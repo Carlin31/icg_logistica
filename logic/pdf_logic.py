@@ -743,6 +743,10 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     # desactualizadas hasta el siguiente guardado completo de Modificación.
     if cfg_tiempo and not rutas_inyectadas:
         try:
+            # Sin caché: relee y reprocesa las 9 semanas del corpus histórico
+            # en cada generación de PDF. Aceptado por ahora (misma decisión
+            # que la falta de recálculo de hora_salida/hora_regreso arriba);
+            # revisar si la frecuencia de generación de PDF crece.
             afinidad = afinidad_historica_por_sucursal()
             movio_algo = resolver_fuera_de_horario(rutas, cfg_tiempo, afinidad,
                                                     consultar_osrm_fn=consultar_osrm)

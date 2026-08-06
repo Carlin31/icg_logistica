@@ -390,3 +390,40 @@ def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta():
     assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
     assert [s["num_tienda"] for s in dest1["sucursales"]] == [42]
     assert [s["num_tienda"] for s in dest2["sucursales"]] == [43]
+
+
+def test_resolver_fuera_de_horario_es_idempotente():
+    # Mismo fixture que test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo:
+    # correr la resolución dos veces sobre el mismo resultado no debe volver
+    # a mover nada la segunda vez.
+    afinidad = {42: {("DEST", "MARTES"): 1}}
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    destino = {
+        "id": "DEST", "dia": "martes", "vehiculo_abrev": "DEST",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+    rutas = [origen, destino]
+
+    primera = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad, consultar_osrm_fn=None)
+    segunda = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad, consultar_osrm_fn=None)
+
+    assert primera is True
+    assert segunda is False
+
+
+def test_resolver_fuera_de_horario_flag_dedicado_apagado_no_hace_nada(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", False)
+    ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
+    assert resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), {}) is False
