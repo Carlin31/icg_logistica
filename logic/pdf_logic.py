@@ -25,10 +25,11 @@ from reportlab.platypus import (
 
 from db import get_db, get_table
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
-from logic.modificacion_logic import obtener_modificacion_previa
+from logic.modificacion_logic import obtener_modificacion_previa, guardar_modificacion
+from logic.historico_logic import afinidad_historica_por_sucursal
 from logic.groq_logic import generar_nombre_poblacion
 from logic.logistica_tiempo import TIEMPO_ENTREGA_ESTRICTO
-from logic.tiempo_reubicacion import evaluar_ruta_completa
+from logic.tiempo_reubicacion import evaluar_ruta_completa, resolver_fuera_de_horario, _recalcular_peso_ruta
 from logic.asignacion_logic import consultar_osrm
 
 # ── Directorio temporal para el PDF generado ─────────────────
@@ -639,11 +640,15 @@ def _pesos_mayoristas(db, oid: str) -> dict:
     return resultado
 
 
-def generar_pdf(datos_sesion: dict) -> str:
+def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     """
     Genera el reporte PDF de pesos.
 
     Fuente de datos (en orden de preferencia):
+      0. `rutas_inyectadas` — rutas ya construidas EN MEMORIA. Sirve para
+         previsualizar la salida de un motor (p. ej. el ConVRP) SIN persistir
+         nada: la regla dura del proyecto prohíbe correr el motor con el flag
+         encendido contra registros de producción, y este camino la respeta.
       1. `modificaciones_rutas` (+ tablas normalizadas) — datos confirmados
          tras la etapa de Modificación.
       2. `asignaciones` (+ tablas normalizadas) — fallback si Modificación
@@ -661,9 +666,14 @@ def generar_pdf(datos_sesion: dict) -> str:
 
     db  = get_db()
 
+    # ── 0. Rutas inyectadas (previsualización sin persistir) ──────
+    rutas: list = list(rutas_inyectadas) if rutas_inyectadas else []
+    mod_doc: "dict | None" = None
+
     # ── 1. Intentar leer desde modificaciones_rutas ───────────────
-    mod_doc = obtener_modificacion_previa(oid)
-    rutas: list = mod_doc.get("rutas_confirmadas", []) if mod_doc else []
+    if not rutas:
+        mod_doc = obtener_modificacion_previa(oid)
+        rutas = mod_doc.get("rutas_confirmadas", []) if mod_doc else []
 
     # ── 2. Fallback a asignaciones si no hay modificaciones ───────
     if not rutas:
@@ -688,6 +698,53 @@ def generar_pdf(datos_sesion: dict) -> str:
                     m["peso_kg"] = pesos_may.get(doc, 0.0)
 
     _filtrar_mayoristas_con_pedidos(rutas)
+
+    # Recalcular peso_kg/pct_utilizacion a nivel de ruta: el paso anterior
+    # (enriquecer peso_kg de mayoristas) los deja desactualizados, y Fase B
+    # necesita el peso real de cada ruta para su chequeo de cupo (85 %).
+    for _r in rutas:
+        _recalcular_peso_ruta(_r)
+
+    # Fase A — config de tiempo de entrega (para marcar y, desde Fase B,
+    # reubicar paradas fuera de horario). Degradación segura: ante
+    # cualquier error, no se marca ni reubica nada.
+    cfg_tiempo = None
+    if TIEMPO_ENTREGA_ESTRICTO:
+        try:
+            cfg_row = db.execute(select(get_table("configuracion"))).mappings().first() or {}
+            depot = (float(cfg_row.get("matriz_lat") or 18.87329315661368),
+                     float(cfg_row.get("matriz_lon") or -96.9491574270346))
+            cd = cfg_row.get("config_dias")
+            cd = json.loads(cd) if isinstance(cd, str) else (cd or {})
+            cfg_tiempo = {
+                "activo":    True,
+                "depot":     depot,
+                "velocidad": float(cfg_row.get("velocidad_kmh") or 35.0),
+                "dias":      cd,
+            }
+        except Exception as e:  # noqa: BLE001
+            print(f"[generar_pdf] tiempo de entrega desactivado por error: {e}")
+            cfg_tiempo = None
+
+    # Fase B — reubicar paradas FUERA DE HORARIO hacia otra ruta con
+    # afinidad histórica, cupo y tiempo. No aplica sobre rutas_inyectadas
+    # (previsualización en memoria; la regla dura del proyecto prohíbe
+    # persistir ahí). Degradación segura: ante cualquier error, las rutas
+    # quedan como Fase A las entregó (sin reubicar).
+    if cfg_tiempo and not rutas_inyectadas:
+        try:
+            afinidad = afinidad_historica_por_sucursal()
+            movio_algo = resolver_fuera_de_horario(rutas, cfg_tiempo, afinidad,
+                                                    consultar_osrm_fn=consultar_osrm)
+            if movio_algo:
+                payload = {
+                    "fecha_modificacion": (mod_doc.get("fecha_modificacion") if mod_doc else None)
+                                           or datetime.now().isoformat(),
+                    "rutas_confirmadas": rutas,
+                }
+                guardar_modificacion(payload, logistica_id)
+        except Exception as e:  # noqa: BLE001
+            print(f"[generar_pdf] reubicación fuera de horario omitida por error: {e}")
 
     vol_map = _volumenes_suc(db, oid)
 
@@ -746,26 +803,6 @@ def generar_pdf(datos_sesion: dict) -> str:
                 }
     except Exception as e:
         print(f"[generar_pdf] Error al leer choferes: {e}")
-
-    # Fase A — config de tiempo de entrega (para marcar paradas fuera de horario).
-    # Degradación segura: ante cualquier error, no se marca nada.
-    cfg_tiempo = None
-    if TIEMPO_ENTREGA_ESTRICTO:
-        try:
-            cfg_row = db.execute(select(get_table("configuracion"))).mappings().first() or {}
-            depot = (float(cfg_row.get("matriz_lat") or 18.87329315661368),
-                     float(cfg_row.get("matriz_lon") or -96.9491574270346))
-            cd = cfg_row.get("config_dias")
-            cd = json.loads(cd) if isinstance(cd, str) else (cd or {})
-            cfg_tiempo = {
-                "activo":    True,
-                "depot":     depot,
-                "velocidad": float(cfg_row.get("velocidad_kmh") or 35.0),
-                "dias":      cd,
-            }
-        except Exception as e:  # noqa: BLE001
-            print(f"[generar_pdf] tiempo de entrega desactivado por error: {e}")
-            cfg_tiempo = None
 
     # Agrupar por (vehículo, chofer efectivo): una ruta con chofer
     # personalizado (cambiado solo para ese día/ruta en Modificación) recibe
