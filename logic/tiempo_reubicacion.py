@@ -260,3 +260,68 @@ def _menos_mala(candidatas: list, parada: dict, tipo: str,
         if ruta_sim["pct_utilizacion"] < mejor_pct:
             mejor, mejor_pct = ruta, ruta_sim["pct_utilizacion"]
     return mejor
+
+
+def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
+                              umbral_pct: float = UMBRAL_PCT_DESTINO,
+                              consultar_osrm_fn=None) -> bool:
+    """
+    Reubica, mutando `rutas` in-place, toda parada FUERA DE HORARIO hacia
+    otra ruta con afinidad histórica real, cupo (<=umbral_pct) y tiempo.
+    Procesa las paradas de cada ruta en orden de secuencia, re-evaluando la
+    ruta origen tras cada movimiento (quitar una parada solo puede adelantar
+    la llegada de las que quedan). Sin destino con afinidad -> se queda
+    marcada, igual que en Fase A. Devuelve True si movió algo.
+
+    rutas: [{id, dia, vehiculo_abrev, capacidad_ton, peso_kg,
+             pct_utilizacion, sucursales:[...], mayoristas:[...]}, ...] —
+           misma forma que arma pdf_logic.generar_pdf().
+    afinidad: historico_logic.afinidad_historica_por_sucursal().
+    """
+    if not (cfg_tiempo and cfg_tiempo.get("activo")):
+        return False
+
+    cambio = False
+    for ruta in rutas:
+        for _ in range(MAX_MOVIMIENTOS_POR_RUTA):
+            combinado = _paradas_ordenadas(ruta)
+            if not combinado:
+                break
+            evals = evaluar_ruta_completa(combinado, ruta.get("dia", ""), cfg_tiempo, consultar_osrm_fn)
+            idx_malo = next((i for i, e in enumerate(evals) if not e["entregable_por_tiempo"]), None)
+            if idx_malo is None:
+                break
+
+            parada = combinado[idx_malo]
+            tipo = parada["_tipo"]
+            peso_extra = float(parada.get("peso_kg") or 0)
+            clave = _clave_afinidad_para(parada, tipo, ruta, afinidad)
+
+            candidatas_mismo_dia = _candidatas_con_afinidad(
+                clave, rutas, afinidad, ruta.get("id"), True, ruta.get("dia", ""))
+            destino = _mejor_candidata(candidatas_mismo_dia, parada, tipo, peso_extra,
+                                       cfg_tiempo, consultar_osrm_fn, umbral_pct)
+
+            candidatas_otro_dia = []
+            if destino is None:
+                candidatas_otro_dia = _candidatas_con_afinidad(
+                    clave, rutas, afinidad, ruta.get("id"), False, ruta.get("dia", ""))
+                destino = _mejor_candidata(candidatas_otro_dia, parada, tipo, peso_extra,
+                                           cfg_tiempo, consultar_osrm_fn, umbral_pct)
+
+            if destino is None:
+                destino = _menos_mala(candidatas_mismo_dia + candidatas_otro_dia, parada, tipo,
+                                      cfg_tiempo, consultar_osrm_fn)
+
+            if destino is None:
+                # Sin afinidad histórica (sucursal nueva, o mayorista sin
+                # ancla): se queda FUERA DE HORARIO, igual que Fase A.
+                break
+
+            _quitar_de_ruta(ruta, parada, tipo)
+            _recalcular_peso_ruta(ruta)
+            _insertar_en_ruta(destino, parada, tipo)
+            _recalcular_peso_ruta(destino)
+            cambio = True
+
+    return cambio

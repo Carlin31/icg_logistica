@@ -231,3 +231,75 @@ def test_menos_mala_elige_menor_pct_resultante():
 
 def test_menos_mala_none_si_no_hay_candidatas():
     assert _menos_mala([], {}, "sucursal", CFG_AMPLIO, None) is None
+
+
+from logic.tiempo_reubicacion import resolver_fuera_de_horario
+
+
+def _cfg_cierre_08_30():
+    # Salida 07:00 (420 min), cierre 08:30 (510 min): 90 min de presupuesto.
+    # Con estas coordenadas y 60 km/h, alcanza para llegar a (0.5,0.5)
+    # DIRECTO desde el depot (~78.6 km, ~78.6 min => llega a 498.6, cabe),
+    # pero NO alcanza si antes hay que pasar por (0.05,0.05) + su descarga
+    # (42 min): la llegada a (0.5,0.5) cae en ~540.6 min, fuera de horario.
+    return {
+        "activo": True, "depot": (0.0, 0.0), "velocidad": 60.0,
+        "dias": {
+            "martes": {"hora_salida": "07:00", "hora_limite": "08:30"},
+            "jueves": {"hora_salida": "07:00", "hora_limite": "08:30"},
+        },
+    }
+
+
+def test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo():
+    # 42 está lejos del depot. La ruta ORIGEN visita antes una sucursal
+    # cercana (con su descarga) y llega tarde a 42. La ruta DESTINO (vacía,
+    # mismo día, con afinidad histórica para 42) llega a tiempo yendo directo.
+    afinidad = {42: {("DEST", "MARTES"): 1}}
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    destino = {
+        "id": "DEST", "dia": "martes", "vehiculo_abrev": "DEST",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
+                                      consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
+    assert 42 in [s["num_tienda"] for s in destino["sucursales"]]
+    assert destino["peso_kg"] == 100.0
+
+
+def test_resolver_fuera_de_horario_sin_historial_no_mueve_nada():
+    ruta = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 999, "nombre": "Sin historial", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    movio = resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), {}, consultar_osrm_fn=None)
+    assert movio is False
+    assert [s["num_tienda"] for s in ruta["sucursales"]] == [1, 999]
+
+
+def test_resolver_fuera_de_horario_interruptor_apagado_no_hace_nada():
+    ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
+    assert resolver_fuera_de_horario([ruta], {"activo": False}, {}) is False
