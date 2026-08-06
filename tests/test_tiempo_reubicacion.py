@@ -303,3 +303,90 @@ def test_resolver_fuera_de_horario_sin_historial_no_mueve_nada():
 def test_resolver_fuera_de_horario_interruptor_apagado_no_hace_nada():
     ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
     assert resolver_fuera_de_horario([ruta], {"activo": False}, {}) is False
+
+
+def test_resolver_fuera_de_horario_mismo_dia_falla_cae_a_otro_dia():
+    # SAMEDIA (mismo dia que ORIGEN) tiene afinidad para 42 pero ya esta casi
+    # llena (3400/3500=97%): tras sumar los 100kg de 42 quedaria en 100%,
+    # por lo que _mejor_candidata la descarta por peso sin llegar a evaluar
+    # tiempo. OTRODIA (jueves) tiene afinidad para 42, esta vacia, y llega a
+    # tiempo yendo directo desde el depot (mismo calculo que el test anterior:
+    # depot->(0.5,0.5) = 78.63 min, llegada 498.63 <= 510).
+    afinidad = {42: {("SAMEDIA", "MARTES"): 1, ("OTRODIA", "JUEVES"): 1}}
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    samedia = {
+        "id": "SAMEDIA", "dia": "martes", "vehiculo_abrev": "SAMEDIA",
+        "capacidad_ton": 3.5, "peso_kg": 3400, "pct_utilizacion": 97.1,
+        "sucursales": [
+            {"num_tienda": 50, "nombre": "Llena", "orden": 1, "peso_kg": 3400,
+             "latitud": 0.05, "longitud": 0.05},
+        ],
+        "mayoristas": [],
+    }
+    otrodia = {
+        "id": "OTRODIA", "dia": "jueves", "vehiculo_abrev": "OTRODIA",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+    rutas = [origen, samedia, otrodia]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
+                                      consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
+    assert [s["num_tienda"] for s in samedia["sucursales"]] == [50]  # sin tocar, descartada por cupo
+    assert 42 in [s["num_tienda"] for s in otrodia["sucursales"]]
+
+
+def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta():
+    # ORIGEN tiene DOS paradas fuera de horario (42 y 43). Cada una tiene
+    # afinidad con una ruta destino distinta, vacia, del mismo dia. Deben
+    # resolverse una por una (re-evaluando ORIGEN tras cada movimiento), sin
+    # detenerse en la primera.
+    afinidad = {
+        42: {("DEST1", "MARTES"): 1},
+        43: {("DEST2", "MARTES"): 1},
+    }
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana1", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+            {"num_tienda": 43, "nombre": "Lejana2", "orden": 3, "peso_kg": 100,
+             "latitud": 0.45, "longitud": 0.45},
+        ],
+        "mayoristas": [],
+    }
+    dest1 = {
+        "id": "DEST1", "dia": "martes", "vehiculo_abrev": "DEST1",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+    dest2 = {
+        "id": "DEST2", "dia": "martes", "vehiculo_abrev": "DEST2",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+    rutas = [origen, dest1, dest2]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
+                                      consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
+    assert [s["num_tienda"] for s in dest1["sucursales"]] == [42]
+    assert [s["num_tienda"] for s in dest2["sucursales"]] == [43]

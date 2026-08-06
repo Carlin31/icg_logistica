@@ -323,5 +323,8 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
             _insertar_en_ruta(destino, parada, tipo)
             _recalcular_peso_ruta(destino)
             cambio = True
+        else:
+            print(f"[tiempo_reubicacion] ruta {ruta.get('id')} alcanzó el tope de "
+                  f"{MAX_MOVIMIENTOS_POR_RUTA} movimientos")
 
     return cambio
