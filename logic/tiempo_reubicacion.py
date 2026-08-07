@@ -266,11 +266,14 @@ def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehicu
     return candidatas
 
 
-def _simular_insercion(ruta: dict, parada: dict, tipo: str) -> dict:
-    """Copia profunda de `ruta` con `parada` insertada y peso recalculado —
-    para evaluar el efecto de un movimiento sin mutar la ruta real todavía."""
+def _simular_insercion_conjunto(ruta: dict, conjunto: list, tipo: str) -> dict:
+    """Copia profunda de `ruta` con TODAS las paradas de `conjunto` insertadas
+    y el peso recalculado — para evaluar el efecto de mover un grupo
+    completo (o una sola parada, si `conjunto` tiene un elemento) sin mutar
+    la ruta real todavía."""
     ruta_sim = copy.deepcopy(ruta)
-    _insertar_en_ruta(ruta_sim, parada, tipo)
+    for parada in conjunto:
+        _insertar_en_ruta(ruta_sim, parada, tipo)
     _recalcular_peso_ruta(ruta_sim)
     return ruta_sim
 
@@ -283,27 +286,29 @@ def _sin_fuera_de_horario(ruta: dict, cfg_tiempo: dict, consultar_osrm_fn) -> bo
     return all(e["entregable_por_tiempo"] for e in evals)
 
 
-def _mejor_candidata(candidatas: list, parada: dict, tipo: str, peso_extra: float,
-                     cfg_tiempo: dict, consultar_osrm_fn, umbral_pct: float) -> "dict | None":
-    """Primera candidata (orden estable) que, tras insertar la parada, queda
-    ≤ umbral_pct de utilización Y no genera un nuevo FUERA DE HORARIO."""
+def _mejor_candidata_grupo(candidatas: list, conjunto: list, tipo: str, peso_extra: float,
+                           cfg_tiempo: dict, consultar_osrm_fn, umbral_pct: float) -> "dict | None":
+    """Primera candidata (ya ordenada por `_rutas_candidatas_por_grupo`) que,
+    tras insertar TODO `conjunto`, queda ≤ umbral_pct de utilización Y no
+    genera un nuevo FUERA DE HORARIO."""
     for ruta in candidatas:
         if not _cabe_por_peso(ruta, peso_extra, umbral_pct):
             continue
-        ruta_sim = _simular_insercion(ruta, parada, tipo)
+        ruta_sim = _simular_insercion_conjunto(ruta, conjunto, tipo)
         if _sin_fuera_de_horario(ruta_sim, cfg_tiempo, consultar_osrm_fn):
             return ruta
     return None
 
 
-def _menos_mala(candidatas: list, parada: dict, tipo: str,
-                cfg_tiempo: dict, consultar_osrm_fn) -> "dict | None":
-    """Último recurso: entre TODAS las candidatas con afinidad (aunque no
-    cumplan 85 %/tiempo), la que quede con menor % de utilización tras
-    insertar la parada. Nunca sale de `candidatas` (siempre con afinidad)."""
+def _menos_mala_grupo(candidatas: list, conjunto: list, tipo: str,
+                      cfg_tiempo: dict, consultar_osrm_fn) -> "dict | None":
+    """Último recurso: entre las candidatas ya restringidas a
+    `unidades_afines` del grupo (nunca una ruta sin relación histórica real
+    con el grupo), la que quede con menor % de utilización tras insertar
+    `conjunto` completo."""
     mejor, mejor_pct = None, float("inf")
     for ruta in candidatas:
-        ruta_sim = _simular_insercion(ruta, parada, tipo)
+        ruta_sim = _simular_insercion_conjunto(ruta, conjunto, tipo)
         if ruta_sim["pct_utilizacion"] < mejor_pct:
             mejor, mejor_pct = ruta, ruta_sim["pct_utilizacion"]
     return mejor

@@ -222,12 +222,12 @@ def test_rutas_candidatas_por_grupo_sin_ruta_real_para_ese_vehiculo_dia():
     assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23") == []
 
 
+from logic.tiempo_reubicacion import _mejor_candidata_grupo, _menos_mala_grupo
+
+
 # El peso de "Vecina" debe IGUALAR peso_kg (no un valor fijo aparte):
-# _menos_mala compara vía _simular_insercion -> _recalcular_peso_ruta,
-# que sobreescribe peso_kg sumando las paradas reales. Si "Vecina" fuera
-# un peso fijo distinto del peso_kg declarado, la simulacion perderia la
-# diferencia entre rutas y el test de _menos_mala compararia valores
-# identicos sin importar el peso_kg pedido.
+# _menos_mala_grupo compara vía _simular_insercion_conjunto -> _recalcular_peso_ruta,
+# que sobreescribe peso_kg sumando las paradas reales.
 def _ruta_destino(id_, dia="martes", peso_kg=0, capacidad_ton=3.5):
     return {
         "id": id_, "dia": dia, "vehiculo_abrev": "F 350_1",
@@ -241,32 +241,47 @@ def _ruta_destino(id_, dia="martes", peso_kg=0, capacidad_ton=3.5):
     }
 
 
-def test_mejor_candidata_respeta_umbral_y_tiempo():
-    parada = {"num_tienda": 42, "nombre": "Nueva", "peso_kg": 100,
-              "latitud": 18.901, "longitud": -96.951}
+def test_mejor_candidata_grupo_respeta_umbral_y_tiempo():
+    conjunto = [{"num_tienda": 42, "nombre": "Nueva", "peso_kg": 100,
+                 "latitud": 18.901, "longitud": -96.951}]
     llena  = _ruta_destino("LLENA", peso_kg=3300)   # 3400/3500=97% > 85%
     libre  = _ruta_destino("LIBRE", peso_kg=1000)   # 1100/3500=31% <= 85%
-    elegida = _mejor_candidata([llena, libre], parada, "sucursal", 100.0,
-                               CFG_AMPLIO, None, 85.0)
+    elegida = _mejor_candidata_grupo([llena, libre], conjunto, "sucursal", 100.0,
+                                     CFG_AMPLIO, None, 85.0)
     assert elegida["id"] == "LIBRE"
 
 
-def test_mejor_candidata_none_si_ninguna_cumple():
-    parada = {"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}
+def test_mejor_candidata_grupo_none_si_ninguna_cumple():
+    conjunto = [{"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}]
     llena = _ruta_destino("LLENA", peso_kg=3300)
-    assert _mejor_candidata([llena], parada, "sucursal", 100.0, CFG_AMPLIO, None, 85.0) is None
+    assert _mejor_candidata_grupo([llena], conjunto, "sucursal", 100.0, CFG_AMPLIO, None, 85.0) is None
 
 
-def test_menos_mala_elige_menor_pct_resultante():
-    parada = {"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}
+def test_mejor_candidata_grupo_evalua_el_peso_total_del_conjunto():
+    # Dos paradas de 500 kg cada una (grupo rigido): 1000 kg extra.
+    conjunto = [
+        {"num_tienda": 42, "peso_kg": 500, "latitud": 18.901, "longitud": -96.951},
+        {"num_tienda": 43, "peso_kg": 500, "latitud": 18.902, "longitud": -96.952},
+    ]
+    # 1000 + 1000 = 2000/3500 = 57% <= 85% -> cabe.
+    libre = _ruta_destino("LIBRE", peso_kg=1000)
+    elegida = _mejor_candidata_grupo([libre], conjunto, "sucursal", 1000.0, CFG_AMPLIO, None, 85.0)
+    assert elegida["id"] == "LIBRE"
+    # 3000 + 1000 = 4000/3500 = 114% > 85% -> no cabe con las dos.
+    llena = _ruta_destino("LLENA", peso_kg=3000)
+    assert _mejor_candidata_grupo([llena], conjunto, "sucursal", 1000.0, CFG_AMPLIO, None, 85.0) is None
+
+
+def test_menos_mala_grupo_elige_menor_pct_resultante():
+    conjunto = [{"num_tienda": 42, "peso_kg": 100, "latitud": 18.901, "longitud": -96.951}]
     mas_llena  = _ruta_destino("MAS_LLENA", peso_kg=3300)
     menos_llena = _ruta_destino("MENOS_LLENA", peso_kg=3000)
-    elegida = _menos_mala([mas_llena, menos_llena], parada, "sucursal", CFG_AMPLIO, None)
+    elegida = _menos_mala_grupo([mas_llena, menos_llena], conjunto, "sucursal", CFG_AMPLIO, None)
     assert elegida["id"] == "MENOS_LLENA"
 
 
-def test_menos_mala_none_si_no_hay_candidatas():
-    assert _menos_mala([], {}, "sucursal", CFG_AMPLIO, None) is None
+def test_menos_mala_grupo_none_si_no_hay_candidatas():
+    assert _menos_mala_grupo([], [{}], "sucursal", CFG_AMPLIO, None) is None
 
 
 from logic.tiempo_reubicacion import resolver_fuera_de_horario
