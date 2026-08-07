@@ -171,6 +171,15 @@ def _formatear_docs_agrupados(docs: list) -> str:
     if len(docs) == 1:
         return docs[0]
 
+    # Ascendente por prefijo y número: los documentos de un mismo grupo se
+    # entregan todos en la misma parada, así que el orden de ruta no significa
+    # nada aquí y salían salteados ('BB3309/08/06/07/22/12'). El planeador los
+    # escribe ascendentes en su hoja; así se leen igual.
+    def _clave(d):
+        m = re.match(r'^([A-Za-z]*)\D*(\d+)', str(d))
+        return (m.group(1).upper(), int(m.group(2))) if m else (str(d), 0)
+    docs = sorted(docs, key=_clave)
+
     first  = docs[0]
     prefix = re.match(r'^([A-Za-z]+)', first)
     pfx    = prefix.group(1).upper() if prefix else ""
