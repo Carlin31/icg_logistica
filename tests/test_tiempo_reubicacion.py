@@ -178,18 +178,48 @@ def test_grupo_para_mayorista_sin_coords_es_none():
     assert _grupo_para({"id_cliente": 7}, "mayorista", {"sucursales": []}, INDICE_GRUPOS) is None
 
 
-def test_candidatas_con_afinidad_filtra_por_dia_y_afinidad():
-    rutas = [
-        {"id": "R_ORIGEN", "dia": "martes",  "vehiculo_abrev": "F 350_1"},
-        {"id": "R_MISMO_DIA_AFIN", "dia": "martes", "vehiculo_abrev": "F 350_1"},
-        {"id": "R_OTRO_VEH", "dia": "martes", "vehiculo_abrev": "F 350_9"},
-        {"id": "R_OTRO_DIA_AFIN", "dia": "jueves", "vehiculo_abrev": "F350_2"},
-    ]
-    mismo_dia = _candidatas_con_afinidad(42, rutas, AFINIDAD, "R_ORIGEN", True, "martes")
-    assert [r["id"] for r in mismo_dia] == ["R_MISMO_DIA_AFIN"]
+from logic.tiempo_reubicacion import _rutas_candidatas_por_grupo
 
-    otro_dia = _candidatas_con_afinidad(42, rutas, AFINIDAD, "R_ORIGEN", False, "martes")
-    assert [r["id"] for r in otro_dia] == ["R_OTRO_DIA_AFIN"]  # 'F350_2' normaliza igual que 'F 350_2'
+
+def test_rutas_candidatas_por_grupo_ordena_por_frecuencia_descendente():
+    grupo = {"unidades_afines": "T 23:3 | K 16:2 | T 25:1", "dias_admisibles": ["MARTES"]}
+    rutas = [
+        {"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"},
+        {"id": "R_K16", "dia": "martes", "vehiculo_abrev": "K 16"},
+        {"id": "R_T25", "dia": "martes", "vehiculo_abrev": "T 25"},
+        {"id": "R_SIN_AFINIDAD", "dia": "martes", "vehiculo_abrev": "T 99"},
+    ]
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
+    assert [r["id"] for r in candidatas] == ["R_K16", "R_T25"]
+
+
+def test_rutas_candidatas_por_grupo_excluye_el_vehiculo_de_origen():
+    grupo = {"unidades_afines": "T 23:5", "dias_admisibles": ["MARTES", "JUEVES"]}
+    rutas = [
+        {"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"},
+        {"id": "R_T23_JUEVES", "dia": "jueves", "vehiculo_abrev": "T 23"},
+    ]
+    # T 23 es el vehiculo de origen -> se excluye por completo, aunque
+    # tenga otra ruta el jueves.
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
+    assert candidatas == []
+
+
+def test_rutas_candidatas_por_grupo_dia_admisible_en_orden_preferido_primero():
+    grupo = {"unidades_afines": "F 350_1:7", "dias_admisibles": ["MARTES", "JUEVES"]}
+    rutas = [
+        {"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "OTRO"},
+        {"id": "R_F350_1_JUEVES", "dia": "jueves", "vehiculo_abrev": "F 350_1"},
+        {"id": "R_F350_1_MARTES", "dia": "martes", "vehiculo_abrev": "F 350_1"},
+    ]
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "OTRO")
+    assert [r["id"] for r in candidatas] == ["R_F350_1_MARTES", "R_F350_1_JUEVES"]
+
+
+def test_rutas_candidatas_por_grupo_sin_ruta_real_para_ese_vehiculo_dia():
+    grupo = {"unidades_afines": "T 20:1", "dias_admisibles": ["VIERNES"]}
+    rutas = [{"id": "R_ORIGEN", "dia": "lunes", "vehiculo_abrev": "T 23"}]
+    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23") == []
 
 
 # El peso de "Vecina" debe IGUALAR peso_kg (no un valor fijo aparte):

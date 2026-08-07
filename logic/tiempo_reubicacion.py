@@ -232,28 +232,38 @@ def _conjunto_a_mover(grupo: dict, ruta: dict, parada: dict, tipo: str) -> list:
     return conjunto if conjunto else [parada]
 
 
-def _candidatas_con_afinidad(num_tienda, rutas: list, afinidad: dict, ruta_origen_id,
-                             mismo_dia: bool, dia_origen: str) -> list:
-    """Rutas de `rutas` (excluye la de origen) con las que `num_tienda`
-    tiene afinidad histórica real. `mismo_dia=True` sólo día == dia_origen;
-    False sólo días distintos. Orden estable por id (determinismo)."""
-    if num_tienda is None:
-        return []
-    prefs = afinidad.get(int(num_tienda), {})
-    if not prefs:
-        return []
-    vehs_dias = {(_normalizar_veh(v), d) for (v, d) in prefs}
-    candidatas = []
+def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehiculo_origen) -> list:
+    """
+    Rutas reales de `rutas` (existentes esta semana) que son destino válido
+    para `grupo`, en orden de preferencia: vehículo dominante primero
+    (`unidades_afines`, conteo descendente), y dentro de cada vehículo, día
+    admisible en su orden (preferido/canónico primero). Excluye la ruta de
+    origen y **todo** el vehículo de origen (aunque ese vehículo corra otro
+    día) — nunca se le vuelve a asignar al mismo vehículo que ya la tenía
+    fuera de horario. Sin duplicados (un vehículo solo tiene una ruta por
+    día esta semana).
+    """
+    veh_origen_norm = _normalizar_veh(vehiculo_origen)
+    pares_veh = _parsear_unidades_afines(grupo.get("unidades_afines"))
+    dias = grupo.get("dias_admisibles") or (
+        [grupo["dia_preferido"]] if grupo.get("dia_preferido") else [])
+
+    rutas_por_clave = {}
     for r in rutas:
         if r.get("id") == ruta_origen_id:
             continue
-        es_mismo_dia = (r.get("dia", "") == dia_origen)
-        if es_mismo_dia != mismo_dia:
-            continue
         clave = (_normalizar_veh(r.get("vehiculo_abrev")), str(r.get("dia", "")).upper())
-        if clave in vehs_dias:
-            candidatas.append(r)
-    return sorted(candidatas, key=lambda r: str(r.get("id", "")))
+        rutas_por_clave.setdefault(clave, r)
+
+    candidatas = []
+    for veh, _conteo in pares_veh:
+        if veh == veh_origen_norm:
+            continue
+        for dia in dias:
+            r = rutas_por_clave.get((veh, str(dia).upper()))
+            if r is not None and r not in candidatas:
+                candidatas.append(r)
+    return candidatas
 
 
 def _simular_insercion(ruta: dict, parada: dict, tipo: str) -> dict:
