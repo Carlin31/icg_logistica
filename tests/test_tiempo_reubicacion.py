@@ -302,11 +302,24 @@ def _cfg_cierre_08_30():
     }
 
 
-def test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo():
+def _ruta_vacia(id_, dia, vehiculo):
+    return {
+        "id": id_, "dia": dia, "vehiculo_abrev": vehiculo,
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [], "mayoristas": [],
+    }
+
+
+def test_resolver_fuera_de_horario_mueve_a_ruta_con_grupo_y_cupo(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
     # 42 está lejos del depot. La ruta ORIGEN visita antes una sucursal
     # cercana (con su descarga) y llega tarde a 42. La ruta DESTINO (vacía,
-    # mismo día, con afinidad histórica para 42) llega a tiempo yendo directo.
-    afinidad = {42: {("DEST", "MARTES"): 1}}
+    # mismo día, con el vehiculo dominante del grupo de 42) llega a tiempo
+    # yendo directo.
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+               "unidades_afines": "DEST:5", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
     origen = {
         "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
         "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
@@ -314,6 +327,155 @@ def test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo():
             {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
              "latitud": 0.05, "longitud": 0.05},
             {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
+    assert 42 in [s["num_tienda"] for s in destino["sucursales"]]
+    assert destino["peso_kg"] == 100.0
+
+
+def test_resolver_fuera_de_horario_sin_grupo_no_mueve_nada():
+    ruta = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 999, "nombre": "Sin grupo", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    movio = resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), [], consultar_osrm_fn=None)
+    assert movio is False
+    assert [s["num_tienda"] for s in ruta["sucursales"]] == [1, 999]
+
+
+def test_resolver_fuera_de_horario_interruptor_apagado_no_hace_nada():
+    ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
+    assert resolver_fuera_de_horario([ruta], {"activo": False}, []) is False
+
+
+def test_resolver_fuera_de_horario_dominante_se_prueba_antes_que_minoritario(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # MINORITARIO (1 semana de historial) esta vacia y cabria perfecto.
+    # DOMINANTE (7 semanas) tambien cabe -- debe elegirse DOMINANTE primero
+    # aunque ambas cumplan cupo+tiempo, por ser la de mayor conteo real.
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+               "unidades_afines": "DOMINANTE:7 | MINORITARIO:1",
+               "dias_admisibles": ["MARTES"], "dia_preferido": "MARTES"}]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    dominante = _ruta_vacia("DOMINANTE", "martes", "DOMINANTE")
+    minoritario = _ruta_vacia("MINORITARIO", "martes", "MINORITARIO")
+    rutas = [origen, minoritario, dominante]  # orden de lista no debe importar
+
+    resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert 42 in [s["num_tienda"] for s in dominante["sucursales"]]
+    assert [s["num_tienda"] for s in minoritario["sucursales"]] == []
+
+
+def test_resolver_fuera_de_horario_dia_canonico_antes_que_otro_dia_admisible(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # Mismo vehiculo DEST disponible martes y jueves; el grupo admite ambos
+    # dias pero MARTES es el preferido/canonico (primero en dias_admisibles)
+    # -> se prueba primero, y como cumple, se elige ahi.
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+               "unidades_afines": "DEST:5", "dias_admisibles": ["MARTES", "JUEVES"],
+               "dia_preferido": "MARTES"}]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 42, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    dest_martes = _ruta_vacia("DEST_MARTES", "martes", "DEST")
+    dest_jueves = _ruta_vacia("DEST_JUEVES", "jueves", "DEST")
+    rutas = [origen, dest_jueves, dest_martes]
+
+    resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert 42 in [s["num_tienda"] for s in dest_martes["sucursales"]]
+    assert [s["num_tienda"] for s in dest_jueves["sucursales"]] == []
+
+
+def test_resolver_fuera_de_horario_grupo_rigido_mueve_ambos_miembros_juntos(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # 76 fuera de horario; 77 (su pareja rigida) SI llega a tiempo en ORIGEN
+    # -- de todos modos se mueven juntas al reubicar 76.
+    grupos = [{"grupo": 30, "rigidez": "RIGIDO", "sucursales": [76, 77],
+               "unidades_afines": "DEST:9", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 77, "nombre": "Pareja", "orden": 2, "peso_kg": 50,
+             "latitud": 0.06, "longitud": 0.06},
+            {"num_tienda": 76, "nombre": "Lejana", "orden": 3, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
+    assert {s["num_tienda"] for s in destino["sucursales"]} == {76, 77}
+
+
+def test_resolver_fuera_de_horario_grupo_rigido_sin_cupo_perfecto_igual_mueve_el_par_junto(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # DEST cabe para 76 sola (100kg) pero no para 76+77 juntas (100+3300kg =
+    # 97.1% > 85%) -- _mejor_candidata_grupo la descarta por peso. Como DEST
+    # es la UNICA candidata dentro de unidades_afines, "menos malo" la elige
+    # de todos modos (no hay gate de cupo en el ultimo recurso, mismo
+    # criterio que v1) -- pero SIEMPRE mueve 76 Y 77 JUNTAS, nunca una sola
+    # separada de su pareja rigida.
+    grupos = [{"grupo": 30, "rigidez": "RIGIDO", "sucursales": [76, 77],
+               "unidades_afines": "DEST:9", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 77, "nombre": "Pareja", "orden": 2, "peso_kg": 3300,
+             "latitud": 0.06, "longitud": 0.06},
+            {"num_tienda": 76, "nombre": "Lejana", "orden": 3, "peso_kg": 100,
              "latitud": 0.5, "longitud": 0.5},
         ],
         "mayoristas": [],
@@ -325,45 +487,55 @@ def test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo():
     }
     rutas = [origen, destino]
 
-    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
-                                      consultar_osrm_fn=None)
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
 
+    # "menos malo" no tiene gate de cupo (mismo criterio que v1): con DEST
+    # como unica candidata dentro de unidades_afines, se elige de todos
+    # modos aunque quede sobrecargada -- pero 76 y 77 SIEMPRE juntas.
     assert movio is True
+    assert {s["num_tienda"] for s in destino["sucursales"]} == {76, 77}
     assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
-    assert 42 in [s["num_tienda"] for s in destino["sucursales"]]
-    assert destino["peso_kg"] == 100.0
 
 
-def test_resolver_fuera_de_horario_sin_historial_no_mueve_nada():
-    ruta = {
+def test_resolver_fuera_de_horario_grupo_flexible_no_arrastra_companero_a_tiempo(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # 100 fuera de horario; 86 (su companero FLEXIBLE) llega a tiempo y NO
+    # debe moverse tambien.
+    grupos = [{"grupo": 19, "rigidez": "FLEXIBLE", "sucursales": [86, 100],
+               "unidades_afines": "DEST:7", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
+    origen = {
         "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
         "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
         "sucursales": [
-            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+            {"num_tienda": 86, "nombre": "Companera", "orden": 1, "peso_kg": 100,
              "latitud": 0.05, "longitud": 0.05},
-            {"num_tienda": 999, "nombre": "Sin historial", "orden": 2, "peso_kg": 100,
+            {"num_tienda": 100, "nombre": "Lejana", "orden": 2, "peso_kg": 100,
              "latitud": 0.5, "longitud": 0.5},
         ],
         "mayoristas": [],
     }
-    movio = resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), {}, consultar_osrm_fn=None)
-    assert movio is False
-    assert [s["num_tienda"] for s in ruta["sucursales"]] == [1, 999]
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert movio is True
+    assert [s["num_tienda"] for s in origen["sucursales"]] == [86]
+    assert [s["num_tienda"] for s in destino["sucursales"]] == [100]
 
 
-def test_resolver_fuera_de_horario_interruptor_apagado_no_hace_nada():
-    ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
-    assert resolver_fuera_de_horario([ruta], {"activo": False}, {}) is False
-
-
-def test_resolver_fuera_de_horario_mismo_dia_falla_cae_a_otro_dia():
-    # SAMEDIA (mismo dia que ORIGEN) tiene afinidad para 42 pero ya esta casi
-    # llena (3400/3500=97%): tras sumar los 100kg de 42 quedaria en 100%,
-    # por lo que _mejor_candidata la descarta por peso sin llegar a evaluar
-    # tiempo. OTRODIA (jueves) tiene afinidad para 42, esta vacia, y llega a
-    # tiempo yendo directo desde el depot (mismo calculo que el test anterior:
-    # depot->(0.5,0.5) = 78.63 min, llegada 498.63 <= 510).
-    afinidad = {42: {("SAMEDIA", "MARTES"): 1, ("OTRODIA", "JUEVES"): 1}}
+def test_resolver_fuera_de_horario_menos_malo_nunca_sale_del_grupo(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # SIN_AFINIDAD esta vacia (cabria perfecto) pero su vehiculo NO aparece
+    # en unidades_afines del grupo -- nunca debe elegirse, ni como "menos
+    # malo". CON_AFINIDAD si aparece mas esta llena -- debe preferirse
+    # sobre no moverse en absoluto.
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+               "unidades_afines": "CON_AFINIDAD:2", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
     origen = {
         "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
         "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
@@ -375,40 +547,65 @@ def test_resolver_fuera_de_horario_mismo_dia_falla_cae_a_otro_dia():
         ],
         "mayoristas": [],
     }
-    samedia = {
-        "id": "SAMEDIA", "dia": "martes", "vehiculo_abrev": "SAMEDIA",
-        "capacidad_ton": 3.5, "peso_kg": 3400, "pct_utilizacion": 97.1,
-        "sucursales": [
-            {"num_tienda": 50, "nombre": "Llena", "orden": 1, "peso_kg": 3400,
-             "latitud": 0.05, "longitud": 0.05},
-        ],
+    sin_afinidad = _ruta_vacia("SIN_AFINIDAD", "martes", "SIN_AFINIDAD")
+    con_afinidad = {
+        "id": "CON_AFINIDAD", "dia": "martes", "vehiculo_abrev": "CON_AFINIDAD",
+        "capacidad_ton": 3.5, "peso_kg": 3000, "pct_utilizacion": 85.7,
+        "sucursales": [{"num_tienda": 5, "nombre": "Llena", "orden": 1, "peso_kg": 3000,
+                        "latitud": 0.05, "longitud": 0.05}],
         "mayoristas": [],
     }
-    otrodia = {
-        "id": "OTRODIA", "dia": "jueves", "vehiculo_abrev": "OTRODIA",
-        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
-        "sucursales": [], "mayoristas": [],
-    }
-    rutas = [origen, samedia, otrodia]
+    rutas = [origen, sin_afinidad, con_afinidad]
 
-    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
-                                      consultar_osrm_fn=None)
+    resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    assert [s["num_tienda"] for s in sin_afinidad["sucursales"]] == []
+    assert 42 in [s["num_tienda"] for s in con_afinidad["sucursales"]]
+
+
+def test_resolver_fuera_de_horario_mayorista_se_mueve_con_grupo_de_su_ancla(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [1],
+               "unidades_afines": "DEST:3", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Ancla", "orden": 1, "peso_kg": 50,
+             "latitud": 0.49, "longitud": 0.49},
+        ],
+        "mayoristas": [
+            {"id_cliente": 7, "documento": "BB1", "nombre": "Mayorista lejano",
+             "orden": 2, "peso_kg": 30, "latitud": 0.5, "longitud": 0.5},
+        ],
+    }
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
 
     assert movio is True
+    assert origen["mayoristas"] == []
+    assert [m["id_cliente"] for m in destino["mayoristas"]] == [7]
+    # El ancla (sucursal 1) NO se mueve -- solo el mayorista era el que
+    # estaba fuera de horario.
     assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
-    assert [s["num_tienda"] for s in samedia["sucursales"]] == [50]  # sin tocar, descartada por cupo
-    assert 42 in [s["num_tienda"] for s in otrodia["sucursales"]]
 
 
-def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta():
+def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
     # ORIGEN tiene DOS paradas fuera de horario (42 y 43). Cada una tiene
-    # afinidad con una ruta destino distinta, vacia, del mismo dia. Deben
-    # resolverse una por una (re-evaluando ORIGEN tras cada movimiento), sin
-    # detenerse en la primera.
-    afinidad = {
-        42: {("DEST1", "MARTES"): 1},
-        43: {("DEST2", "MARTES"): 1},
-    }
+    # grupo propio con destino distinto, vacio, del mismo dia. Deben
+    # resolverse una por una (re-evaluando ORIGEN tras cada movimiento).
+    grupos = [
+        {"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+         "unidades_afines": "DEST1:2", "dias_admisibles": ["MARTES"], "dia_preferido": "MARTES"},
+        {"grupo": 2, "rigidez": "FLEXIBLE", "sucursales": [43],
+         "unidades_afines": "DEST2:2", "dias_admisibles": ["MARTES"], "dia_preferido": "MARTES"},
+    ]
     origen = {
         "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
         "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
@@ -422,20 +619,11 @@ def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta():
         ],
         "mayoristas": [],
     }
-    dest1 = {
-        "id": "DEST1", "dia": "martes", "vehiculo_abrev": "DEST1",
-        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
-        "sucursales": [], "mayoristas": [],
-    }
-    dest2 = {
-        "id": "DEST2", "dia": "martes", "vehiculo_abrev": "DEST2",
-        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
-        "sucursales": [], "mayoristas": [],
-    }
+    dest1 = _ruta_vacia("DEST1", "martes", "DEST1")
+    dest2 = _ruta_vacia("DEST2", "martes", "DEST2")
     rutas = [origen, dest1, dest2]
 
-    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad,
-                                      consultar_osrm_fn=None)
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
 
     assert movio is True
     assert [s["num_tienda"] for s in origen["sucursales"]] == [1]
@@ -443,11 +631,12 @@ def test_resolver_fuera_de_horario_procesa_varias_paradas_en_la_misma_ruta():
     assert [s["num_tienda"] for s in dest2["sucursales"]] == [43]
 
 
-def test_resolver_fuera_de_horario_es_idempotente():
-    # Mismo fixture que test_resolver_fuera_de_horario_mueve_a_ruta_con_afinidad_y_cupo:
-    # correr la resolución dos veces sobre el mismo resultado no debe volver
-    # a mover nada la segunda vez.
-    afinidad = {42: {("DEST", "MARTES"): 1}}
+def test_resolver_fuera_de_horario_es_idempotente(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    grupos = [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+               "unidades_afines": "DEST:5", "dias_admisibles": ["MARTES"],
+               "dia_preferido": "MARTES"}]
     origen = {
         "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
         "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
@@ -459,15 +648,11 @@ def test_resolver_fuera_de_horario_es_idempotente():
         ],
         "mayoristas": [],
     }
-    destino = {
-        "id": "DEST", "dia": "martes", "vehiculo_abrev": "DEST",
-        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
-        "sucursales": [], "mayoristas": [],
-    }
+    destino = _ruta_vacia("DEST", "martes", "DEST")
     rutas = [origen, destino]
 
-    primera = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad, consultar_osrm_fn=None)
-    segunda = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), afinidad, consultar_osrm_fn=None)
+    primera = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+    segunda = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
 
     assert primera is True
     assert segunda is False
@@ -477,92 +662,4 @@ def test_resolver_fuera_de_horario_flag_dedicado_apagado_no_hace_nada(monkeypatc
     import logic.tiempo_reubicacion as tr
     monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", False)
     ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
-    assert resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), {}) is False
-
-
-from logic.tiempo_reubicacion import _parsear_unidades_afines, _indice_num_tienda_a_grupo
-
-
-def test_parsear_unidades_afines_ordena_por_conteo_descendente():
-    resultado = _parsear_unidades_afines("T 23:3 | K 16:2 | T 20:2 | T 17_1:1 | T 25:1")
-    assert resultado[0] == ("T23", 3)
-    assert set(resultado[1:3]) == {("K16", 2), ("T20", 2)}
-    assert set(resultado[3:]) == {("T17_1", 1), ("T25", 1)}
-
-
-def test_parsear_unidades_afines_vacio_o_none():
-    assert _parsear_unidades_afines(None) == []
-    assert _parsear_unidades_afines("") == []
-    assert _parsear_unidades_afines("   ") == []
-
-
-def test_parsear_unidades_afines_ignora_trozos_mal_formados():
-    assert _parsear_unidades_afines("T 23:3 | basura | K 16:dos") == [("T23", 3)]
-
-
-def test_indice_num_tienda_a_grupo_mapea_cada_miembro():
-    grupos = [
-        {"grupo": 30, "sucursales": [76, 77]},
-        {"grupo": 19, "sucursales": [86, 100]},
-    ]
-    indice = _indice_num_tienda_a_grupo(grupos)
-    assert indice[76]["grupo"] == 30
-    assert indice[77]["grupo"] == 30
-    assert indice[86]["grupo"] == 19
-    assert indice[100]["grupo"] == 19
-    assert 999 not in indice
-
-
-from logic.tiempo_reubicacion import _conjunto_a_mover
-
-GRUPO_RIGIDO_76_77 = {"grupo": 30, "rigidez": "RIGIDO", "sucursales": [76, 77]}
-GRUPO_FLEXIBLE_86_100 = {"grupo": 19, "rigidez": "FLEXIBLE", "sucursales": [86, 100]}
-
-
-def _ruta_con_76_y_77():
-    return {
-        "sucursales": [
-            {"num_tienda": 76, "nombre": "Tierra Blanca 7", "orden": 1, "peso_kg": 100,
-             "latitud": 18.5, "longitud": -96.5},
-            {"num_tienda": 77, "nombre": "Tierra Blanca 8", "orden": 2, "peso_kg": 50,
-             "latitud": 18.51, "longitud": -96.51},
-        ],
-        "mayoristas": [],
-    }
-
-
-def test_conjunto_a_mover_rigido_junta_miembros_presentes_en_la_ruta():
-    ruta = _ruta_con_76_y_77()
-    parada_76 = ruta["sucursales"][0]
-    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, ruta, parada_76, "sucursal")
-    assert {p["num_tienda"] for p in conjunto} == {76, 77}
-
-
-def test_conjunto_a_mover_rigido_de_un_solo_miembro_presente_es_solo_la_parada():
-    ruta = {"sucursales": [
-        {"num_tienda": 76, "nombre": "Tierra Blanca 7", "orden": 1, "peso_kg": 100,
-         "latitud": 18.5, "longitud": -96.5},
-    ], "mayoristas": []}
-    parada_76 = ruta["sucursales"][0]
-    # 77 no está en esta ruta (viajó aparte esta semana, caso borde real) —
-    # no se inventa ni se va a buscar a otra ruta.
-    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, ruta, parada_76, "sucursal")
-    assert [p["num_tienda"] for p in conjunto] == [76]
-
-
-def test_conjunto_a_mover_flexible_solo_la_parada():
-    ruta = {"sucursales": [
-        {"num_tienda": 86, "nombre": "Carlos A. Carrillo 2", "orden": 1, "peso_kg": 500,
-         "latitud": 18.37, "longitud": -95.75},
-        {"num_tienda": 100, "nombre": "Amatitlan", "orden": 2, "peso_kg": 165,
-         "latitud": 18.43, "longitud": -95.73},
-    ], "mayoristas": []}
-    parada_100 = ruta["sucursales"][1]
-    conjunto = _conjunto_a_mover(GRUPO_FLEXIBLE_86_100, ruta, parada_100, "sucursal")
-    assert [p["num_tienda"] for p in conjunto] == [100]
-
-
-def test_conjunto_a_mover_mayorista_nunca_arrastra_grupo():
-    mayorista = {"id_cliente": 7, "peso_kg": 20, "latitud": 18.5, "longitud": -96.5}
-    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, {"sucursales": []}, mayorista, "mayorista")
-    assert conjunto == [mayorista]
+    assert resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), []) is False

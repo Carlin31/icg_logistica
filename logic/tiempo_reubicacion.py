@@ -314,25 +314,31 @@ def _menos_mala_grupo(candidatas: list, conjunto: list, tipo: str,
     return mejor
 
 
-def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
+def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
                               umbral_pct: float = UMBRAL_PCT_DESTINO,
                               consultar_osrm_fn=None) -> bool:
     """
     Reubica, mutando `rutas` in-place, toda parada FUERA DE HORARIO hacia
-    otra ruta con afinidad histórica real, cupo (<=umbral_pct) y tiempo.
-    Procesa las paradas de cada ruta en orden de secuencia, re-evaluando la
-    ruta origen tras cada movimiento (quitar una parada solo puede adelantar
-    la llegada de las que quedan). Sin destino con afinidad -> se queda
-    marcada, igual que en Fase A. Devuelve True si movió algo.
+    otra ruta real de esta semana con respaldo histórico sólido (grupo de
+    co-viaje de `plantilla_canonica.obtener_grupos()`, nunca un vehículo sin
+    presencia real en `unidades_afines` del grupo), cupo (<=umbral_pct) y
+    tiempo. Procesa las paradas de cada ruta en orden de secuencia,
+    re-evaluando la ruta origen tras cada movimiento (quitar una parada
+    solo puede adelantar la llegada de las que quedan). Sin grupo o sin
+    destino con respaldo -> se queda marcada, igual que en Fase A. Grupos
+    RÍGIDOS con más de un miembro se mueven completos (nunca se separa una
+    pareja/trío rígido); grupos FLEXIBLES mueven solo la parada marcada.
+    Devuelve True si movió algo.
 
     rutas: [{id, dia, vehiculo_abrev, capacidad_ton, peso_kg,
              pct_utilizacion, sucursales:[...], mayoristas:[...]}, ...] —
            misma forma que arma pdf_logic.generar_pdf().
-    afinidad: historico_logic.afinidad_historica_por_sucursal().
+    grupos: plantilla_canonica.obtener_grupos().
     """
     if not (TIEMPO_REUBICACION_ACTIVA and cfg_tiempo and cfg_tiempo.get("activo")):
         return False
 
+    indice_grupos = _indice_num_tienda_a_grupo(grupos)
     cambio = False
     for ruta in rutas:
         for _ in range(MAX_MOVIMIENTOS_POR_RUTA):
@@ -346,33 +352,31 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
 
             parada = combinado[idx_malo]
             tipo = parada["_tipo"]
-            peso_extra = float(parada.get("peso_kg") or 0)
-            clave = _clave_afinidad_para(parada, tipo, ruta, afinidad)
-
-            candidatas_mismo_dia = _candidatas_con_afinidad(
-                clave, rutas, afinidad, ruta.get("id"), True, ruta.get("dia", ""))
-            destino = _mejor_candidata(candidatas_mismo_dia, parada, tipo, peso_extra,
-                                       cfg_tiempo, consultar_osrm_fn, umbral_pct)
-
-            candidatas_otro_dia = []
-            if destino is None:
-                candidatas_otro_dia = _candidatas_con_afinidad(
-                    clave, rutas, afinidad, ruta.get("id"), False, ruta.get("dia", ""))
-                destino = _mejor_candidata(candidatas_otro_dia, parada, tipo, peso_extra,
-                                           cfg_tiempo, consultar_osrm_fn, umbral_pct)
-
-            if destino is None:
-                destino = _menos_mala(candidatas_mismo_dia + candidatas_otro_dia, parada, tipo,
-                                      cfg_tiempo, consultar_osrm_fn)
-
-            if destino is None:
-                # Sin afinidad histórica (sucursal nueva, o mayorista sin
-                # ancla): se queda FUERA DE HORARIO, igual que Fase A.
+            grupo = _grupo_para(parada, tipo, ruta, indice_grupos)
+            if grupo is None:
+                # Sin grupo en la plantilla canónica (sucursal nueva, o
+                # mayorista sin ancla): se queda FUERA DE HORARIO.
                 break
 
-            _quitar_de_ruta(ruta, parada, tipo)
+            conjunto = _conjunto_a_mover(grupo, ruta, parada, tipo)
+            candidatas = _rutas_candidatas_por_grupo(
+                grupo, rutas, ruta.get("id"), ruta.get("vehiculo_abrev"))
+            peso_extra = sum(float(p.get("peso_kg") or 0) for p in conjunto)
+
+            destino = _mejor_candidata_grupo(candidatas, conjunto, tipo, peso_extra,
+                                             cfg_tiempo, consultar_osrm_fn, umbral_pct)
+            if destino is None:
+                destino = _menos_mala_grupo(candidatas, conjunto, tipo, cfg_tiempo, consultar_osrm_fn)
+            if destino is None:
+                # Ningún vehículo de unidades_afines tiene ruta real esta
+                # semana, o ninguno cabe -- nunca se inventa un destino.
+                break
+
+            for p in conjunto:
+                _quitar_de_ruta(ruta, p, tipo)
             _recalcular_peso_ruta(ruta)
-            _insertar_en_ruta(destino, parada, tipo)
+            for p in conjunto:
+                _insertar_en_ruta(destino, p, tipo)
             _recalcular_peso_ruta(destino)
             cambio = True
         else:
