@@ -427,3 +427,36 @@ def test_resolver_fuera_de_horario_flag_dedicado_apagado_no_hace_nada(monkeypatc
     monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", False)
     ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
     assert resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), {}) is False
+
+
+from logic.tiempo_reubicacion import _parsear_unidades_afines, _indice_num_tienda_a_grupo
+
+
+def test_parsear_unidades_afines_ordena_por_conteo_descendente():
+    resultado = _parsear_unidades_afines("T 23:3 | K 16:2 | T 20:2 | T 17_1:1 | T 25:1")
+    assert resultado[0] == ("T23", 3)
+    assert set(resultado[1:3]) == {("K16", 2), ("T20", 2)}
+    assert set(resultado[3:]) == {("T17_1", 1), ("T25", 1)}
+
+
+def test_parsear_unidades_afines_vacio_o_none():
+    assert _parsear_unidades_afines(None) == []
+    assert _parsear_unidades_afines("") == []
+    assert _parsear_unidades_afines("   ") == []
+
+
+def test_parsear_unidades_afines_ignora_trozos_mal_formados():
+    assert _parsear_unidades_afines("T 23:3 | basura | K 16:dos") == [("T23", 3)]
+
+
+def test_indice_num_tienda_a_grupo_mapea_cada_miembro():
+    grupos = [
+        {"grupo": 30, "sucursales": [76, 77]},
+        {"grupo": 19, "sucursales": [86, 100]},
+    ]
+    indice = _indice_num_tienda_a_grupo(grupos)
+    assert indice[76]["grupo"] == 30
+    assert indice[77]["grupo"] == 30
+    assert indice[86]["grupo"] == 19
+    assert indice[100]["grupo"] == 19
+    assert 999 not in indice

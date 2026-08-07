@@ -337,3 +337,38 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, afinidad: dict,
                   f"{MAX_MOVIMIENTOS_POR_RUTA} movimientos")
 
     return cambio
+
+
+def _parsear_unidades_afines(s) -> list:
+    """
+    'T 23:3 | K 16:2 | T 20:2' -> [('T23', 3), ('K16', 2), ('T20', 2)],
+    ordenado por conteo descendente (el vehículo dominante primero; sort
+    estable, así que empates conservan el orden de aparición en el string).
+    Vehículos normalizados (mayúsculas sin espacios, ver `_normalizar_veh`)
+    para comparar contra `ruta.vehiculo_abrev` sin caer en el bug ya
+    confirmado del proyecto ('F350_2' != 'F 350_2').
+    """
+    if not s or not str(s).strip():
+        return []
+    pares = []
+    for trozo in str(s).split("|"):
+        trozo = trozo.strip()
+        if not trozo or ":" not in trozo:
+            continue
+        veh, _, cnt = trozo.rpartition(":")
+        try:
+            conteo = int(cnt.strip())
+        except ValueError:
+            continue
+        pares.append((_normalizar_veh(veh), conteo))
+    return sorted(pares, key=lambda x: -x[1])
+
+
+def _indice_num_tienda_a_grupo(grupos: list) -> dict:
+    """{num_tienda: grupo} a partir de la lista que devuelve
+    `plantilla_canonica.obtener_grupos()` — un grupo por sucursal miembro."""
+    indice = {}
+    for g in grupos:
+        for nt in g.get("sucursales", []):
+            indice[int(nt)] = g
+    return indice
