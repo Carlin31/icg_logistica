@@ -81,9 +81,17 @@ consumidor en este módulo.
 - **Orden de búsqueda de destino** (reemplaza el "mismo día → otro día →
   último recurso" de v1):
   1. Recorrer `unidades_afines` del grupo en orden de conteo descendente
-     (dominante primero). Para cada vehículo candidato (excluyendo el de
-     la ruta origen), recorrer `dias_admisibles` del grupo en su orden
-     (preferido/canónico primero).
+     (dominante primero). Para cada vehículo candidato, recorrer
+     `dias_admisibles` del grupo en su orden (preferido/canónico primero).
+     Solo se excluye la ruta de origen exacta (mismo vehículo **y** mismo
+     día) — si el vehículo de origen tiene otra ruta en otro día admisible
+     del grupo, esa ruta sigue siendo candidata válida. Un grupo flexible
+     puede operar en varios días admisibles con el mismo vehículo
+     dominante; excluir el vehículo completo solo porque coincide con el
+     de origen tiraría al vehículo dominante por una coincidencia de
+     calendario, no por afinidad real — los chequeos de cupo+tiempo del
+     paso 2 ya garantizan que esa otra ruta solo se elige si de verdad
+     funciona.
   2. Para cada combinación `(vehículo, día)`, si existe una ruta real esa
      semana con ese vehículo y día: verificar cupo (`≤ 85 %` de
      `capacidad_ton`, mismo cálculo que v1) **y** que insertar la

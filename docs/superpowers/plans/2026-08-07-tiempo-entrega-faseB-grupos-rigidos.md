@@ -426,20 +426,31 @@ def test_rutas_candidatas_por_grupo_ordena_por_frecuencia_descendente():
         {"id": "R_T25", "dia": "martes", "vehiculo_abrev": "T 25"},
         {"id": "R_SIN_AFINIDAD", "dia": "martes", "vehiculo_abrev": "T 99"},
     ]
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
     assert [r["id"] for r in candidatas] == ["R_K16", "R_T25"]
 
 
-def test_rutas_candidatas_por_grupo_excluye_el_vehiculo_de_origen():
+def test_rutas_candidatas_por_grupo_incluye_mismo_vehiculo_en_otro_dia_admisible():
+    # Solo se excluye la ruta de origen EXACTA (mismo vehiculo Y mismo dia).
+    # El mismo vehiculo en OTRO dia admisible (T 23 jueves) SI es candidata
+    # valida -- un grupo flexible puede operar varios dias, y forzar un
+    # vehiculo distinto solo por coincidir en vehiculo con el origen
+    # tiraria al vehiculo dominante por una coincidencia de calendario.
     grupo = {"unidades_afines": "T 23:5", "dias_admisibles": ["MARTES", "JUEVES"]}
     rutas = [
         {"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"},
         {"id": "R_T23_JUEVES", "dia": "jueves", "vehiculo_abrev": "T 23"},
     ]
-    # T 23 es el vehiculo de origen -> se excluye por completo, aunque
-    # tenga otra ruta el jueves.
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
-    assert candidatas == []
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
+    assert [r["id"] for r in candidatas] == ["R_T23_JUEVES"]
+
+
+def test_rutas_candidatas_por_grupo_excluye_solo_la_ruta_de_origen_exacta():
+    # Mismo vehiculo Y mismo dia que origen (o sea, la ruta origen misma,
+    # aunque aparezca de nuevo en la lista por error) nunca se auto-elige.
+    grupo = {"unidades_afines": "T 23:5", "dias_admisibles": ["MARTES"]}
+    rutas = [{"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"}]
+    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN") == []
 
 
 def test_rutas_candidatas_por_grupo_dia_admisible_en_orden_preferido_primero():
@@ -449,14 +460,14 @@ def test_rutas_candidatas_por_grupo_dia_admisible_en_orden_preferido_primero():
         {"id": "R_F350_1_JUEVES", "dia": "jueves", "vehiculo_abrev": "F 350_1"},
         {"id": "R_F350_1_MARTES", "dia": "martes", "vehiculo_abrev": "F 350_1"},
     ]
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "OTRO")
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
     assert [r["id"] for r in candidatas] == ["R_F350_1_MARTES", "R_F350_1_JUEVES"]
 
 
 def test_rutas_candidatas_por_grupo_sin_ruta_real_para_ese_vehiculo_dia():
     grupo = {"unidades_afines": "T 20:1", "dias_admisibles": ["VIERNES"]}
     rutas = [{"id": "R_ORIGEN", "dia": "lunes", "vehiculo_abrev": "T 23"}]
-    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23") == []
+    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN") == []
 ```
 
 - [ ] **Step 2: Correr las pruebas y verificar que fallan**
@@ -469,18 +480,19 @@ Expected: FAIL con `ImportError: cannot import name '_rutas_candidatas_por_grupo
 En `logic/tiempo_reubicacion.py`, reemplazar la función `_candidatas_con_afinidad` completa (línea 207-228) por:
 
 ```python
-def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehiculo_origen) -> list:
+def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id) -> list:
     """
     Rutas reales de `rutas` (existentes esta semana) que son destino válido
     para `grupo`, en orden de preferencia: vehículo dominante primero
     (`unidades_afines`, conteo descendente), y dentro de cada vehículo, día
     admisible en su orden (preferido/canónico primero). Excluye la ruta de
-    origen y **todo** el vehículo de origen (aunque ese vehículo corra otro
-    día) — nunca se le vuelve a asignar al mismo vehículo que ya la tenía
-    fuera de horario. Sin duplicados (un vehículo solo tiene una ruta por
-    día esta semana).
+    origen exacta (mismo vehículo Y mismo día) — el resto de los días
+    admisibles de ese mismo vehículo SÍ son candidatos válidos (un grupo
+    flexible puede operar en varios días; forzarlo a un vehículo distinto
+    solo porque el origen coincide en vehículo tira al vehículo dominante
+    por una coincidencia de calendario, no de afinidad real). Sin
+    duplicados (un vehículo solo tiene una ruta por día esta semana).
     """
-    veh_origen_norm = _normalizar_veh(vehiculo_origen)
     pares_veh = _parsear_unidades_afines(grupo.get("unidades_afines"))
     dias = grupo.get("dias_admisibles") or (
         [grupo["dia_preferido"]] if grupo.get("dia_preferido") else [])
@@ -494,8 +506,6 @@ def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehicu
 
     candidatas = []
     for veh, _conteo in pares_veh:
-        if veh == veh_origen_norm:
-            continue
         for dia in dias:
             r = rutas_por_clave.get((veh, str(dia).upper()))
             if r is not None and r not in candidatas:
@@ -503,10 +513,25 @@ def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehicu
     return candidatas
 ```
 
+> **Nota post-implementación (2026-08-07):** las pruebas de regresión de
+> Task 7, construidas con datos reales de producción (grupo 19,
+> Amatitlán), encontraron que la exclusión de **todo** el vehículo de
+> origen descrita arriba era un bug, no una decisión correcta: rompía
+> exactamente el escenario que esta migración existe para arreglar (ver
+> Task 7 más abajo y el bullet correspondiente en el spec §3). La versión
+> corregida — la que quedó implementada — es la que se muestra arriba
+> (excluye solo `ruta_origen_id`, ya no recibe `vehiculo_origen`); el test
+> `test_rutas_candidatas_por_grupo_excluye_el_vehiculo_de_origen` fue
+> reemplazado por
+> `test_rutas_candidatas_por_grupo_incluye_mismo_vehiculo_en_otro_dia_admisible`
+> y `test_rutas_candidatas_por_grupo_excluye_solo_la_ruta_de_origen_exacta`
+> (ver arriba). El call site en `resolver_fuera_de_horario` (Task 6) se
+> actualizó para llamar con 3 argumentos, sin `ruta.get("vehiculo_abrev")`.
+
 - [ ] **Step 4: Correr las pruebas y verificar que pasan**
 
 Run: `python -m pytest tests/test_tiempo_reubicacion.py -k rutas_candidatas_por_grupo -v`
-Expected: PASS (4 passed).
+Expected: PASS (5 passed).
 
 - [ ] **Step 5: Commit**
 
@@ -1162,7 +1187,7 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
 
             conjunto = _conjunto_a_mover(grupo, ruta, parada, tipo)
             candidatas = _rutas_candidatas_por_grupo(
-                grupo, rutas, ruta.get("id"), ruta.get("vehiculo_abrev"))
+                grupo, rutas, ruta.get("id"))
             peso_extra = sum(float(p.get("peso_kg") or 0) for p in conjunto)
 
             destino = _mejor_candidata_grupo(candidatas, conjunto, tipo, peso_extra,
