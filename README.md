@@ -139,6 +139,90 @@ importar catálogos desde CSV (productos, sucursales, vehículos, clientes mayor
 rutas históricas), limpiar caché de OSRM, arreglar índices de MongoDB, crear los
 usuarios iniciales del sistema, y generar reportes de comparación Excel ↔ MongoDB.
 
+### ⚠️ Corpus canónico de rutas históricas — no se reescribe
+
+Las **9 semanas** de `febrero a junio 2026` (archivos `_HT.xls`) son datos de
+ORIGEN: el plan que la empresa entregó, y la única referencia contra la que se
+puede medir el motor. Están listadas en `config.SEMANAS_CANONICAS`, por fecha
+de inicio.
+
+**El riesgo es real y ya ocurrió.** Al guardar en el módulo de Modificación, el
+front dispara `POST /modificacion/guardar-historico`
+([static/js/modificacion.js](static/js/modificacion.js)) y
+`guardar_en_historico` hace **UPSERT**: abrir una semana vieja y guardar
+reemplaza su histórico. El 2026-08-03 pasó con la semana del 18-22 de mayo.
+
+Protecciones vigentes:
+
+- `guardar_en_historico` **rechaza** el guardado si la logística es una semana
+  canónica y devuelve `409` con un mensaje legible. El endpoint HTTP **no
+  expone** el flag que lo levanta: sólo el uso programático
+  (`permitir_canon=True`) puede sobrescribir el corpus.
+- El front ya no se traga el error: lo muestra en un toast.
+- **Ningún script de `scripts/` llama a `guardar_en_historico` ni a
+  `guardar_modificacion`.** El pipeline de la plantilla es de sólo lectura sobre
+  `rutas_historicas`. Verificado por `grep`; si alguna vez se agrega uno, tiene
+  que pasar `permitir_canon` explícito y decir por qué.
+- `rutas_historicas` tiene auditoría de escritura (`escrito_en`, `escrito_por`,
+  `origen`), agregada por `scripts/migrar_auditoria_historico.py`. Las filas
+  anteriores quedan en NULL, que significa "escrita antes de que existiera la
+  auditoría".
+
+**`cargado_en` NO es marca de escritura.** Se fabrica como
+`f"{fecha_inicio}T00:00:00"`, o sea la fecha de INICIO de la semana. Para saber
+cuándo se escribió una fila, usar `escrito_en`.
+
+**Dos capas con distinta procedencia.** En `rutas_historicas`, la capa de
+SUCURSALES es el plan del planeador (verificado estructuralmente contra los
+`_HT.xls`), pero la capa de MAYOREO viene de la distribución del sistema, no de
+la hoja. Para cualquier medición de mayoreo la fuente son los 9 Excel, no la BD.
+Además, las paradas operativas de 0 kg (recolecciones, aeropuerto) nunca llegan
+a la BD: el front las descarta con `if (!suc.num_tienda) continue`, así que el
+tiempo de ruta del histórico está subestimado en todas las semanas.
+
+**Plantilla canónica (ConVRP):** `crear_plantilla_canonica.py` crea las tablas
+`plantilla_*` (versionadas, no destructivas) y `cargar_plantilla.py` la carga o
+recarga desde el Excel canónico + `datos/mapeo_no_a_numtienda.csv`; cada corrida
+crea una versión nueva sin borrar la anterior. Lógica y lectores en
+`logic/plantilla_canonica.py`. `smoke_convrp.py` valida el motor ConVRP contra
+las 9 semanas reales (viajes vs históricos, rígidos partidos, determinismo,
+verificación de llaves, utilización máxima con mayoristas y por qué vía se
+resolvió cada parada de mayoreo) — correrlo tras tocar el builder, el enganche
+o la plantilla.
+
+`calibrar_unidad_ref.py` recalcula `unidad_ref` como asignación global por día
+(afinidad histórica + capacidad + nº de viajes que hace la operación ese día) y
+escribe `datos/unidad_ref_por_grupo.csv`, que el cargador aplica sobre la unidad
+del Excel. `recalcular_zonas.py` **debe correrse después de cada carga**: el
+Excel no trae el grupo núcleo ni la confianza de las zonas, y sin ellos el
+enganche de mayoristas cae entero a la geografía.
+
+**Consolidación de mayoristas:** `logic/consolidacion_mayoristas.py` agrupa los
+DOCUMENTOS de una semana en PARADAS antes de rutear. Sin este paso el VRP rutea
+folio por folio y parte una entrega en varios viajes (los 4 folios de un mismo
+domicilio acabaron en tres días distintos). La llave es la proximidad (500 m),
+no el nombre ni la población: los casos reales agrupan razones sociales distintas
+en un mismo local y escriben la población de dos formas. La parada resultante es
+**carga indivisible**; si no cabe en la unidad se parte a propósito por folios
+completos y la división queda registrada para imprimirla.
+
+**Mayoristas por zona:** `logic/enganche_zona.py` resuelve a qué zona pertenece
+cada cliente (historia → geografía → fallback) y a qué ruta se engancha (núcleo →
+segundo grupo → geografía de ruta → viaje de mayoristas solo).
+`convrp_integracion.construir_rutas_con_mayoristas()` cierra el circuito: la
+carga de mayoristas se ancla a una sucursal del grupo destino y **entra a las
+restricciones del motor**, así que el sobrecupo que provoca dispara las palancas
+(unidad → día → partir) en vez de aparecer al pintar el PDF. El enganche y el
+reparto son mutuamente dependientes, así que iteran a punto fijo con tope de
+pasadas; al final `reubicar_mayoristas_por_cupo()` garantiza que ninguna ruta
+quede por encima de su capacidad.
+
+El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
+`logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
+comportamiento es idéntico al motor de afinidad actual.
+`scripts/pdf_convrp_preview.py` genera el PDF de una semana con el motor
+ConVRP + mayoristas **sin persistir nada** (vista previa para el planeador).
+
 ## Pruebas
 
 ```bash

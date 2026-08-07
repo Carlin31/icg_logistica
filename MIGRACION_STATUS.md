@@ -5,6 +5,108 @@ local, módulo por módulo, preservando el comportamiento actual. Tarea de
 prácticas — cada fase se prueba contra la base real antes de pasar a la
 siguiente. **Lee este archivo primero en cualquier sesión nueva.**
 
+## ConVRP — Plantilla canónica (iniciativa aparte, en curso)
+
+Convertir el VRP de GENERADOR a AJUSTADOR sobre una plantilla histórica. **No
+es parte de la migración**; convive con ella. Detalle vivo del avance por fase
+se lleva en la conversación; aquí quedan las decisiones de datos permanentes:
+
+- **Tablas nuevas (versionadas, no destructivas)** — creadas por
+  `scripts/crear_plantilla_canonica.py`, cargadas por `scripts/cargar_plantilla.py`
+  (usa `logic/plantilla_canonica.py`): `plantilla_meta` (1 fila por versión),
+  `plantilla_bridge_sucursal`, `plantilla_grupo`, `plantilla_grupo_sucursal`,
+  `plantilla_grupo_dia` (días admisibles por grupo: el grupo sólo se mueve dentro
+  de este set, con el día LORES como preferido; rigidez de composición y
+  flexibilidad de día son dimensiones independientes), `plantilla_zona_mayorista`,
+  `plantilla_poblacion_zona`. Cada carga inserta una
+  **versión nueva** y marca la anterior `vigente=0`; **nunca borra**. Los
+  lectores devuelven la versión vigente. Semilla del bridge revisada:
+  `datos/mapeo_no_a_numtienda.csv`.
+- **Llave crítica:** `No. SUCURSAL` (Excel canónico) ≠ `num_tienda` (BD) — son
+  numeraciones independientes (sólo 59/101 coinciden por índice). El puente se
+  resolvió por coordenada (biyección 101/101, mediana 28 m) y se validó
+  reconstruyendo el co-viaje: los **23 grupos rígidos reaparecen (100 %)**. Dos
+  pares (`Cd. Isla 1`, `San Andrés 1`) difieren >2 km entre fuentes pero sus
+  hermanos coinciden a <50 m → **error de captura de coordenada, no de mapeo**;
+  quedan marcados `estado_revision='revisado_ok'` para escalarse con la empresa
+  (no tocar la BD de `sucursales`).
+
+- **Motor ConVRP tras flag** — `CONVRP_ACTIVO` en `logic/historico_logic.py`
+  (**False = default**, motor de afinidad intacto). Builder puro en
+  `logic/convrp_logic.py`, puente a BD en `logic/convrp_integracion.py`,
+  excepciones en `convrp_excepciones`. Gate obligatorio tras tocar el builder,
+  la plantilla o el catálogo de vehículos: `python scripts/smoke_convrp.py`.
+
+> ⚠️ **Decisiones ABIERTAS antes de invertir el flag** (no cerradas):
+> 1. **RESUELTO — el modelo de tiempo queda absuelto; era la estimación de
+>    traslado.** El builder calculaba el viaje con haversine a **35 km/h fijos**.
+>    Medido contra OSRM sobre **875 tramos reales**, la velocidad
+>    haversine-equivalente no es constante: **55.5 km/h** en tramos largos
+>    (>50 km, matriz→clúster) y **37.8** en cortos. Con 35 para todo, el tramo
+>    matriz→Los Tuxtlas daba 343 min contra **195 min reales** (+2.5 h), lo que
+>    hacía violar TIEMPO a un grupo que cabía de sobra. Las palancas 1 y 2 no
+>    podían ayudar porque la violación era idéntica en toda unidad y todo día
+>    admisible — **el orden unidad→día→partir siempre se respetó**.
+>    Corregido con `velocidad_para_km()` en `logistica_tiempo` (dos regímenes
+>    calibrados; `por_tramo=True`, sin cambiar el camino del PDF).
+>    Efecto: **rígidos partidos 9 → 0**; influencia del chequeo de tiempo de
+>    +26 viajes/9 particiones a **+6 viajes/0 particiones**. Viajes/semana
+>    27.0 contra 30.8 reales (antes 29.2, pero con 9 particiones espurias).
+>    Es la MISMA clase de bug que ya se había corregido en el PDF esta sesión
+>    (haversine sobreestimaba matriz→clúster → se pasó a tramos OSRM).
+>
+> 1-bis. **[HISTÓRICO, ya resuelto]** El modelo de tiempo parte rígidos. El rígido
+>    g2 se parte las 9 semanas, pero en el histórico real viajó **completo en 8
+>    de 9**. Aislado: el chequeo de tiempo añade +26 viajes (263 vs 237) y causa
+>    **el 100 % de los rígidos partidos** (9 vs 0). Que el conteo de viajes
+>    (29.2) quede cerca del real (30.8) **no prueba** que parta donde la realidad
+>    parte. Traza concreta (1-5 jun): g2 pesa 3438 kg y su `unidad_ref`
+>    (`F 350_3`) aguanta 3900 — **cabe de sobra**. Sin chequeo de tiempo viaja
+>    completo en `F 350_3/MARTES`, que es exactamente lo que ocurrió en la
+>    realidad; con chequeo se parte en `T 23` + `F 350_3`. Ojo: la excepción
+>    queda etiquetada `restriccion: PESO`, que es la causa PRÓXIMA (lo que ataba
+>    al pelar) y no la raíz — el tiempo actúa **indirectamente**, rechazando al
+>    grupo completo en la asignación. No leer esa etiqueta como causa raíz.
+>    Corregir el horario del lunes (11:00) **no cambió nada**: los 49 viajes de
+>    lunes no tocan el límite de tiempo en ninguno de los tres escenarios.
+> 2. **La calibración de tiempo se reabre en Fase 3.** Hoy las rutas del ConVRP
+>    topan en 7 paradas (sólo Lores); al enganchar mayoristas crecerán hacia las
+>    ~23 paradas de las rutas reales y el piso de 38 min/parada sí va a morder.
+>    Volver a correr el aislamiento con-tiempo/sin-tiempo después de Fase 3.
+> 3. **Piso de 38 min y coordenadas** (`Cd. Isla 1`, `San Andrés 1`): escalados
+>    con la empresa, sin tocar la BD.
+
+> ⚠️ **Llaves: verificar siempre, nunca adivinar.** Dos joins fallaron en
+> silencio y ambos se descubrieron de casualidad: `No. SUCURSAL` ≠ `num_tienda`
+> (numeraciones independientes) y `unidad_ref` `'F350_2'` ≠ `'F 350_2'` del
+> catálogo (**9 de 10 unidades no empataban y la preferencia de unidad se
+> ignoraba**). `scripts/smoke_convrp.py` ahora verifica los cuatro joins
+> (sucursal, unidad, día, población) al 100 % esperado y falla ruidosamente.
+> Ojo con `configuracion.config_dias`: usa minúsculas (`miercoles`) y **el lunes
+> sale 11:00, no 07:00** — asumir 07:00 regalaba 4 h.
+
+> ⚠️ **`asignaciones` de "Logística del 1 al 5 de junio del 2026"
+> (`6a2c9928ba526866fcad54b3`) NO refleja lo que se operó esa semana.** El
+> 2026-08-03 se corrió el motor con `CONVRP_ACTIVO=True` contra ese registro de
+> producción para probar el flujo completo; eso sobreescribió sus asignaciones y
+> después se regeneró con el motor de afinidad. O sea: ese registro contiene
+> **lo que el botón "Generar Rutas VRP" produce hoy**, no la operación real de
+> esa semana. No leerlo como histórico.
+> Intactas y válidas como verdad de referencia: `rutas_historicas` +
+> `rutas_historicas_visitas` (140 filas, confirmada, `cargado_en=2026-06-01`) y
+> `modificaciones_rutas` (31 rutas manuales, 101 sucursales + 39 mayoristas,
+> `guardado_en=2026-06-23`, que es además la fuente primaria del PDF).
+> **Regla:** nunca correr el motor con el flag encendido contra producción; para
+> probar, `construir_groups_convrp(...)` corre en memoria y no persiste.
+
+> ⚠️ **`rutas_historicas_visitas` NO es una tabla huérfana — NO limpiar.** Aunque
+> ningún endpoint la consulta hoy, es la fuente normalizada (`id_sucursal`=
+> `num_tienda`, `vehiculo`, `dia_semana`, `secuencia_visita`, `kg_entrega`) desde
+> la que se reconstruyen los grupos de co-viaje y es la **base de la validación
+> por origen móvil** del ConVRP (Fase 2/4). Ya tiene las **9 semanas** feb–jun
+> con detalle (15-19 jun se cargó desde el `filas` JSON de su registro
+> confirmado).
+
 ## Estado por fase
 
 | Fase | Archivos | Estado |
