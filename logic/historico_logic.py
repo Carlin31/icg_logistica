@@ -38,6 +38,7 @@ _OSRM_RETRY_DELAY = 1.5
 
 from sqlalchemy import select, insert, update, delete, or_
 
+from config import es_semana_canonica
 from db import get_db, get_table, transaccion
 from logic.vrp_logic import (
     build_template_from_history,
@@ -56,6 +57,23 @@ from logic.vrp_afinidad.rebalanceo_geografico import rebalancear_por_geografia
 # geográficamente (la cercanía gana sobre el histórico). False = comportamiento
 # anterior idéntico.
 REBALANCEO_GEOGRAFICO = True
+
+# Interruptor del motor ConVRP (el VRP como AJUSTADOR sobre la plantilla
+# canónica, en vez de generador desde cero).
+#   False = motor de afinidad actual, comportamiento idéntico (DEFAULT).
+#   True  = las rutas salen de la plantilla canónica vigente.
+# Se queda en False hasta que la validación de fidelidad y costo pase.
+# Pendiente antes de invertirlo: el modelo de tiempo parte el rígido g2 las 9
+# semanas cuando en la realidad viajó completo en 8 de 9 (alivio fantasma);
+# además la calibración se reabre en Fase 3, cuando los mayoristas hagan crecer
+# las rutas de ~7 a ~23 paradas y el piso de 38 min empiece a morder.
+CONVRP_ACTIVO = False
+
+# Con CONVRP_ESTRICTO=True un fallo del ConVRP REVIENTA en vez de caer al motor
+# de afinidad. Lo usa el arnés de validación: si mido fidelidad y por dentro
+# corrió el otro motor, el número no significa nada. En producción va en False
+# (se cae al motor actual, pero el error se registra de forma visible).
+CONVRP_ESTRICTO = False
 
 # Algoritmo de afinidad histórica — motor VRP activo en producción.
 from logic.vrp_afinidad.afinidad import construir_afinidad
@@ -1072,6 +1090,46 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     if not vehiculos_cap:
         return {"status": "error", "mensaje": "No hay vehículos activos con capacidad configurada."}
 
+    # ── 4.5. ConVRP: las rutas salen de la PLANTILLA CANÓNICA ──────────────────
+    # El VRP deja de generar de cero y pasa a ajustar la plantilla histórica.
+    # Produce el mismo `groups` que el motor de afinidad, así que los pasos 7-8
+    # (reporte, secuencia, detalle_por_dia, persistencia) se reutilizan sin
+    # cambios. Degradación segura: ante cualquier error se sigue con el motor
+    # actual, que es el default mientras el flag esté apagado.
+    convrp_groups = None
+    convrp_excepciones: list = []
+    convrp_meta: dict = {}
+    if CONVRP_ACTIVO:
+        try:
+            from logic.convrp_integracion import (
+                construir_groups_convrp, guardar_excepciones_convrp)
+            _cfgm = db.execute(select(get_table("configuracion"))).mappings().first() or {}
+            _depot = (float(_cfgm.get("matriz_lat") or MATRIZ_LAT_DEFAULT),
+                      float(_cfgm.get("matriz_lon") or MATRIZ_LON_DEFAULT))
+            convrp_groups, convrp_excepciones, convrp_meta = construir_groups_convrp(
+                pedidos_dict, volumenes_dict, coords_dict,
+                vehiculos_cap, obtener_volumenes_vehiculos(), _depot)
+            guardar_excepciones_convrp(oid, convrp_excepciones)
+            print(f"[convrp] plantilla v{convrp_meta.get('version_plantilla')}: "
+                  f"{convrp_meta.get('viajes')} viajes, "
+                  f"{len(convrp_excepciones)} excepciones")
+        except Exception as e:  # noqa: BLE001
+            # Degradación RUIDOSA: caer al motor de afinidad sin avisar es el
+            # mismo patrón de fallo silencioso que ya mordió tres veces (llave
+            # de sucursal, de unidad y horario del lunes). En producción se cae
+            # pero se registra de forma visible; con CONVRP_ESTRICTO se revienta
+            # (el arnés de validación lo usa: medir fidelidad mientras por
+            # dentro corrió el otro motor no significa nada).
+            import traceback
+            convrp_groups = None
+            print("=" * 70)
+            print(f"[convrp] ERROR: {type(e).__name__}: {e}")
+            print("[convrp] SE USÓ EL MOTOR DE AFINIDAD, no la plantilla canónica.")
+            print(traceback.format_exc())
+            print("=" * 70)
+            if CONVRP_ESTRICTO:
+                raise
+
     # ── 5. Asignar cada sucursal a su (vehiculo, dia) y secuencia histórica ───────
     pref_vd        = afinidad_data["pref_vehiculo_dia"]   # {sid: (veh, dia)}
     afinidad_norm  = afinidad_data["afinidad"]            # {(i,j): float normalizado}
@@ -1138,24 +1196,28 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             groups[(veh, dia)].append({"sid": sid, "seq": seq})
 
     # ── 6. Resolver sobrecargas respetando capacidad e historial (peso ante todo) ──
-    groups = _resolver_sobrecarga_con_afinidad(
-        groups, pedidos_dict, vehiculos_cap, afinidad_norm, afinidad_raw, nodos_hist,
-        coords_dict,
-    )
+    # Con ConVRP la capacidad ya se resolvió contra la plantilla (unidad → día →
+    # partir), así que estos pasos —propios del motor de afinidad— se omiten.
+    if convrp_groups is None:
+        groups = _resolver_sobrecarga_con_afinidad(
+            groups, pedidos_dict, vehiculos_cap, afinidad_norm, afinidad_raw,
+            nodos_hist, coords_dict,
+        )
 
     # ── 6.5. Anti-aislamiento: integrar rutas de 1 parada en ruta compatible ───
     # Detectar sucursales que históricamente operan solas (umbral ≥ 50 % de sus
     # apariciones y al menos 2 veces confirmado) para no forzarlas en grupo.
-    solos_historicos = _detectar_historicamente_solos(historiales)
-    groups = _consolidar_aisladas(
-        groups, pedidos_dict, vehiculos_cap, afinidad_norm, afinidad_raw,
-        nodos_hist, solos_historicos,
-    )
+    if convrp_groups is None:
+        solos_historicos = _detectar_historicamente_solos(historiales)
+        groups = _consolidar_aisladas(
+            groups, pedidos_dict, vehiculos_cap, afinidad_norm, afinidad_raw,
+            nodos_hist, solos_historicos,
+        )
 
     # ── 6.6. Rebalanceo geográfico: compactar rutas por cercanía (por día),
     # respetando peso y volumen. Degradación segura: ante cualquier error se
     # conservan las rutas sin rebalancear.
-    if REBALANCEO_GEOGRAFICO:
+    if REBALANCEO_GEOGRAFICO and convrp_groups is None:
         try:
             vehiculos_vol = obtener_volumenes_vehiculos()
             _sin_vol = [v for v in vehiculos_cap if v not in vehiculos_vol]
@@ -1172,6 +1234,10 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             )
         except Exception as e:  # noqa: BLE001
             print(f"[rebalanceo_geografico] omitido por error: {e}")
+
+    # Con el flag encendido mandan las rutas de la plantilla canónica.
+    if convrp_groups is not None:
+        groups = convrp_groups
 
     # ── 7. Estadísticas históricas para clasificar el estado de cada ruta ───────
     dfs_hist = obtener_historicos_como_dfs()
@@ -1323,7 +1389,64 @@ def exportar_csv_rutas(rutas_list: list) -> str:
 
 # ── Guardar rutas confirmadas en historial ────────────────────────────────────
 
-def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_registro: str = "sucursales") -> dict:
+def _fecha_inicio_de_logistica(logistica_id: str) -> str:
+    """`logisticas.fecha_inicio` de esa logística, o '' si no se puede leer."""
+    try:
+        oid = _id_valido(str(logistica_id))
+        if not oid:
+            return ""
+        t = get_table("logisticas")
+        fila = get_db().execute(
+            select(t.c.fecha_inicio).where(t.c.mongo_id == oid)).mappings().first()
+        return str(fila["fecha_inicio"] or "") if fila else ""
+    except Exception as exc:  # noqa: BLE001
+        # Ante la duda NO se abre el candado: se devuelve vacío, que no es
+        # canónico, pero se avisa fuerte para que no pase inadvertido.
+        print("=" * 70)
+        print(f"[historico] no se pudo leer fecha_inicio de {logistica_id}: "
+              f"{type(exc).__name__}: {exc}")
+        print("[historico] el candado de semanas canónicas NO pudo evaluarse.")
+        print("=" * 70)
+        return ""
+
+
+def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list,
+                         tipo_registro: str = "sucursales",
+                         permitir_canon: bool = False) -> dict:
+    """
+    Guarda rutas confirmadas en `rutas_historicas` — con CANDADO.
+
+    Las 9 semanas del corpus canónico (`config.SEMANAS_CANONICAS`) son datos de
+    ORIGEN: el plan que la empresa entregó en los archivos `_HT.xls`, y la única
+    referencia contra la que se puede medir el motor. Esta función hace UPSERT,
+    y el front la dispara en fire-and-forget al guardar en Modificación
+    (`static/js/modificacion.js`), así que sin candado basta con que alguien
+    abra una semana vieja y guarde para borrar el canon — sin rastro, porque
+    `cargado_en` se fabrica desde la fecha de inicio de la logística.
+
+    Ya ocurrió con 18-22 mayo el 2026-08-03.
+
+    `permitir_canon=True` levanta el candado. Es de uso PROGRAMÁTICO: el
+    endpoint HTTP no lo expone, de modo que la UI nunca puede sobreescribir el
+    corpus.
+    """
+    if not permitir_canon:
+        fi = _fecha_inicio_de_logistica(logistica_id)
+        if es_semana_canonica(fi):
+            return {
+                "status": "error",
+                "codigo": "SEMANA_CANONICA",
+                "mensaje": (
+                    f"Esta logística ({fi[:10]}) es una de las 9 semanas históricas "
+                    f"que sirven de referencia para calibrar el sistema. No se "
+                    f"puede sobrescribir su histórico desde la aplicación. Las "
+                    f"rutas de la pantalla SÍ se guardaron; lo único que no se "
+                    f"tocó es el registro histórico."),
+            }
+    return _escribir_historico(logistica_id, nombre, rutas_list, tipo_registro)
+
+
+def _escribir_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_registro: str = "sucursales") -> dict:
     """
     Guarda rutas confirmadas como un nuevo documento en rutas_historicas.
 
@@ -1387,7 +1510,16 @@ def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_
         except Exception:
             pass
 
+        # OJO: `cargado_en` NO es marca de escritura — es la fecha de INICIO de
+        # la semana. Para saber cuándo se escribió de verdad están las columnas
+        # de auditoría de abajo (scripts/migrar_auditoria_historico.py).
         cargado_en = f"{fecha_inicio}T00:00:00" if fecha_inicio else datetime.now().isoformat()
+        try:
+            from flask import session as _sesion
+            _usuario = str(_sesion.get("usuario") or _sesion.get("nombre") or "")
+        except Exception:  # noqa: BLE001
+            _usuario = ""
+        _origen = "ui_modificacion" if _usuario else "programatico"
 
         nombre_auto = _nombre_desde_fechas(fecha_inicio, fecha_fin)
         if nombre_auto:
@@ -1407,6 +1539,18 @@ def guardar_en_historico(logistica_id: str, nombre: str, rutas_list: list, tipo_
             confirmada=True,
             tipo_registro=tipo_registro,
         )
+        # Auditoría real de escritura. Las columnas pueden no existir todavía
+        # (base sin migrar): en ese caso se omiten en vez de romper el guardado.
+        try:
+            _cols = set(tabla.c.keys())
+            if "escrito_en" in _cols:
+                valores["escrito_en"] = datetime.now().isoformat()
+            if "escrito_por" in _cols:
+                valores["escrito_por"] = _usuario[:120]
+            if "origen" in _cols:
+                valores["origen"] = _origen[:60]
+        except Exception as exc:  # noqa: BLE001
+            print(f"[historico] no se pudo registrar la auditoría de escritura: {exc}")
 
         # Upsert: si ya existe un historial confirmado (no-mayoristas) para esta
         # logística, actualizarlo; si no, insertar uno nuevo. Cuando

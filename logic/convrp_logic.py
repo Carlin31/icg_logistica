@@ -1,0 +1,526 @@
+"""
+logic/convrp_logic.py
+
+ConVRP — el VRP como AJUSTADOR sobre la plantilla canónica (Fase 2).
+
+En vez de generar rutas desde cero, parte de la plantilla histórica y sólo
+reoptimiza donde la demanda de la semana no cabe.
+
+Modelo (decisiones fijas del negocio):
+  - El GRUPO son las sucursales del grupo canónico CON PEDIDO esa semana, no el
+    roster completo: un rígido de 6 con demanda en 4 viaja de 4.
+  - La UNIDAD no es identidad del grupo, pero tampoco es libre: `unidad_ref` es
+    la preferencia y desviarse tiene penalización (se registra como excepción).
+  - El DÍA es atributo del GRUPO (se mueve en bloque completo, nunca parcial) y
+    sólo dentro de sus `dias_admisibles`; fuera de ese conjunto no se mueve.
+  - Rigidez de COMPOSICIÓN y flexibilidad de DÍA son dimensiones independientes:
+    un rígido puede cambiar de día si su conjunto admisible lo permite.
+
+Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
+    1) mover de UNIDAD dentro del mismo día
+    2) mover de DÍA dentro de los admisibles
+    3) PARTIR el grupo — último recurso, determinista y siempre registrado
+
+Determinismo: todo recorrido es sobre claves ordenadas; sin aleatoriedad ni
+dependencia del orden de los diccionarios de entrada. Cada grupo se mueve a lo
+sumo UNA vez por corrida y los barridos están acotados por `max_iteraciones`:
+eso impide el encadenamiento infinito (mover un grupo satura el día destino y
+dispara otro movimiento).
+
+Cada excepción registra QUÉ restricción ató (PESO / VOLUMEN / TIEMPO), para
+poder distinguir después alivio real de alivio fantasma — el modelo de tiempo
+sobrestima en rutas de muchas paradas chicas (ver nota de calibración).
+"""
+from logic.logistica_tiempo import evaluar_ruta_por_tiempo
+
+DIAS_ORDEN = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
+
+# ── configuración (constantes; el llamador puede sobreescribir vía cfg) ─────
+CONVRP_AVISO_PARADAS = 10        # sólo AVISA rutas largas; nunca bloquea ni parte
+CONVRP_MAX_ITERACIONES = 3       # tope de barridos: acota la cascada de días
+CONVRP_CHEQUEAR_TIEMPO = True
+CONVRP_HORA_SALIDA_MIN = 420     # 07:00
+CONVRP_HORA_CIERRE_MIN = 1200    # 20:00 (cierre de tiendas)
+CONVRP_VELOCIDAD_KMH = 35.0
+# True = velocidad haversine-equivalente calibrada por longitud de tramo
+# (55.5 km/h en tramos largos, 37.8 en cortos; medido contra OSRM sobre 875
+# tramos reales). Con la constante única de 35 km/h el trayecto matriz→clúster
+# se inflaba ~2.5 h y provocaba particiones de rígidos por una violación de
+# tiempo inexistente.
+CONVRP_VELOCIDAD_POR_TRAMO = True
+CONVRP_DEPOT = (18.87, -96.95)
+
+
+def cfg_por_defecto() -> dict:
+    return {
+        "aviso_paradas": CONVRP_AVISO_PARADAS,
+        "max_iteraciones": CONVRP_MAX_ITERACIONES,
+        "chequear_tiempo": CONVRP_CHEQUEAR_TIEMPO,
+        "hora_salida_min": CONVRP_HORA_SALIDA_MIN,
+        "hora_cierre_min": CONVRP_HORA_CIERRE_MIN,
+        "velocidad_kmh": CONVRP_VELOCIDAD_KMH,
+        "velocidad_por_tramo": CONVRP_VELOCIDAD_POR_TRAMO,
+        "depot": CONVRP_DEPOT,
+    }
+
+
+def _orden_dia(dia: str) -> int:
+    try:
+        return DIAS_ORDEN.index(str(dia).upper())
+    except ValueError:
+        return len(DIAS_ORDEN)
+
+
+def _num(x) -> float:
+    try:
+        return float(x or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+# ── evaluación de una ruta (qué restricción ata, si alguna) ─────────────────
+def _horario_del_dia(dia, cfg):
+    """
+    (salida, cierre) en minutos para ese día. `config_dias` NO es uniforme: el
+    lunes sale 11:00 y el resto 07:00 — cablear 07:00 regalaría 4 h los lunes
+    justo en la restricción que más decide. Cae al default si no hay entrada.
+    """
+    por_dia = cfg.get("horarios_por_dia") or {}
+    par = por_dia.get(str(dia).upper())
+    if par:
+        return float(par[0]), float(par[1])
+    return (float(cfg.get("hora_salida_min", CONVRP_HORA_SALIDA_MIN)),
+            float(cfg.get("hora_cierre_min", CONVRP_HORA_CIERRE_MIN)))
+
+
+_SIN_MAY = object()   # sentinela: "evaluar SIN la carga de mayoristas"
+
+
+def _restriccion_violada(sids, unidad, pedidos, volumenes, coords,
+                         vehiculos_cap, vehiculos_vol, cfg, dia=None,
+                         kg_mayoristas=None):
+    """Devuelve 'PESO' | 'VOLUMEN' | 'TIEMPO' — la PRIMERA que satura — o None.
+
+    `kg_mayoristas` es la carga de mayoristas enganchada a cada sucursal-ancla:
+    al concentrar los mayoristas en la ruta de su zona, esa carga puede saturar
+    la ruta que la recibe (AYOZINTEPEC mete 877 kg/sem sobre un grupo que en
+    Lores lleva 310 — 2.8x)."""
+    if not sids:
+        return None
+    if kg_mayoristas is None:                 # por defecto: la del cfg
+        kg_mayoristas = cfg.get("kg_mayoristas") or {}
+    elif kg_mayoristas is _SIN_MAY:
+        kg_mayoristas = {}
+    kg = sum(_num(pedidos.get(s)) for s in sids)
+    if kg_mayoristas:
+        kg += sum(_num(kg_mayoristas.get(s)) for s in sids)
+    cap = _num(vehiculos_cap.get(unidad)) or float("inf")
+    if kg > cap:
+        return "PESO"
+    m3 = sum(_num(volumenes.get(s)) for s in sids)
+    cap_v = vehiculos_vol.get(unidad)
+    if cap_v is not None and m3 > _num(cap_v):
+        return "VOLUMEN"
+    if cfg.get("chequear_tiempo"):
+        paradas = []
+        for s in sids:
+            c = coords.get(s)
+            if c is None:
+                continue
+            paradas.append({"latitud": c[0], "longitud": c[1],
+                            "peso_kg": _num(pedidos.get(s))})
+        if paradas:
+            salida, cierre = _horario_del_dia(dia, cfg)
+            out = evaluar_ruta_por_tiempo(
+                paradas, cfg.get("depot", CONVRP_DEPOT), salida, cierre,
+                velocidad_kmh=cfg.get("velocidad_kmh", CONVRP_VELOCIDAD_KMH),
+                por_tramo=cfg.get("velocidad_por_tramo", True))
+            if any(not p["entregable_por_tiempo"] for p in out):
+                return "TIEMPO"
+    return None
+
+
+def _origen_de_carga(sids, unidad, pedidos, volumenes, coords,
+                     vehiculos_cap, vehiculos_vol, cfg, dia, kg_mayoristas):
+    """
+    'LORES' | 'MAYORISTAS' | 'AMBAS' | None — qué empujó la ruta sobre el límite.
+
+    Se evalúa quitando cada fuente por separado: si sin mayoristas la ruta cabe,
+    los mayoristas la saturaron; si sin la demanda Lores cabe, fue Lores. Sin
+    este campo, tras el enganche por zona se verían rígidos partiéndose sin
+    poder decir por qué.
+    """
+    if not kg_mayoristas:
+        return "LORES"
+    solo_lores = _restriccion_violada(sids, unidad, pedidos, volumenes, coords,
+                                      vehiculos_cap, vehiculos_vol, cfg, dia,
+                                      kg_mayoristas=_SIN_MAY)
+    vacio = {s: 0 for s in sids}
+    solo_may = _restriccion_violada(sids, unidad, vacio, volumenes, coords,
+                                    vehiculos_cap, vehiculos_vol, cfg, dia,
+                                    kg_mayoristas=kg_mayoristas)
+    if solo_lores and solo_may:
+        return "AMBAS"
+    if solo_may:
+        return "MAYORISTAS"
+    if solo_lores:
+        return "LORES"
+    return "AMBAS"      # ninguna sola satura, pero juntas sí
+
+
+def _sids_de_ruta(asign, unidad, dia):
+    sids = []
+    for gid in sorted(asign):
+        a = asign[gid]
+        if a["unidad"] == unidad and a["dia"] == dia:
+            sids.extend(a["miembros"])
+    return sorted(sids)
+
+
+def _rutas_activas(asign):
+    """Claves (unidad, dia) presentes, en orden determinista (día, unidad)."""
+    claves = {(a["unidad"], a["dia"]) for a in asign.values()}
+    return sorted(claves, key=lambda k: (_orden_dia(k[1]), str(k[0])))
+
+
+def _evaluar(asign, unidad, dia, pedidos, volumenes, coords,
+             vehiculos_cap, vehiculos_vol, cfg):
+    return _restriccion_violada(_sids_de_ruta(asign, unidad, dia), unidad,
+                                pedidos, volumenes, coords,
+                                vehiculos_cap, vehiculos_vol, cfg, dia=dia)
+
+
+def _kg_grupo(a, pedidos):
+    return sum(_num(pedidos.get(s)) for s in a["miembros"])
+
+
+def _candidatos_a_mover(asign, unidad, dia, pedidos):
+    """Grupos de la ruta, ordenados: FLEXIBLE antes que RIGIDO, luego el de mayor
+    peso (alivia más), desempate por id de grupo ascendente."""
+    en_ruta = [asign[g] for g in sorted(asign)
+               if asign[g]["unidad"] == unidad and asign[g]["dia"] == dia]
+    return sorted(en_ruta, key=lambda a: (0 if a["rigidez"] != "RIGIDO" else 1,
+                                          -_kg_grupo(a, pedidos), a["grupo"]))
+
+
+def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
+                        vehiculos_cap, vehiculos_vol, cfg):
+    """Otra unidad, MISMO día, donde el grupo quepa sin saturarla."""
+    for unidad in sorted(vehiculos_cap):
+        if unidad == a["unidad"]:
+            continue
+        destino = _sids_de_ruta(asign, unidad, a["dia"]) + list(a["miembros"])
+        if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
+                                coords, vehiculos_cap, vehiculos_vol, cfg,
+                                dia=a["dia"]) is None:
+            return unidad
+    return None
+
+
+def _asignar_unidades(asign, pedidos, volumenes, coords,
+                      vehiculos_cap, vehiculos_vol, cfg):
+    """
+    Reparte los grupos de cada día entre las unidades.
+
+    `unidad_ref` es PREFERENCIA con penalización: se intenta primero y sólo se
+    cede si el grupo no cabe ahí. El resto de unidades se prueba por carga
+    ascendente (desempate por nombre) — determinista. Esto resuelve el reparto
+    en la asignación, no a base de reparaciones acotadas: si varios grupos
+    comparten `unidad_ref` el mismo día, se distribuyen en la flota libre en vez
+    de saturar una unidad y terminar partiendo grupos.
+
+    Devuelve la lista de excepciones MOVIDO_UNIDAD (desviaciones de la
+    preferencia). Es idempotente: se puede volver a llamar tras mover un día.
+    """
+    for a in asign.values():
+        a["unidad"] = None
+    por_dia: dict = {}
+    for gid in sorted(asign):
+        por_dia.setdefault(asign[gid]["dia"], []).append(gid)
+
+    desviaciones: list = []
+    for dia in sorted(por_dia, key=_orden_dia):
+        # los grupos más pesados primero (first-fit decreasing), desempate por id
+        gids = sorted(por_dia[dia],
+                      key=lambda g: (-_kg_grupo(asign[g], pedidos), g))
+        for gid in gids:
+            a = asign[gid]
+            ref = a["unidad_ref"] if a["unidad_ref"] in vehiculos_cap else None
+            # Al ceder la preferida se busca CONSOLIDAR: primero las unidades que
+            # ya llevan carga ese día (la más llena que todavía admita el grupo),
+            # y sólo al final una vacía. Ordenar por carga ASCENDENTE dispersaría
+            # —abriría un viaje nuevo por grupo— y en el histórico un viaje
+            # (unidad, día) lleva ~1.4 grupos, no 1.0.
+            # Al ceder la preferida, entre unidades EMPATADAS en carga decide la
+            # AFINIDAD histórica del grupo, no el abecedario. Sin esto, el g24
+            # (Playa Vicente) se iba a F 350_1 sobre F 350_2 sólo porque ambas
+            # estaban vacías y "F 350_1" ordena antes: le abría a esa unidad un
+            # día de trabajo que la operación no hace, dejando libre la que sí
+            # lleva esa carga.
+            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
+            otras = sorted(
+                [u for u in vehiculos_cap if u != ref],
+                key=lambda u: (-sum(_num(pedidos.get(s))
+                                    for s in _sids_de_ruta(asign, u, dia)),
+                               -_num(af.get(u)), str(u)))
+            elegido, restr_ref = None, None
+            for i, unidad in enumerate([ref] + otras if ref else otras):
+                destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
+                violacion = _restriccion_violada(
+                    sorted(destino), unidad, pedidos, volumenes, coords,
+                    vehiculos_cap, vehiculos_vol, cfg, dia=dia)
+                if violacion is None:
+                    elegido = unidad
+                    break
+                if ref and i == 0:
+                    restr_ref = violacion       # por qué no cupo en la preferida
+            if elegido is None:
+                # Ningún destino admite el grupo completo (p. ej. pesa más que
+                # cualquier vehículo). Va a la unidad con MÁS ESPACIO LIBRE del
+                # día, para que la partición posterior pele lo mínimo.
+                #
+                # "Más vacía" NO es "la que lleva menos kilos": con todas las
+                # unidades en cero eso desempataba por nombre y mandaba un grupo
+                # de 3,981 kg a un T 25 de 1,300 (semana del 6-10 abril). Para
+                # cuando corría la partición, las unidades grandes ya estaban
+                # ocupadas por otros grupos y lo pelado no encontraba destino:
+                # la ruta se quedaba al 306 %. Espacio libre = capacidad menos
+                # lo que ya lleva (incluida la carga de mayoristas anclada).
+                candidatos = sorted(vehiculos_cap) or ["VEHICULO"]
+
+                kg_may = cfg.get("kg_mayoristas") or {}
+
+                def _libre(u):
+                    sids_u = _sids_de_ruta(asign, u, dia)
+                    ocupado = sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
+                                  for s in sids_u)
+                    return _num(vehiculos_cap.get(u)) - ocupado
+
+                elegido = min(candidatos, key=lambda u: (-_libre(u), str(u)))
+                if ref and _restriccion_violada(
+                        sorted(a["miembros"]), ref, pedidos, volumenes, coords,
+                        vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
+                    elegido = ref     # cabe sola en su preferida: consérvala
+            a["unidad"] = elegido
+            if ref and elegido != ref:
+                desviaciones.append({
+                    "tipo": "MOVIDO_UNIDAD", "grupo": a["grupo"],
+                    "rigidez": a["rigidez"], "restriccion": restr_ref,
+                    "origen_carga": _origen_de_carga(
+                        sorted(_sids_de_ruta(asign, ref, dia) + list(a["miembros"])),
+                        ref, pedidos, volumenes, coords, vehiculos_cap,
+                        vehiculos_vol, cfg, dia, cfg.get("kg_mayoristas")),
+                    "desde_unidad": ref, "a_unidad": elegido, "dia": dia,
+                    "motivo": f"{ref}/{dia} sin cupo por {restr_ref}; "
+                              f"se cede la unidad de referencia",
+                })
+    return desviaciones
+
+
+def _dia_alternativo(asign, a, pedidos, volumenes, coords,
+                     vehiculos_cap, vehiculos_vol, cfg):
+    """Otro día ADMISIBLE (en orden de preferencia) donde el grupo quepa.
+    El grupo se mueve completo — el día es atributo del bloque."""
+    for dia in a["dias_admisibles"]:
+        if dia == a["dia"]:
+            continue
+        for unidad in [a["unidad_ref"]] + sorted(vehiculos_cap):
+            if unidad not in vehiculos_cap:
+                continue
+            destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
+            if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
+                                    coords, vehiculos_cap, vehiculos_vol,
+                                    cfg, dia=dia) is None:
+                return dia, unidad
+    return None
+
+
+def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dict,
+                                     plantilla: list, vehiculos_cap: dict,
+                                     vehiculos_vol: dict, cfg: dict = None,
+                                     kg_mayoristas: dict = None):
+    """
+    Construye las rutas de la semana AJUSTANDO la plantilla canónica.
+
+    plantilla : [{grupo, rigidez, dia|dia_preferido, unidad_ref, sucursales,
+                  dias_admisibles}]
+    Retorna (groups, excepciones):
+      groups      : {(vehiculo, dia): [{"sid","seq"}]}  — mismo formato que
+                    consume el resto del motor (reporte, secuencia, PDF).
+      excepciones : [{tipo, grupo, restriccion, ...}] — MOVIDO_UNIDAD,
+                    MOVIDO_DIA, PARTIDO_CAPACIDAD, AVISO_RUTA_LARGA.
+    """
+    cfg = dict(cfg_por_defecto(), **(cfg or {}))
+    if kg_mayoristas is not None:
+        cfg["kg_mayoristas"] = kg_mayoristas
+    kg_may = cfg.get("kg_mayoristas") or {}
+    vehiculos_vol = vehiculos_vol or {}
+    excepciones: list = []
+
+    # ── 1. Rutas base: el grupo son las sucursales CON PEDIDO esta semana ──
+    asign: dict = {}
+    for g in sorted(plantilla, key=lambda x: int(x["grupo"])):
+        activos = sorted(s for s in g.get("sucursales", [])
+                         if _num(pedidos.get(s)) > 0)
+        if not activos:
+            continue                      # grupo sin demanda: no genera ruta
+        dia = str(g.get("dia_preferido") or g.get("dia") or "LUNES").upper()
+        adm = [str(d).upper() for d in (g.get("dias_admisibles") or [dia])]
+        if dia not in adm:
+            adm = [dia] + adm
+        unidad_ref = g.get("unidad_ref")
+        unidad = unidad_ref if unidad_ref in vehiculos_cap else (
+            sorted(vehiculos_cap)[0] if vehiculos_cap else "VEHICULO")
+        asign[int(g["grupo"])] = dict(
+            grupo=int(g["grupo"]), rigidez=str(g.get("rigidez", "")).upper(),
+            unidad=unidad, unidad_ref=unidad_ref, dia=dia, dia_preferido=dia,
+            dias_admisibles=adm, miembros=activos)
+
+    # ── 2. Palanca 1: repartir en la flota (unidad_ref = preferencia) ──
+    desviaciones = _asignar_unidades(asign, pedidos, volumenes, coords,
+                                     vehiculos_cap, vehiculos_vol, cfg)
+
+    # ── 3. Palanca 2: mover de DÍA dentro de los admisibles. Cada grupo se
+    #      mueve a lo sumo UNA vez y los barridos tienen tope: eso acota la
+    #      cascada (mover un grupo satura el día destino y dispara otro). ──
+    movidos: set = set()
+    for iteracion in range(1, int(cfg["max_iteraciones"]) + 1):
+        progreso = False
+        for unidad, dia in _rutas_activas(asign):
+            restr = _evaluar(asign, unidad, dia, pedidos, volumenes, coords,
+                             vehiculos_cap, vehiculos_vol, cfg)
+            if restr is None:
+                continue
+            for a in _candidatos_a_mover(asign, unidad, dia, pedidos):
+                if a["grupo"] in movidos:
+                    continue
+                alt = _dia_alternativo(asign, a, pedidos, volumenes, coords,
+                                       vehiculos_cap, vehiculos_vol, cfg)
+                if alt:
+                    dia_destino, unidad_destino = alt
+                    excepciones.append({
+                        "tipo": "MOVIDO_DIA", "grupo": a["grupo"],
+                        "rigidez": a["rigidez"], "restriccion": restr,
+                        "origen_carga": _origen_de_carga(
+                            _sids_de_ruta(asign, unidad, dia), unidad, pedidos,
+                            volumenes, coords, vehiculos_cap, vehiculos_vol,
+                            cfg, dia, kg_may),
+                        "desde_dia": a["dia"], "a_dia": dia_destino,
+                        "desde_unidad": a["unidad"], "a_unidad": unidad_destino,
+                        "iteracion": iteracion,
+                        "motivo": f"{unidad}/{dia} saturada por {restr}; "
+                                  f"día dentro del conjunto admisible",
+                    })
+                    a["dia"] = dia_destino
+                    a["unidad"] = unidad_destino
+                    movidos.add(a["grupo"]); progreso = True
+                    break
+        if progreso:
+            # el reparto de unidades se recalcula tras cambiar un día
+            desviaciones = _asignar_unidades(asign, pedidos, volumenes, coords,
+                                             vehiculos_cap, vehiculos_vol, cfg)
+        else:
+            break
+    excepciones = desviaciones + excepciones
+
+    # ── 3. Último recurso: partir. Determinista y siempre registrado. ──
+    for unidad, dia in _rutas_activas(asign):
+        for _ in range(len(asign)):       # cota dura: nunca bucle infinito
+            restr = _evaluar(asign, unidad, dia, pedidos, volumenes, coords,
+                             vehiculos_cap, vehiculos_vol, cfg)
+            if restr is None:
+                break
+            candidatos = _candidatos_a_mover(asign, unidad, dia, pedidos)
+            candidatos = [a for a in candidatos if len(a["miembros"]) > 1]
+            if not candidatos:
+                break
+            a = candidatos[0]
+            metrica = volumenes if restr == "VOLUMEN" else pedidos
+            # pelar primero lo que más reduce el sobrecupo; desempate por
+            # num_tienda ascendente (nunca "la que caiga primero")
+            orden = sorted(a["miembros"], key=lambda s: (-_num(metrica.get(s)), s))
+            separadas: list = []
+            # Se registra TODA restricción que ató durante el pelado: si el
+            # pelado siguió por TIEMPO (modelo conocido como sobreestimado en
+            # rutas de muchas paradas chicas) queda asentado, para poder
+            # distinguir después alivio real de alivio fantasma.
+            restricciones: list = [restr]
+            for sid in orden:
+                if len(a["miembros"]) - len(separadas) <= 1:
+                    break
+                separadas.append(sid)
+                restantes = [s for s in a["miembros"] if s not in separadas]
+                otros = [s for s in _sids_de_ruta(asign, unidad, dia)
+                         if s not in a["miembros"]]
+                aun = _restriccion_violada(sorted(otros + restantes), unidad,
+                                           pedidos, volumenes, coords,
+                                           vehiculos_cap, vehiculos_vol, cfg,
+                                           dia=dia)
+                if aun is None:
+                    break
+                if aun not in restricciones:
+                    restricciones.append(aun)
+            if not separadas:
+                break
+            a["miembros"] = [s for s in a["miembros"] if s not in separadas]
+            # reubicar la parte separada: otra unidad del mismo día, si no otro
+            # día admisible; si no hay destino, se queda y queda documentado.
+            sub = dict(a, grupo=a["grupo"], miembros=sorted(separadas))
+            destino_u = _unidad_alternativa(asign, sub, pedidos, volumenes,
+                                            coords, vehiculos_cap,
+                                            vehiculos_vol, cfg)
+            destino = None
+            if destino_u:
+                destino = (destino_u, dia)
+            else:
+                alt = _dia_alternativo(asign, sub, pedidos, volumenes, coords,
+                                       vehiculos_cap, vehiculos_vol, cfg)
+                if alt:
+                    destino = (alt[1], alt[0])
+            clave = max(asign) + 1
+            asign[clave] = dict(
+                grupo=a["grupo"], rigidez=a["rigidez"],
+                unidad=(destino[0] if destino else unidad),
+                unidad_ref=a["unidad_ref"],
+                dia=(destino[1] if destino else dia), dia_preferido=a["dia_preferido"],
+                dias_admisibles=a["dias_admisibles"], miembros=sorted(separadas))
+            excepciones.append({
+                "tipo": "PARTIDO_CAPACIDAD", "grupo": a["grupo"],
+                "rigidez": a["rigidez"], "restriccion": restr,
+                "origen_carga": _origen_de_carga(
+                    _sids_de_ruta(asign, unidad, dia), unidad, pedidos,
+                    volumenes, coords, vehiculos_cap, vehiculos_vol, cfg,
+                    dia, kg_may),
+                "restricciones_durante_particion": list(restricciones),
+                "sucursales_separadas": sorted(separadas),
+                "sucursales_restantes": sorted(a["miembros"]),
+                "destino_unidad": (destino[0] if destino else None),
+                "destino_dia": (destino[1] if destino else None),
+                "motivo": f"{unidad}/{dia} excede {restr} y no hubo unidad ni "
+                          f"día admisible con cupo para el grupo completo",
+            })
+            if destino is None:
+                break                      # sin destino: no seguir partiendo
+
+    # ── 4. Salida en el formato que consume el resto del motor ──
+    groups: dict = {}
+    for gid in sorted(asign):
+        a = asign[gid]
+        for sid in a["miembros"]:
+            groups.setdefault((a["unidad"], a["dia"]), []).append(
+                {"sid": sid, "seq": 999, "grupo": a["grupo"]})
+    for clave in groups:
+        groups[clave].sort(key=lambda m: m["sid"])
+
+    # ── 5. Aviso de rutas largas (informativo, nunca bloquea) ──
+    tope = cfg.get("aviso_paradas")
+    if tope:
+        for (unidad, dia) in sorted(groups, key=lambda k: (_orden_dia(k[1]), str(k[0]))):
+            n = len(groups[(unidad, dia)])
+            if n > int(tope):
+                excepciones.append({
+                    "tipo": "AVISO_RUTA_LARGA", "grupo": None, "restriccion": None,
+                    "unidad": unidad, "dia": dia, "paradas": n,
+                    "motivo": f"ruta con {n} paradas (> {tope}); sólo aviso",
+                })
+    return groups, excepciones
