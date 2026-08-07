@@ -1,0 +1,216 @@
+"""
+tests/test_convrp_validacion.py
+
+Pruebas del arnés de fidelidad (origen móvil). Puras: sin BD.
+"""
+import os
+import sys
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
+from logic.convrp_validacion import medir_fidelidad, construir_plantilla_desde
+
+
+def _fila(sid, veh, dia):
+    return {"id_sucursal": sid, "vehiculo": veh, "dia_semana": dia,
+            "tipo": "sucursal", "kg_entrega": 100, "secuencia_visita": 1}
+
+
+def test_dia_exacto_y_dia_admisible():
+    # El plan pone a la sucursal 1 en MARTES; en la realidad fue MIERCOLES.
+    # Día exacto falla, pero MIERCOLES está entre los admisibles de su grupo,
+    # así que la métrica "admisible" debe darlo por bueno.
+    groups = {("V1", "MARTES"): [{"sid": 1, "seq": 1}, {"sid": 2, "seq": 2}]}
+    reales = [_fila(1, "V1", "MIERCOLES"), _fila(2, "V1", "MIERCOLES")]
+    admisibles = {1: ["MARTES", "MIERCOLES"], 2: ["MARTES", "MIERCOLES"]}
+    fid = medir_fidelidad(groups, reales, admisibles_por_sucursal=admisibles)
+    assert fid["dia_correcto_pct"] == 0.0
+    assert fid["dia_admisible_pct"] == 100.0
+
+
+def test_dia_admisible_castiga_fuera_del_conjunto():
+    groups = {("V1", "VIERNES"): [{"sid": 1, "seq": 1}]}
+    reales = [_fila(1, "V1", "LUNES")]
+    admisibles = {1: ["MARTES", "MIERCOLES"]}       # VIERNES no es admisible
+    fid = medir_fidelidad(groups, reales, admisibles_por_sucursal=admisibles)
+    assert fid["dia_admisible_pct"] == 0.0
+
+
+def test_sin_admisibles_la_metrica_no_aparece():
+    groups = {("V1", "MARTES"): [{"sid": 1, "seq": 1}]}
+    reales = [_fila(1, "V1", "MARTES")]
+    fid = medir_fidelidad(groups, reales)
+    assert fid["dia_correcto_pct"] == 100.0
+    assert fid.get("dia_admisible_pct") is None
+
+
+def test_construir_plantilla_agrupa_lo_que_viaja_junto():
+    # 1 y 2 viajan siempre juntas; 3 siempre sola.
+    semanas = [[_fila(1, "V1", "LUNES"), _fila(2, "V1", "LUNES"), _fila(3, "V2", "MARTES")]
+               for _ in range(4)]
+    pl = construir_plantilla_desde(semanas)
+    grupos = sorted(tuple(g["sucursales"]) for g in pl)
+    assert (1, 2) in grupos
+    assert (3,) in grupos
+
+
+def test_construir_plantilla_no_usa_semanas_fuera_de_la_ventana():
+    # Las 2 primeras semanas dicen LUNES, las 2 últimas MARTES. Con ventana=2 el
+    # día debe salir MARTES (sólo las últimas), no LUNES.
+    semanas = ([[_fila(1, "V1", "LUNES")]] * 2) + ([[_fila(1, "V1", "MARTES")]] * 2)
+    pl = construir_plantilla_desde(semanas, ventana_dia=2)
+    assert pl[0]["dia"] == "MARTES"
+
+
+def test_ventana_de_dia_y_de_unidad_son_independientes():
+    # Son dos preguntas distintas ("¿qué día opera el grupo?" vs "¿en qué
+    # camión?") y medirlas con la misma ventana impide saber cuál movió el
+    # resultado. Aquí: 3 semanas en V1/LUNES y una última en V2/MARTES.
+    from logic.convrp_validacion import construir_plantilla_desde
+    viejas = [[{"id_sucursal": 1, "vehiculo": "V1", "dia_semana": "LUNES"}]] * 3
+    nueva = [{"id_sucursal": 1, "vehiculo": "V2", "dia_semana": "MARTES"}]
+    semanas = viejas + [nueva]
+    # ventana 1 para ambos: manda la última semana
+    p = construir_plantilla_desde(semanas, ventana_dia=1)[0]
+    assert (p["dia_preferido"], p["unidad_ref"]) == ("MARTES", "V2")
+    # día por la última semana, unidad por todo el histórico
+    p = construir_plantilla_desde(semanas, ventana_dia=1, ventana_unidad=None)[0]
+    assert (p["dia_preferido"], p["unidad_ref"]) == ("MARTES", "V1")
+    # y al revés
+    p = construir_plantilla_desde(semanas, ventana_dia=None, ventana_unidad=1)[0]
+    assert (p["dia_preferido"], p["unidad_ref"]) == ("LUNES", "V2")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Asignación GLOBAL de unidad_ref
+#
+# La moda por grupo ignora que la unidad es un recurso compartido: 8 grupos
+# apuntan a T 17_2 y 8 a T 20 mientras J 18, J 19 y K 20 no son referencia de
+# ninguno. Medido sobre 9 semanas, eso deja T 17_1 con +17 días de trabajo
+# contra la realidad y a K 16 con -12. La referencia hay que resolverla POR DÍA
+# y contra la capacidad, no grupo por grupo.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_asignacion_global_no_apila_grupos_en_la_misma_unidad():
+    from logic.convrp_validacion import asignar_unidad_ref
+    # tres grupos el mismo día, todos con máxima afinidad por V1, que no puede
+    # con los tres: la afinidad manda, pero la capacidad decide.
+    grupos = [{"grupo": i, "dia_preferido": "LUNES"} for i in (1, 2, 3)]
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}, 3: {"V1": 9}}
+    kg = {1: 900, 2: 900, 3: 900}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    assert sorted(ref.values()) == ["V1", "V2", "V3"]
+
+
+def test_asignacion_global_respeta_la_afinidad_cuando_cabe():
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
+    afinidad = {1: {"V2": 7, "V1": 1}, 2: {"V1": 8}}
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    assert ref == {1: "V2", 2: "V1"}
+
+
+def test_asignacion_global_no_colisiona_entre_dias_distintos():
+    # dos grupos con la misma afinidad pero en días distintos SÍ pueden
+    # compartir unidad: la restricción es por día, no por semana.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "MARTES"}]
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    kg = {1: 900, 2: 900}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, {"V1": 1000, "V2": 1000})
+    assert ref == {1: "V1", 2: "V1"}
+
+
+def test_asignacion_global_es_determinista():
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": i, "dia_preferido": "LUNES"} for i in (1, 2, 3, 4)]
+    afinidad = {i: {} for i in (1, 2, 3, 4)}          # sin historia: empate total
+    kg = {i: 500 for i in (1, 2, 3, 4)}
+    caps = {"A": 1000, "B": 1000, "C": 1000}
+    a = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    b = asignar_unidad_ref(list(reversed(grupos)), afinidad, kg, caps)
+    assert a == b
+
+
+def test_asignacion_global_usa_toda_la_flota_antes_de_sobrecargar():
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": i, "dia_preferido": "LUNES"} for i in range(1, 5)]
+    afinidad = {i: {"V1": 9} for i in range(1, 5)}    # todos quieren V1
+    kg = {i: 800 for i in range(1, 5)}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000, "V4": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    assert len(set(ref.values())) == 4                # una unidad por grupo
+
+
+def test_asignacion_global_respeta_el_objetivo_de_viajes_del_dia():
+    # Repartir por afinidad sin más abre un viaje por grupo: fuera de muestra
+    # subía de 29.4 a 34.6 viajes/semana contra 29.8 reales, y la utilización
+    # caía de 65 % a 58 %. La empresa hace ~6 viajes por día, no uno por grupo:
+    # el objetivo del día acota cuántas unidades se abren.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": i, "dia_preferido": "LUNES"} for i in (1, 2, 3, 4)]
+    afinidad = {1: {"V1": 9}, 2: {"V2": 9}, 3: {"V3": 9}, 4: {"V4": 9}}
+    kg = {i: 400 for i in (1, 2, 3, 4)}               # 1,600 kg en total
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000, "V4": 1000}
+    libre = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    assert len(set(libre.values())) == 4              # sin objetivo: 4 unidades
+    acotada = asignar_unidad_ref(grupos, afinidad, kg, caps,
+                                 viajes_objetivo={"LUNES": 2})
+    assert len(set(acotada.values())) == 2            # con objetivo: 2
+
+
+def test_objetivo_de_viajes_cede_si_la_carga_no_cabe():
+    # El objetivo es una preferencia, no un tope duro: si los grupos del día no
+    # caben en esas unidades, se abre otra en vez de sobrecargar.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": i, "dia_preferido": "LUNES"} for i in (1, 2, 3)]
+    afinidad = {1: {"V1": 9}, 2: {"V2": 9}, 3: {"V3": 9}}
+    kg = {i: 900 for i in (1, 2, 3)}                  # 2,700 kg
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps,
+                             viajes_objetivo={"LUNES": 1})
+    assert len(set(ref.values())) == 3
+
+
+def test_kg_representativo_no_usa_la_mediana_para_decidir_camion():
+    # Elegir capacidad con la MEDIANA subdimensiona: el g38 (Tierra Blanca 1)
+    # tiene mediana 1,091 kg y quedó referenciado a un T 23 de 1,500 — pero su
+    # semana pico son 1,529 y no cabe. El motor tuvo que cederlo a un F 350 y
+    # le abrió a FELIPE un día de trabajo que no existe en la operación.
+    # Para decidir camión hay que mirar el percentil alto, no el centro.
+    from logic.convrp_validacion import kg_representativo
+    semanas = [900, 1000, 1091, 1100, 1200, 1250, 1300, 1400, 1529]
+    assert kg_representativo(semanas) >= 1400
+    assert kg_representativo(semanas) <= 1529          # no es el máximo ciego
+    assert kg_representativo([]) == 0.0
+    assert kg_representativo([500]) == 500
+
+
+def test_la_unidad_de_referencia_tiene_que_aguantar_la_semana_alta():
+    # Dos cantidades distintas: cuánto OCUPA el grupo al empacar varios en un
+    # mismo camión (la semana típica) y cuánto tiene que AGUANTAR ese camión
+    # (la semana alta). Mezclarlas subdimensiona: con la mediana el g38 quedó
+    # referenciado a un T 23 de 1,500 y su pico de 1,529 no cabía.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"}]
+    afinidad = {1: {"CHICA": 9}}          # la historia dice CHICA…
+    ref = asignar_unidad_ref(grupos, afinidad, {1: 1000},
+                             {"CHICA": 1200, "GRANDE": 3000},
+                             kg_minimo={1: 1500})    # …pero no aguanta el pico
+    assert ref == {1: "GRANDE"}
+
+
+def test_el_minimo_no_infla_el_empaque():
+    # El mínimo filtra candidatos, no reserva capacidad: dos grupos con pico
+    # alto pero consumo típico bajo siguen cabiendo juntos en el mismo camión.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    ref = asignar_unidad_ref(grupos, afinidad, {1: 400, 2: 400}, {"V1": 1000},
+                             kg_minimo={1: 900, 2: 900})
+    assert ref == {1: "V1", 2: "V1"}

@@ -89,6 +89,22 @@ def evaluar_llegadas(paradas: list, tramos_min: list,
     return resultado
 
 
+# Velocidad haversine-equivalente (km en línea recta ÷ hora de viaje real),
+# calibrada contra OSRM sobre 875 tramos de las 9 semanas confirmadas. NO es
+# constante: los tramos largos (matriz → clúster) son mucho más "directos" que
+# el zigzag entre sucursales cercanas. Una sola constante de 35 km/h inflaba el
+# tramo matriz→Los Tuxtlas en ~2.5 h y disparaba violaciones de tiempo falsas.
+VELOCIDAD_TRAMO_LARGO_KMH = 55.5   # mediana de 249 tramos > 50 km
+VELOCIDAD_TRAMO_CORTO_KMH = 37.8   # mediana de 626 tramos ≤ 50 km
+UMBRAL_TRAMO_LARGO_KM = 50.0
+
+
+def velocidad_para_km(km: float) -> float:
+    """Velocidad haversine-equivalente según la longitud del tramo."""
+    return (VELOCIDAD_TRAMO_LARGO_KMH if float(km) > UMBRAL_TRAMO_LARGO_KM
+            else VELOCIDAD_TRAMO_CORTO_KMH)
+
+
 def _latlon(p: dict):
     lat = p.get("latitud", p.get("lat"))
     lon = p.get("longitud", p.get("lon"))
@@ -98,7 +114,8 @@ def _latlon(p: dict):
 
 
 def evaluar_ruta_por_tiempo(paradas: list, depot: tuple, hora_salida_min: float,
-                            hora_limite_min: float, velocidad_kmh: float = 35.0) -> list:
+                            hora_limite_min: float, velocidad_kmh: float = 35.0,
+                            por_tramo: bool = False) -> list:
     """
     Evalúa las llegadas de una ruta calculando el traslado por HAVERSINE
     (rápido, sin OSRM: en rutas agrupadas el tiempo lo domina la descarga).
@@ -106,6 +123,9 @@ def evaluar_ruta_por_tiempo(paradas: list, depot: tuple, hora_salida_min: float,
     paradas   : en orden, con lat/lon (latitud/longitud o lat/lon), peso_kg,
                 es_mayorista.
     depot     : (lat, lon) de la matriz.
+    por_tramo : True = velocidad calibrada según la longitud de cada tramo
+                (ver `velocidad_para_km`); False = `velocidad_kmh` para todos,
+                comportamiento anterior.
     Retorna evaluar_llegadas(...) sobre esta ruta.
     """
     vel = velocidad_kmh if (velocidad_kmh and velocidad_kmh > 0) else 35.0
@@ -116,6 +136,8 @@ def evaluar_ruta_por_tiempo(paradas: list, depot: tuple, hora_salida_min: float,
         if ll is None or prev is None:
             tramos.append(0.0)   # sin coords: no se puede medir el tramo
         else:
-            tramos.append(_haversine_km(prev[0], prev[1], ll[0], ll[1]) / vel * 60.0)
+            km = _haversine_km(prev[0], prev[1], ll[0], ll[1])
+            v = velocidad_para_km(km) if por_tramo else vel
+            tramos.append(km / v * 60.0)
             prev = ll
     return evaluar_llegadas(paradas, tramos, hora_salida_min, hora_limite_min)

@@ -57,6 +57,30 @@ def test_evaluar_ruta_por_tiempo_marca_tarde():
     assert out[1]["entregable_por_tiempo"] is False   # ~422 + 40(desc) + viaje > 450
 
 
+def test_velocidad_por_tramo_calibrada_dos_regimenes():
+    """
+    La velocidad haversine-equivalente no es constante: medida contra OSRM sobre
+    875 tramos reales da ~55.5 km/h en tramos largos (depot→clúster) y ~37.8 en
+    cortos. Una sola constante de 35 infla los largos ~2.5 h y dispara
+    violaciones de tiempo falsas.
+    """
+    from logic.logistica_tiempo import velocidad_para_km
+    assert velocidad_para_km(200) == 55.5      # largo
+    assert velocidad_para_km(10) == 37.8       # corto
+    assert velocidad_para_km(50) == 37.8       # el umbral pertenece a "corto"
+    assert velocidad_para_km(51) == 55.5
+
+
+def test_evaluar_ruta_usa_velocidad_por_tramo_si_se_pide():
+    from logic.logistica_tiempo import evaluar_ruta_por_tiempo
+    depot = (18.87, -96.95)
+    # una parada a ~200 km: con 35 km/h son ~343 min; con el régimen largo ~216
+    paradas = [{"latitud": 18.44, "longitud": -95.21, "peso_kg": 0}]
+    fijo = evaluar_ruta_por_tiempo(paradas, depot, 420, 1200, velocidad_kmh=35.0)
+    calib = evaluar_ruta_por_tiempo(paradas, depot, 420, 1200, por_tramo=True)
+    assert calib[0]["hora_llegada_min"] < fijo[0]["hora_llegada_min"] - 60
+
+
 def test_evaluar_ruta_sin_coords_no_rompe():
     depot = (18.87, -96.95)
     paradas = [{"peso_kg": 100}, {"latitud": 18.88, "longitud": -96.95, "peso_kg": 0}]
