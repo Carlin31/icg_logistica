@@ -26,7 +26,7 @@ from reportlab.platypus import (
 from db import get_db, get_table
 from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
 from logic.modificacion_logic import obtener_modificacion_previa, guardar_modificacion
-from logic.historico_logic import afinidad_historica_por_sucursal
+from logic.plantilla_canonica import obtener_grupos
 from logic.groq_logic import generar_nombre_poblacion
 from logic.logistica_tiempo import TIEMPO_ENTREGA_ESTRICTO
 from logic.tiempo_reubicacion import evaluar_ruta_completa, resolver_fuera_de_horario, _recalcular_peso_ruta
@@ -727,15 +727,17 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
             cfg_tiempo = None
 
     # Fase B — reubicar paradas FUERA DE HORARIO hacia otra ruta con
-    # afinidad histórica, cupo y tiempo. No aplica sobre rutas_inyectadas
-    # (previsualización en memoria; la regla dura del proyecto prohíbe
-    # persistir ahí). Degradación segura: ante cualquier error, las rutas
-    # quedan como Fase A las entregó (sin reubicar).
+    # respaldo real de grupo de co-viaje (plantilla_grupo, ya validada por
+    # el trabajo de ConVRP — ver docs/superpowers/specs/2026-08-07-tiempo-
+    # entrega-faseB-grupos-rigidos-design.md), cupo y tiempo. No aplica
+    # sobre rutas_inyectadas (previsualización en memoria; la regla dura del
+    # proyecto prohíbe persistir ahí). Degradación segura: ante cualquier
+    # error, las rutas quedan como Fase A las entregó (sin reubicar).
     #
-    # Nota (encontrada en la revisión de calidad del Task 7): tras mover una
-    # parada, esta pasada NO recalcula hora_salida/hora_regreso/distancia_km/
-    # conduccion_min/total_min de las rutas tocadas (solo peso/%utilización y
-    # las paradas en sí) — mismo comportamiento ya aceptado en
+    # Nota (heredada de la v1 de Fase B): tras mover una parada, esta pasada
+    # NO recalcula hora_salida/hora_regreso/distancia_km/conduccion_min/
+    # total_min de las rutas tocadas (solo peso/%utilización y las paradas
+    # en sí) — mismo comportamiento ya aceptado en
     # agregar_sucursal_a_asignacion/quitar_sucursal_de_asignacion de
     # modificacion_logic.py, que tampoco recalculan esos campos. La lista de
     # paradas que ve el conductor SÍ queda correcta (es lo que importa para
@@ -743,12 +745,8 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     # desactualizadas hasta el siguiente guardado completo de Modificación.
     if cfg_tiempo and not rutas_inyectadas:
         try:
-            # Sin caché: relee y reprocesa las 9 semanas del corpus histórico
-            # en cada generación de PDF. Aceptado por ahora (misma decisión
-            # que la falta de recálculo de hora_salida/hora_regreso arriba);
-            # revisar si la frecuencia de generación de PDF crece.
-            afinidad = afinidad_historica_por_sucursal()
-            movio_algo = resolver_fuera_de_horario(rutas, cfg_tiempo, afinidad,
+            grupos = obtener_grupos()
+            movio_algo = resolver_fuera_de_horario(rutas, cfg_tiempo, grupos,
                                                     consultar_osrm_fn=consultar_osrm)
             if movio_algo:
                 payload = {
