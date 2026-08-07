@@ -189,20 +189,31 @@ def test_rutas_candidatas_por_grupo_ordena_por_frecuencia_descendente():
         {"id": "R_T25", "dia": "martes", "vehiculo_abrev": "T 25"},
         {"id": "R_SIN_AFINIDAD", "dia": "martes", "vehiculo_abrev": "T 99"},
     ]
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
     assert [r["id"] for r in candidatas] == ["R_K16", "R_T25"]
 
 
-def test_rutas_candidatas_por_grupo_excluye_el_vehiculo_de_origen():
+def test_rutas_candidatas_por_grupo_incluye_mismo_vehiculo_en_otro_dia_admisible():
+    # Solo se excluye la ruta de origen EXACTA (mismo vehiculo Y mismo dia).
+    # El mismo vehiculo en OTRO dia admisible (T 23 jueves) SI es candidata
+    # valida -- un grupo flexible puede operar varios dias, y forzar un
+    # vehiculo distinto solo por coincidir en vehiculo con el origen
+    # tiraria al vehiculo dominante por una coincidencia de calendario.
     grupo = {"unidades_afines": "T 23:5", "dias_admisibles": ["MARTES", "JUEVES"]}
     rutas = [
         {"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"},
         {"id": "R_T23_JUEVES", "dia": "jueves", "vehiculo_abrev": "T 23"},
     ]
-    # T 23 es el vehiculo de origen -> se excluye por completo, aunque
-    # tenga otra ruta el jueves.
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23")
-    assert candidatas == []
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
+    assert [r["id"] for r in candidatas] == ["R_T23_JUEVES"]
+
+
+def test_rutas_candidatas_por_grupo_excluye_solo_la_ruta_de_origen_exacta():
+    # Mismo vehiculo Y mismo dia que origen (o sea, la ruta origen misma,
+    # aunque aparezca de nuevo en la lista por error) nunca se auto-elige.
+    grupo = {"unidades_afines": "T 23:5", "dias_admisibles": ["MARTES"]}
+    rutas = [{"id": "R_ORIGEN", "dia": "martes", "vehiculo_abrev": "T 23"}]
+    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN") == []
 
 
 def test_rutas_candidatas_por_grupo_dia_admisible_en_orden_preferido_primero():
@@ -212,14 +223,14 @@ def test_rutas_candidatas_por_grupo_dia_admisible_en_orden_preferido_primero():
         {"id": "R_F350_1_JUEVES", "dia": "jueves", "vehiculo_abrev": "F 350_1"},
         {"id": "R_F350_1_MARTES", "dia": "martes", "vehiculo_abrev": "F 350_1"},
     ]
-    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "OTRO")
+    candidatas = _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN")
     assert [r["id"] for r in candidatas] == ["R_F350_1_MARTES", "R_F350_1_JUEVES"]
 
 
 def test_rutas_candidatas_por_grupo_sin_ruta_real_para_ese_vehiculo_dia():
     grupo = {"unidades_afines": "T 20:1", "dias_admisibles": ["VIERNES"]}
     rutas = [{"id": "R_ORIGEN", "dia": "lunes", "vehiculo_abrev": "T 23"}]
-    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN", "T 23") == []
+    assert _rutas_candidatas_por_grupo(grupo, rutas, "R_ORIGEN") == []
 
 
 from logic.tiempo_reubicacion import _mejor_candidata_grupo, _menos_mala_grupo
@@ -298,6 +309,7 @@ def _cfg_cierre_08_30():
         "dias": {
             "martes": {"hora_salida": "07:00", "hora_limite": "08:30"},
             "jueves": {"hora_salida": "07:00", "hora_limite": "08:30"},
+            "lunes":  {"hora_salida": "07:00", "hora_limite": "08:30"},
         },
     }
 
@@ -663,3 +675,81 @@ def test_resolver_fuera_de_horario_flag_dedicado_apagado_no_hace_nada(monkeypatc
     monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", False)
     ruta = {"id": "R1", "dia": "martes", "sucursales": [], "mayoristas": []}
     assert resolver_fuera_de_horario([ruta], _cfg_cierre_08_30(), []) is False
+
+
+def test_regresion_tierra_blanca_7_no_va_a_ruta_sin_relacion_geografica(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # Datos reales: grupo 30, RIGIDO, sucursales [76, 77], unidades_afines
+    # real "T 23:3 | K 16:2 | T 20:2 | T 17_1:1 | T 25:1". T20 SI aparece
+    # (2/9 semanas) -- si T20 no tiene ruta el lunes esta semana, T20 nunca
+    # debe elegirse (no hay ruta real que buscar), y si la tiene, se mueven
+    # 76 Y 77 juntas, nunca 76 sola separada de su pareja rigida.
+    grupos = [{"grupo": 30, "rigidez": "RIGIDO", "sucursales": [76, 77],
+               "unidades_afines": "T 23:3 | K 16:2 | T 20:2 | T 17_1:1 | T 25:1",
+               "dias_admisibles": ["LUNES"], "dia_preferido": "LUNES"}]
+    origen = {
+        "id": "ORIGEN_T25_LUNES", "dia": "lunes", "vehiculo_abrev": "T 25",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 77, "nombre": "Tierra Blanca 8", "orden": 2, "peso_kg": 50,
+             "latitud": 0.06, "longitud": 0.06},
+            {"num_tienda": 76, "nombre": "Tierra Blanca 7", "orden": 3, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    # T 20 SI tiene ruta el lunes esta semana (candidata real de unidades_afines).
+    t20_lunes = _ruta_vacia("T20_LUNES", "lunes", "T 20")
+    # Ruta geograficamente ajena, sin ninguna relacion con el grupo 30 --
+    # NUNCA debe recibir a 76/77 aunque tuviera cupo de sobra.
+    ruta_ajena = _ruta_vacia("AJENA_SIN_AFINIDAD", "lunes", "AJENA")
+    rutas = [origen, t20_lunes, ruta_ajena]
+
+    resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    # La ruta ajena (sin presencia en unidades_afines) jamas recibe nada.
+    assert ruta_ajena["sucursales"] == []
+    # Si algo se movio, 76 y 77 se movieron JUNTAS (nunca una sola).
+    movidas_a_t20 = {s["num_tienda"] for s in t20_lunes["sucursales"]}
+    if movidas_a_t20:
+        assert movidas_a_t20 == {76, 77}
+    else:
+        # Si T20 no cupo para ambas, el grupo se queda completo en origen.
+        assert {s["num_tienda"] for s in origen["sucursales"]} == {1, 76, 77}
+
+
+def test_regresion_amatitlan_prefiere_vehiculo_dominante_sobre_uno_de_una_semana(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    # Datos reales: grupo 19, FLEXIBLE, sucursales [86, 100], cohesion 0.67,
+    # unidades_afines real "F 350_1:7 | T 20:1 | T 25:1". F 350_1 es el
+    # hogar dominante (7/9 semanas) -- si F 350_1 tiene otra ruta disponible
+    # (otro dia admisible) con cupo+tiempo, debe preferirse sobre T 25
+    # (1/9 semanas) aunque T 25 tambien cumpla.
+    grupos = [{"grupo": 19, "rigidez": "FLEXIBLE", "sucursales": [86, 100],
+               "unidades_afines": "F 350_1:7 | T 20:1 | T 25:1",
+               "dias_admisibles": ["MARTES", "JUEVES"], "dia_preferido": "JUEVES"}]
+    origen = {
+        "id": "ORIGEN_F350_1_MARTES", "dia": "martes", "vehiculo_abrev": "F 350_1",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Cercana", "orden": 1, "peso_kg": 100,
+             "latitud": 0.05, "longitud": 0.05},
+            {"num_tienda": 100, "nombre": "Amatitlan", "orden": 2, "peso_kg": 100,
+             "latitud": 0.5, "longitud": 0.5},
+        ],
+        "mayoristas": [],
+    }
+    f350_1_jueves = _ruta_vacia("F350_1_JUEVES", "jueves", "F 350_1")
+    t25_jueves = _ruta_vacia("T25_JUEVES", "jueves", "T 25")
+    rutas = [origen, t25_jueves, f350_1_jueves]  # orden de lista no debe importar
+
+    resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos, consultar_osrm_fn=None)
+
+    # F 350_1 (dominante, 7/9) se prueba antes que T 25 (1/9) -- si F 350_1
+    # cumple cupo+tiempo, se elige ahi, no en T 25.
+    assert 100 in [s["num_tienda"] for s in f350_1_jueves["sucursales"]]
+    assert [s["num_tienda"] for s in t25_jueves["sucursales"]] == []

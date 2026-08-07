@@ -232,18 +232,19 @@ def _conjunto_a_mover(grupo: dict, ruta: dict, parada: dict, tipo: str) -> list:
     return conjunto if conjunto else [parada]
 
 
-def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehiculo_origen) -> list:
+def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id) -> list:
     """
     Rutas reales de `rutas` (existentes esta semana) que son destino válido
     para `grupo`, en orden de preferencia: vehículo dominante primero
     (`unidades_afines`, conteo descendente), y dentro de cada vehículo, día
     admisible en su orden (preferido/canónico primero). Excluye la ruta de
-    origen y **todo** el vehículo de origen (aunque ese vehículo corra otro
-    día) — nunca se le vuelve a asignar al mismo vehículo que ya la tenía
-    fuera de horario. Sin duplicados (un vehículo solo tiene una ruta por
-    día esta semana).
+    origen exacta (mismo vehículo Y mismo día) — el resto de los días
+    admisibles de ese mismo vehículo SÍ son candidatos válidos (un grupo
+    flexible puede operar en varios días; forzarlo a un vehículo distinto
+    solo porque el origen coincide en vehículo tira al vehículo dominante
+    por una coincidencia de calendario, no de afinidad real). Sin
+    duplicados (un vehículo solo tiene una ruta por día esta semana).
     """
-    veh_origen_norm = _normalizar_veh(vehiculo_origen)
     pares_veh = _parsear_unidades_afines(grupo.get("unidades_afines"))
     dias = grupo.get("dias_admisibles") or (
         [grupo["dia_preferido"]] if grupo.get("dia_preferido") else [])
@@ -257,8 +258,6 @@ def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id, vehicu
 
     candidatas = []
     for veh, _conteo in pares_veh:
-        if veh == veh_origen_norm:
-            continue
         for dia in dias:
             r = rutas_por_clave.get((veh, str(dia).upper()))
             if r is not None and r not in candidatas:
@@ -360,7 +359,7 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
 
             conjunto = _conjunto_a_mover(grupo, ruta, parada, tipo)
             candidatas = _rutas_candidatas_por_grupo(
-                grupo, rutas, ruta.get("id"), ruta.get("vehiculo_abrev"))
+                grupo, rutas, ruta.get("id"))
             peso_extra = sum(float(p.get("peso_kg") or 0) for p in conjunto)
 
             destino = _mejor_candidata_grupo(candidatas, conjunto, tipo, peso_extra,
