@@ -206,6 +206,32 @@ def _grupo_para(parada: dict, tipo: str, ruta: dict, indice_grupos: dict) -> "di
     return mejor_grupo
 
 
+def _conjunto_a_mover(grupo: dict, ruta: dict, parada: dict, tipo: str) -> list:
+    """
+    Paradas que se mueven juntas, atómicamente, al reubicar `parada`:
+    - Mayorista: siempre solo ella misma — un mayorista nunca es miembro de
+      un grupo (`plantilla_grupo_sucursal` es solo de sucursales), así que
+      nunca arrastra al grupo de su sucursal ancla.
+    - Sucursal en grupo FLEXIBLE (o grupo de un solo miembro): solo ella —
+      la cohesión <1.0 de un grupo flexible ya dice que históricamente no
+      siempre viajaron juntos, no se fuerza a un compañero que hoy sí llega
+      a tiempo a moverse también.
+    - Sucursal en grupo RÍGIDO con más miembros: todos los miembros del
+      grupo que estén presentes en la ruta origen ahora mismo (nunca se
+      separa una pareja/trío rígido). Si por algún motivo el resto del
+      grupo no está en esta ruta esta semana, se mueve solo lo que sí está
+      — no se va a buscar al resto a otras rutas.
+    """
+    if tipo != "sucursal":
+        return [parada]
+    if grupo.get("rigidez") != "RIGIDO" or len(grupo.get("sucursales", [])) <= 1:
+        return [parada]
+    miembros_nt = {int(nt) for nt in grupo.get("sucursales", [])}
+    conjunto = [s for s in ruta.get("sucursales", [])
+                if s.get("num_tienda") is not None and int(s["num_tienda"]) in miembros_nt]
+    return conjunto if conjunto else [parada]
+
+
 def _candidatas_con_afinidad(num_tienda, rutas: list, afinidad: dict, ruta_origen_id,
                              mismo_dia: bool, dia_origen: str) -> list:
     """Rutas de `rutas` (excluye la de origen) con las que `num_tienda`

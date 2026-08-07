@@ -466,3 +466,58 @@ def test_indice_num_tienda_a_grupo_mapea_cada_miembro():
     assert indice[86]["grupo"] == 19
     assert indice[100]["grupo"] == 19
     assert 999 not in indice
+
+
+from logic.tiempo_reubicacion import _conjunto_a_mover
+
+GRUPO_RIGIDO_76_77 = {"grupo": 30, "rigidez": "RIGIDO", "sucursales": [76, 77]}
+GRUPO_FLEXIBLE_86_100 = {"grupo": 19, "rigidez": "FLEXIBLE", "sucursales": [86, 100]}
+
+
+def _ruta_con_76_y_77():
+    return {
+        "sucursales": [
+            {"num_tienda": 76, "nombre": "Tierra Blanca 7", "orden": 1, "peso_kg": 100,
+             "latitud": 18.5, "longitud": -96.5},
+            {"num_tienda": 77, "nombre": "Tierra Blanca 8", "orden": 2, "peso_kg": 50,
+             "latitud": 18.51, "longitud": -96.51},
+        ],
+        "mayoristas": [],
+    }
+
+
+def test_conjunto_a_mover_rigido_junta_miembros_presentes_en_la_ruta():
+    ruta = _ruta_con_76_y_77()
+    parada_76 = ruta["sucursales"][0]
+    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, ruta, parada_76, "sucursal")
+    assert {p["num_tienda"] for p in conjunto} == {76, 77}
+
+
+def test_conjunto_a_mover_rigido_de_un_solo_miembro_presente_es_solo_la_parada():
+    ruta = {"sucursales": [
+        {"num_tienda": 76, "nombre": "Tierra Blanca 7", "orden": 1, "peso_kg": 100,
+         "latitud": 18.5, "longitud": -96.5},
+    ], "mayoristas": []}
+    parada_76 = ruta["sucursales"][0]
+    # 77 no está en esta ruta (viajó aparte esta semana, caso borde real) —
+    # no se inventa ni se va a buscar a otra ruta.
+    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, ruta, parada_76, "sucursal")
+    assert [p["num_tienda"] for p in conjunto] == [76]
+
+
+def test_conjunto_a_mover_flexible_solo_la_parada():
+    ruta = {"sucursales": [
+        {"num_tienda": 86, "nombre": "Carlos A. Carrillo 2", "orden": 1, "peso_kg": 500,
+         "latitud": 18.37, "longitud": -95.75},
+        {"num_tienda": 100, "nombre": "Amatitlan", "orden": 2, "peso_kg": 165,
+         "latitud": 18.43, "longitud": -95.73},
+    ], "mayoristas": []}
+    parada_100 = ruta["sucursales"][1]
+    conjunto = _conjunto_a_mover(GRUPO_FLEXIBLE_86_100, ruta, parada_100, "sucursal")
+    assert [p["num_tienda"] for p in conjunto] == [100]
+
+
+def test_conjunto_a_mover_mayorista_nunca_arrastra_grupo():
+    mayorista = {"id_cliente": 7, "peso_kg": 20, "latitud": 18.5, "longitud": -96.5}
+    conjunto = _conjunto_a_mover(GRUPO_RIGIDO_76_77, {"sucursales": []}, mayorista, "mayorista")
+    assert conjunto == [mayorista]
