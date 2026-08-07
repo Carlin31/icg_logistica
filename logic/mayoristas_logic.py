@@ -18,6 +18,7 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from sqlalchemy import select, insert
 
+from config import es_semana_canonica
 from db import get_db, get_table
 from logic.vrp_logic import capacidad_efectiva_kg
 
@@ -245,7 +246,16 @@ def _cargar_historico_mayoristas(logistica_id: str) -> dict:
                     orden_por_ruta[ruta_id].get(id_cliente, orden),
                 )
         return orden_por_ruta
-    except Exception:
+    except Exception as e:  # noqa: BLE001
+        # {} es indistinguible de "no hay órdenes históricos": se registra
+        # ruidosamente para que la pérdida del orden histórico no pase callada.
+        import traceback
+        print("=" * 70)
+        print(f"[mayoristas] NO se pudieron leer los órdenes históricos "
+              f"({type(e).__name__}: {e}); las paradas se ordenarán sólo por "
+              f"proximidad, sin memoria histórica.")
+        print(traceback.format_exc())
+        print("=" * 70)
         return {}
 
 
@@ -410,7 +420,57 @@ def _resolver_sobrecarga_mayoristas(
     return mayoristas_por_ruta
 
 
-def _guardar_historico_mayoristas(logistica_id: str, nombre: str, filas_list: list) -> dict:
+def _fecha_inicio_de_logistica(logistica_id: str) -> str:
+    """`logisticas.fecha_inicio` de esa logística, o '' si no se puede leer."""
+    try:
+        oid = _id_valido(str(logistica_id))
+        if not oid:
+            return ""
+        t = get_table("logisticas")
+        fila = get_db().execute(
+            select(t.c.fecha_inicio).where(t.c.mongo_id == oid)).mappings().first()
+        return str(fila["fecha_inicio"] or "") if fila else ""
+    except Exception as exc:  # noqa: BLE001
+        print("=" * 70)
+        print(f"[mayoristas] no se pudo leer fecha_inicio de {logistica_id}: "
+              f"{type(exc).__name__}: {exc}")
+        print("[mayoristas] el candado de semanas canónicas NO pudo evaluarse.")
+        print("=" * 70)
+        return ""
+
+
+def _guardar_historico_mayoristas(logistica_id: str, nombre: str, filas_list: list,
+                                  permitir_canon: bool = False) -> dict:
+    """
+    Candado de semanas canónicas — ver `config.SEMANAS_CANONICAS`.
+
+    Este camino NO pasa por `historico_logic.guardar_en_historico`: hace su
+    propio INSERT sobre `rutas_historicas`, así que el candado hay que ponerlo
+    aquí también o queda abierto. Sólo inserta (nunca hace upsert), o sea que
+    no puede reemplazar una semana del corpus, pero sí ensuciarla con filas
+    nuevas atribuidas a esa fecha.
+    """
+    if not permitir_canon:
+        fi = _fecha_inicio_de_logistica(logistica_id)
+        if not fi:
+            # Una escritura al histórico que no se puede atribuir a una semana
+            # es basura por construcción, y este camino ya produjo una (la fila
+            # 'Mayoristas confirmados' de una logística borrada, con
+            # id_cliente 8888888 y ruta_test_1).
+            return {"status": "error", "codigo": "SIN_SEMANA",
+                    "mensaje": ("No se pudo determinar a qué semana pertenece esta "
+                                "logística, así que no se escribe histórico de "
+                                "mayoreo: un registro sin semana no es histórico "
+                                "de nada.")}
+        if es_semana_canonica(fi):
+            return {"status": "error", "codigo": "SEMANA_CANONICA",
+                    "mensaje": (f"Esta logística ({fi[:10]}) es una de las 9 semanas "
+                                f"históricas de referencia: no se escribe histórico de "
+                                f"mayoreo sobre ella desde la aplicación.")}
+    return _insertar_historico_mayoristas(logistica_id, nombre, filas_list)
+
+
+def _insertar_historico_mayoristas(logistica_id: str, nombre: str, filas_list: list) -> dict:
     """
     Persiste una fotografía de mayoristas confirmados en `rutas_historicas`
     (tipo_registro='mayoristas'). Equivalente a
@@ -479,8 +539,12 @@ def _guardar_historico_mayoristas(logistica_id: str, nombre: str, filas_list: li
             tipo_registro="mayoristas",
         ))
         return {"status": "ok", "id": nuevo_id}
-    except Exception as e:
-        return {"status": "error", "mensaje": str(e)}
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        print(f"[mayoristas] _guardar_historico_mayoristas falló: "
+              f"{type(e).__name__}: {e}")
+        print(traceback.format_exc())
+        return {"status": "error", "mensaje": f"{type(e).__name__}: {e}"}
 
 
 def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoristas_por_ruta: dict) -> None:
@@ -533,9 +597,23 @@ def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoris
                 })
 
         if filas:
-            _guardar_historico_mayoristas(logistica_id, "Mayoristas confirmados", filas)
-    except Exception:
-        pass
+            res = _guardar_historico_mayoristas(
+                logistica_id, "Mayoristas confirmados", filas)
+            # `_guardar_historico_mayoristas` devuelve status; ignorarlo dejaba
+            # el histórico de mayoristas sin guardar en silencio.
+            if isinstance(res, dict) and res.get("status") != "ok":
+                print("=" * 70)
+                print(f"[mayoristas] NO se guardó el histórico de mayoristas: "
+                      f"{res.get('mensaje')}")
+                print("=" * 70)
+    except Exception as e:  # noqa: BLE001
+        import traceback
+        print("=" * 70)
+        print(f"[mayoristas] NO se persistió el histórico de mayoristas "
+              f"({type(e).__name__}: {e}); esa semana quedará sin memoria "
+              f"histórica de la distribución.")
+        print(traceback.format_exc())
+        print("=" * 70)
 
 
 def _integrar_paradas(sucursales: list, mayoristas: list,

@@ -2798,10 +2798,20 @@ async function guardarTodo(redirigir = false) {
         }
       }
       if (filasHistorial.length) {
+        // El histórico de las 9 semanas canónicas está protegido en el
+        // servidor: si responde 409 hay que DECIRLO, no tragárselo en consola.
+        // Antes esto era fire-and-forget y por eso nadie se enteraba de que
+        // guardar una semana vieja reescribía el corpus de calibración.
         fetch("/modificacion/guardar-historico", {
           method:  "POST",
           headers: { "Content-Type": "application/json" },
           body:    JSON.stringify({ nombre: "", rutas: filasHistorial }),
+        }).then(async (r) => {
+          if (r.ok) return;
+          let msg = "No se pudo guardar el histórico.";
+          try { msg = (await r.json()).mensaje || msg; } catch (_) {}
+          mostrarToastMod(msg, "info");
+          console.warn("[guardar-historico]", r.status, msg);
         }).catch(err => console.warn("[guardar-historico]", err));
       }
 

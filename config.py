@@ -68,3 +68,45 @@ class Config:
                 f"Variables de entorno faltantes: {', '.join(faltantes)}. "
                 "Revisa las variables de entorno en Render."
             )
+
+
+# ── Corpus canónico de rutas históricas ────────────────────────────────────
+# Las 9 semanas que la empresa entregó como plan real (archivos `_HT.xls`) y
+# sobre las que se calibra la plantilla canónica del ConVRP. Son datos de
+# ORIGEN, no salida del sistema: si se reescriben, se pierde la única
+# referencia contra la que se puede medir el motor.
+#
+# El riesgo es concreto y ya ocurrió: guardar en el módulo de Modificación
+# dispara `POST /modificacion/guardar-historico` en fire-and-forget desde
+# `static/js/modificacion.js`, y `guardar_en_historico` hace UPSERT. Cualquiera
+# que abra una semana vieja y guarde reemplaza el canon, y como `cargado_en` se
+# fabrica desde la fecha de inicio de la logística, no queda rastro.
+#
+# Se identifican por FECHA DE INICIO, no por id de logística: la fecha es
+# propiedad de la semana y sobrevive a que alguien recree la logística.
+#
+# NO están las semanas de julio (13-17 y 27-31): son salida del motor de
+# afinidad (claves `vrpaf_` en `asignaciones_rutas`, sin archivo `_HT`), no
+# plan del planeador.
+SEMANAS_CANONICAS = frozenset({
+    "2026-02-09",   # 9 al 13 de febrero
+    "2026-02-23",   # 23 al 27 de febrero
+    "2026-03-09",   # 9 al 13 de marzo
+    "2026-03-23",   # 23 al 27 de marzo
+    "2026-04-06",   # 6 al 10 de abril
+    "2026-05-04",   # 4 al 8 de mayo
+    "2026-05-18",   # 18 al 22 de mayo
+    "2026-06-01",   # 1 al 5 de junio
+    "2026-06-15",   # 15 al 19 de junio
+})
+
+
+def es_semana_canonica(fecha_inicio) -> bool:
+    """True si esa fecha de inicio corresponde a una semana del corpus canónico.
+
+    Tolera ' 2026-05-18 ' y '2026-05-18T00:00:00': `logisticas.fecha_inicio` no
+    tiene un formato único.
+    """
+    if not fecha_inicio:
+        return False
+    return str(fecha_inicio).strip()[:10] in SEMANAS_CANONICAS

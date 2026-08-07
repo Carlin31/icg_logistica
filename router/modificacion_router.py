@@ -538,8 +538,13 @@ def post_guardar_historico():
         return jsonify({"status": "error", "mensaje": "No se recibieron rutas"}), 400
 
     try:
+        # `permitir_canon` NO se expone a propósito: la UI nunca debe poder
+        # sobrescribir el histórico de las 9 semanas canónicas. Para eso está el
+        # uso programático de `guardar_en_historico(..., permitir_canon=True)`.
         resultado = guardar_en_historico(lid, nombre, rutas)
-        code      = 200 if resultado.get("status") == "ok" else 500
+        if resultado.get("codigo") == "SEMANA_CANONICA":
+            return jsonify(resultado), 409
+        code = 200 if resultado.get("status") == "ok" else 500
         return jsonify(resultado), code
     except Exception as e:
         return jsonify({"status": "error", "mensaje": str(e)}), 500
