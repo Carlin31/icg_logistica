@@ -173,35 +173,37 @@ def _recalcular_peso_ruta(ruta: dict) -> None:
     ruta["pct_utilizacion"] = _pct_utilizacion(peso, ruta.get("capacidad_ton"))
 
 
-def _clave_afinidad_para(parada: dict, tipo: str, ruta: dict, afinidad: dict) -> "int | None":
+def _grupo_para(parada: dict, tipo: str, ruta: dict, indice_grupos: dict) -> "dict | None":
     """
-    Llave de búsqueda en `afinidad` para `parada`:
-    - Sucursal: su propio num_tienda.
-    - Mayorista: el num_tienda de la sucursal de la MISMA ruta geográficamente
-      más cercana que sí tenga afinidad histórica registrada — ancla
-      conceptualmente igual a como enganche_zona ancla mayoristas a una
-      sucursal del grupo destino, sin activar ese motor.
-    None si no hay coordenadas o no se encuentra ancla.
+    Grupo de co-viaje (de `plantilla_canonica.obtener_grupos()`, indexado
+    por `_indice_num_tienda_a_grupo`) al que pertenece `parada`:
+    - Sucursal: su propio grupo, por `num_tienda`.
+    - Mayorista: el grupo de la sucursal de la MISMA ruta geográficamente
+      más cercana que sí tenga grupo — mismo criterio de anclaje que usaba
+      `_clave_afinidad_para` en v1, ahora resolviendo un grupo completo en
+      vez de una llave suelta.
+    None si no hay coordenadas, no hay ancla, o la sucursal no está en
+    ningún grupo de la plantilla canónica.
     """
     if tipo == "sucursal":
         nt = parada.get("num_tienda")
-        return int(nt) if nt is not None else None
+        return indice_grupos.get(int(nt)) if nt is not None else None
 
     lat, lon = parada.get("latitud"), parada.get("longitud")
     if lat is None or lon is None:
         return None
-    mejor_sid, mejor_dist = None, float("inf")
+    mejor_grupo, mejor_dist = None, float("inf")
     for s in ruta.get("sucursales", []):
         nt = s.get("num_tienda")
-        if nt is None or int(nt) not in afinidad:
+        if nt is None or int(nt) not in indice_grupos:
             continue
         la, lo = s.get("latitud"), s.get("longitud")
         if la is None or lo is None:
             continue
         d = _haversine_km(float(lat), float(lon), float(la), float(lo))
         if d < mejor_dist:
-            mejor_dist, mejor_sid = d, int(nt)
-    return mejor_sid
+            mejor_dist, mejor_grupo = d, indice_grupos[int(nt)]
+    return mejor_grupo
 
 
 def _candidatas_con_afinidad(num_tienda, rutas: list, afinidad: dict, ruta_origen_id,

@@ -139,9 +139,7 @@ def test_recalcular_peso_ruta_suma_sucursales_y_mayoristas():
     assert ruta["pct_utilizacion"] == _pct_utilizacion(1050.0, 3.5)
 
 
-from logic.tiempo_reubicacion import (
-    _clave_afinidad_para, _candidatas_con_afinidad, _mejor_candidata, _menos_mala,
-)
+from logic.tiempo_reubicacion import _grupo_para
 
 CFG_AMPLIO = {
     "activo": True, "depot": (18.87, -96.94), "velocidad": 35.0,
@@ -151,25 +149,33 @@ CFG_AMPLIO = {
     },
 }
 
-AFINIDAD = {42: {("F 350_1", "MARTES"): 1, ("F 350_2", "JUEVES"): 2}}
+GRUPO_42 = {"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [42],
+            "unidades_afines": "F 350_1:1 | F 350_2:2", "dias_admisibles": ["MARTES", "JUEVES"],
+            "dia_preferido": "JUEVES"}
+INDICE_GRUPOS = {42: GRUPO_42}
 
 
-def test_clave_afinidad_para_sucursal_es_su_num_tienda():
+def test_grupo_para_sucursal_es_su_grupo_directo():
     parada = {"num_tienda": 42}
-    assert _clave_afinidad_para(parada, "sucursal", {"sucursales": []}, AFINIDAD) == 42
+    assert _grupo_para(parada, "sucursal", {"sucursales": []}, INDICE_GRUPOS) is GRUPO_42
 
 
-def test_clave_afinidad_para_mayorista_ancla_a_sucursal_cercana_con_afinidad():
+def test_grupo_para_sucursal_sin_grupo_es_none():
+    parada = {"num_tienda": 999}
+    assert _grupo_para(parada, "sucursal", {"sucursales": []}, INDICE_GRUPOS) is None
+
+
+def test_grupo_para_mayorista_ancla_a_sucursal_cercana_con_grupo():
     ruta = {"sucursales": [
         {"num_tienda": 42, "latitud": 18.90, "longitud": -96.95},
-        {"num_tienda": 99, "latitud": 0.0, "longitud": 0.0},  # sin afinidad, lejos
+        {"num_tienda": 99, "latitud": 0.0, "longitud": 0.0},  # sin grupo, lejos
     ]}
     mayorista = {"id_cliente": 7, "latitud": 18.901, "longitud": -96.951}
-    assert _clave_afinidad_para(mayorista, "mayorista", ruta, AFINIDAD) == 42
+    assert _grupo_para(mayorista, "mayorista", ruta, INDICE_GRUPOS) is GRUPO_42
 
 
-def test_clave_afinidad_para_mayorista_sin_coords_es_none():
-    assert _clave_afinidad_para({"id_cliente": 7}, "mayorista", {"sucursales": []}, AFINIDAD) is None
+def test_grupo_para_mayorista_sin_coords_es_none():
+    assert _grupo_para({"id_cliente": 7}, "mayorista", {"sucursales": []}, INDICE_GRUPOS) is None
 
 
 def test_candidatas_con_afinidad_filtra_por_dia_y_afinidad():
