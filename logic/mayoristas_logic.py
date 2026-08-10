@@ -186,7 +186,8 @@ def _leer_coords_mayoristas(db, ids: set) -> dict:
     if not ids:
         return coords
     tabla = get_table("clientes_mayoristas")
-    for c in db.execute(select(tabla.c.id_cliente, tabla.c.nombre, tabla.c.latitud, tabla.c.longitud)):
+    for c in db.execute(select(tabla.c.id_cliente, tabla.c.nombre, tabla.c.latitud,
+                               tabla.c.longitud, tabla.c.poblacion)):
         id_int = _normalizar_id(c.id_cliente)
         if id_int is None or id_int not in ids:
             continue
@@ -194,6 +195,7 @@ def _leer_coords_mayoristas(db, ids: set) -> dict:
             "nombre": (c.nombre or "").strip(),
             "latitud": _to_float(c.latitud),
             "longitud": _to_float(c.longitud),
+            "poblacion": (c.poblacion or "").strip(),
         }
     return coords
 
@@ -257,6 +259,89 @@ def _cargar_historico_mayoristas(logistica_id: str) -> dict:
         print(traceback.format_exc())
         print("=" * 70)
         return {}
+
+
+def _construir_cache_zonas(db, rutas_sucursales: dict) -> "dict | None":
+    """
+    {poblacion: rid} -- para cada población con zona registrada
+    (`plantilla_zona_mayorista`/`plantilla_poblacion_zona`, del trabajo de
+    ConVRP), resuelve a qué ruta de ESTA semana pertenece su grupo núcleo
+    real, si alguna sucursal de ese grupo está presente en `rutas_sucursales`.
+
+    Mismo criterio que ya se corrigió para sucursales (Tierra Blanca 7,
+    Amatitlán): la población más cercana geográficamente HOY no siempre es
+    la que históricamente viajó junto — un mayorista de una zona cuyo día
+    habitual es viernes puede caer geográficamente cerca de una ruta de
+    martes sin tener ninguna relación real con ella.
+
+    Degradación segura: si la plantilla canónica no está cargada o cualquier
+    lectura falla, devuelve None y el llamador cae al criterio geográfico de
+    siempre (`_seleccionar_ruta`) -- nunca rompe el reparto de mayoristas.
+    """
+    try:
+        from logic.plantilla_canonica import obtener_grupos, _norm
+        from db import get_table as _get_table
+        from sqlalchemy import select as _select
+
+        tp = _get_table("plantilla_poblacion_zona")
+        # Llave normalizada (mayúsculas, sin acentos, espacios colapsados) —
+        # mismo criterio que ya usa `plantilla_canonica.zona_de_poblacion()`,
+        # para no perder el match por una tilde o un espacio de más entre
+        # `clientes_mayoristas.poblacion` y la plantilla.
+        poblacion_a_zona = {
+            _norm(r.poblacion): str(r.zona)
+            for r in db.execute(_select(tp.c.poblacion, tp.c.zona).where(tp.c.vigente == 1))
+        }
+        if not poblacion_a_zona:
+            return None
+
+        tz = _get_table("plantilla_zona_mayorista")
+        zona_a_nucleo = {
+            str(r.zona): int(r.grupo_nucleo)
+            for r in db.execute(_select(tz.c.zona, tz.c.grupo_nucleo)
+                                .where(tz.c.vigente == 1, tz.c.grupo_nucleo.is_not(None)))
+        }
+        if not zona_a_nucleo:
+            return None
+
+        grupo_de_num_tienda: dict = {}
+        for g in obtener_grupos():
+            for nt in g.get("sucursales", []):
+                grupo_de_num_tienda[int(nt)] = int(g["grupo"])
+
+        rid_por_grupo: dict = {}
+        for rid, sucursales in rutas_sucursales.items():
+            for s in sucursales:
+                nt = s.get("num_tienda")
+                if nt is None:
+                    continue
+                grupo = grupo_de_num_tienda.get(int(nt))
+                if grupo is not None and grupo not in rid_por_grupo:
+                    rid_por_grupo[grupo] = rid
+
+        cache: dict = {}
+        for poblacion, zona in poblacion_a_zona.items():
+            nucleo = zona_a_nucleo.get(zona)
+            rid = rid_por_grupo.get(nucleo) if nucleo is not None else None
+            if rid:
+                cache[poblacion] = rid
+        return cache
+    except Exception as e:
+        print(f"[mayoristas_logic] cache de zonas no disponible, se usa geografía: {e}")
+        return None
+
+
+def _seleccionar_ruta_por_zona(mayorista: dict, cache_zonas: "dict | None") -> "str | None":
+    """Ruta real de esta semana para el grupo núcleo histórico de la
+    población del mayorista, o None si no hay dato (el llamador cae a
+    `_seleccionar_ruta`, geográfico)."""
+    if not cache_zonas:
+        return None
+    poblacion = (mayorista.get("poblacion") or "").strip()
+    if not poblacion:
+        return None
+    from logic.plantilla_canonica import _norm
+    return cache_zonas.get(_norm(poblacion))
 
 
 def _seleccionar_ruta(mayorista: dict, rutas_sucursales: dict) -> "str | None":
@@ -738,6 +823,7 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
             "peso_kg":    float(pedido["peso"]),
             "latitud":    lat,
             "longitud":   lon,
+            "poblacion":  cat.get("poblacion") or "",
         }
         # Pendientes (peso 0): quedan disponibles para agregado manual, pero
         # NO entran al reparto automático por ruta.
@@ -784,11 +870,12 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
             rutas_cap_kg[rid] = capacidad_efectiva_kg(cap_ton * 1000)
 
     historico_orden = _cargar_historico_mayoristas(str(logistica_id))
+    cache_zonas = _construir_cache_zonas(db, rutas_sucursales)
 
     mayoristas_por_ruta: dict = {rid: [] for rid in rutas_index}
     sin_asignar: list = []
     for m in mayoristas:
-        ruta_id = _seleccionar_ruta(m, rutas_sucursales)
+        ruta_id = _seleccionar_ruta_por_zona(m, cache_zonas) or _seleccionar_ruta(m, rutas_sucursales)
         if not ruta_id:
             sin_asignar.append(dict(m))
             continue
