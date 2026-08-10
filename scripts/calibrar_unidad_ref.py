@@ -51,6 +51,9 @@ def main():
         db = get_db()
         caps = obtener_capacidades_vehiculos()
         plantilla = obtener_grupos()
+        coords = {int(s.num_tienda): (float(s.latitud), float(s.longitud))
+                  for s in db.execute(select(get_table("sucursales"))).mappings()
+                  if s.get("latitud") is not None and s.get("num_tienda") is not None}
         if not plantilla:
             print("No hay plantilla vigente.")
             return 1
@@ -151,7 +154,7 @@ def main():
               {d: objetivo[d] for d in sorted(objetivo)})
         nueva = asignar_unidad_ref(plantilla, {g: dict(c) for g, c in afinidad.items()},
                                    kg_tipico, caps, viajes_objetivo=objetivo,
-                                   kg_minimo=kg_minimo)
+                                   kg_minimo=kg_minimo, coords=coords)
 
         actual = {int(g["grupo"]): g.get("unidad_ref") for g in plantilla}
         dia_de = {int(g["grupo"]): str(g.get("dia_preferido") or g.get("dia")).upper()

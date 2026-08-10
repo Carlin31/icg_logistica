@@ -214,3 +214,62 @@ def test_el_minimo_no_infla_el_empaque():
     ref = asignar_unidad_ref(grupos, afinidad, {1: 400, 2: 400}, {"V1": 1000},
                              kg_minimo={1: 900, 2: 900})
     assert ref == {1: "V1", 2: "V1"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Filtro geográfico — encontrado en producción el 2026-08-10: F 350_2 jueves
+# apiló Tuxtepec (grupo 8) con Veracruz (grupos 28/35), 127 km, porque la
+# afinidad/capacidad decían que "cabía" sin ninguna noción de distancia. El
+# histórico real de esa semana nunca los puso en el mismo camión.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_geografia_separa_grupos_lejanos_si_hay_alternativa():
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
+              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
+    coords = {1: (0.0, 0.0), 2: (2.0, 0.0)}     # ~222 km -- supera MAX_KM_ENGANCHE
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}     # ambos "quieren" V1 por historia
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coords=coords)
+    assert ref[1] == "V1"
+    assert ref[2] == "V2"          # geo-incompatible con V1 -> cede a V2
+
+
+def test_geografia_cede_si_es_la_unica_unidad():
+    # Sin alternativa, mejor asignar lejos que dejar el grupo sin camión.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
+              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
+    coords = {1: (0.0, 0.0), 2: (2.0, 0.0)}
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    kg = {1: 100, 2: 100}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, {"V1": 1000}, coords=coords)
+    assert ref == {1: "V1", 2: "V1"}
+
+
+def test_geografia_no_bloquea_grupos_cercanos():
+    # Regresión: dos grupos de la misma zona (< 60 km) se siguen consolidando
+    # en el mismo camión como antes del filtro.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
+              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
+    coords = {1: (0.0, 0.0), 2: (0.01, 0.0)}    # ~1.1 km
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coords=coords)
+    assert ref == {1: "V1", 2: "V1"}
+
+
+def test_sin_coords_el_filtro_no_actua():
+    # Comportamiento previo intacto si no se pasa `coords` (compatibilidad con
+    # los llamadores que aún no la tienen disponible).
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
+              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps)
+    assert ref == {1: "V1", 2: "V1"}

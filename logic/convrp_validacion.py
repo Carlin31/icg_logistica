@@ -19,6 +19,8 @@ dentro corriera el motor de afinidad, el número no significaría nada.
 from collections import Counter
 from itertools import combinations
 
+from logic.enganche_zona import _haversine_km, MAX_KM_ENGANCHE
+
 UMBRAL_COVIAJE = 0.60      # dos sucursales se agrupan si viajaron juntas ≥60 %
 VENTANA_DIA = 4            # semanas (las últimas del entrenamiento) que fijan el día
 
@@ -52,7 +54,8 @@ def _kg_por_semana(semanas: list) -> list:
 def construir_plantilla_desde(semanas: list, umbral: float = UMBRAL_COVIAJE,
                               ventana_dia: int = VENTANA_DIA,
                               ventana_unidad: int = -1,
-                              vehiculos_cap: dict = None) -> list:
+                              vehiculos_cap: dict = None,
+                              coords: dict = None) -> list:
     """
     Deriva la plantilla canónica de una lista de semanas (cada una = lista de
     filas). Mismo método que el análisis offline: co-viaje ≥`umbral` con enlace
@@ -179,7 +182,8 @@ def construir_plantilla_desde(semanas: list, umbral: float = UMBRAL_COVIAJE,
         n_semanas = max(len(viajes_por_semana), 1)
         objetivo = {d: max(1, round(n / n_semanas)) for d, n in por_dia.items()}
         ref = asignar_unidad_ref(plantilla, afinidad, kg_tipico, vehiculos_cap,
-                                 viajes_objetivo=objetivo, kg_minimo=kg_minimo)
+                                 viajes_objetivo=objetivo, kg_minimo=kg_minimo,
+                                 coords=coords)
         for g in plantilla:
             g["unidad_ref"] = ref.get(g["grupo"], g["unidad_ref"])
             # el motor la usa para desempatar cuando cede la unidad de referencia
@@ -210,9 +214,16 @@ def kg_representativo(totales, percentil: float = PERCENTIL_CAPACIDAD) -> float:
     return v[i]
 
 
+def _centroide_grupo(sucursales, coords: dict):
+    pts = [coords[s] for s in (sucursales or []) if coords and s in coords]
+    if not pts:
+        return None
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
 def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
                        vehiculos_cap: dict, viajes_objetivo: dict = None,
-                       kg_minimo: dict = None) -> dict:
+                       kg_minimo: dict = None, coords: dict = None) -> dict:
     """
     Resuelve `unidad_ref` como una ASIGNACIÓN GLOBAL por día, no como la moda
     de cada grupo por separado.
@@ -243,7 +254,19 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
         motor lo cedía a un F 350 y le abría a esa unidad un día de trabajo que
         la operación no hace.
 
-    grupos        : [{grupo, dia_preferido}]
+    `coords` ({num_tienda: (lat, lon)}) filtra por GEOGRAFÍA: si al grupo se le
+    empareja una unidad que ese día ya lleva otro grupo a más de
+    `MAX_KM_ENGANCHE` km de distancia (centroide a centroide), esa unidad se
+    descarta como candidata — salvo que sea la única opción, caso en el que se
+    asigna igual (mejor una excepción rara que un grupo sin camión). Sin este
+    filtro, el resto de la función sólo mira peso/capacidad/afinidad y puede
+    apilar zonas físicamente incompatibles en el mismo camión-día con tal de
+    que "quepan" (visto en producción: Tuxtepec + Veracruz, 127 km, mismo F
+    350_2 jueves — real, invalida cualquier ruta que el VRP arme sobre eso).
+    Si no se pasa `coords`, o al grupo/unidad les falta coordenada, no bloquea
+    (degradación segura, igual que el resto de la plantilla).
+
+    grupos        : [{grupo, dia_preferido, sucursales}]
     afinidad      : {grupo: {unidad: nº de semanas que viajó ahí}}
     kg_tipico     : {grupo: kg de una semana típica}
     kg_minimo     : {grupo: kg que la unidad debe poder cargar}
@@ -254,16 +277,30 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
     """
     ocupado: dict = {}          # (unidad, dia) -> kg ya comprometidos
     abiertas: dict = {}         # dia -> {unidades ya en uso}
+    grupos_en: dict = {}        # (unidad, dia) -> [gid ya asignados ahí]
     ref: dict = {}
     objetivo = {str(d).upper(): int(n) for d, n in (viajes_objetivo or {}).items()}
+    centroides = {int(g["grupo"]): _centroide_grupo(g.get("sucursales"), coords)
+                  for g in grupos}
     orden = sorted(grupos, key=lambda g: (-float(kg_tipico.get(g["grupo"], 0) or 0),
                                           int(g["grupo"])))
+
+    def _compatible(u, dia, centro):
+        if centro is None:
+            return True         # sin coordenada: no se puede evaluar, no bloquea
+        for gid2 in grupos_en.get((u, dia), ()):
+            c2 = centroides.get(gid2)
+            if c2 is not None and _haversine_km(*centro, *c2) > MAX_KM_ENGANCHE:
+                return False
+        return True
+
     for g in orden:
         gid = int(g["grupo"])
         dia = str(g.get("dia_preferido") or g.get("dia") or "").upper()
         kg = float(kg_tipico.get(gid, 0) or 0)
         af = {str(u): n for u, n in (afinidad.get(gid) or {}).items()}
         minimo = float((kg_minimo or {}).get(gid, 0) or 0)
+        centro = centroides.get(gid)
         en_uso = abiertas.setdefault(dia, set())
         tope = objetivo.get(dia)
         # Con el cupo del día agotado sólo se consideran las unidades ya
@@ -273,6 +310,10 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
         # el camión tiene que poder con la semana alta del grupo
         aptas = [u for u in universo if float(vehiculos_cap[u]) + 1e-6 >= minimo]
         universo = aptas or universo
+        # geografía: no apilar con un grupo ya asignado que quede lejos; si eso
+        # deja el universo vacío, se cede (mejor lejos que sin camión)
+        geo = [u for u in universo if _compatible(u, dia, centro)]
+        universo = geo or universo
         # más afinidad primero; sin historia, la unidad menos comprometida ese
         # día (reparte en vez de apilar); desempate final por nombre.
         cands = sorted(universo,
@@ -288,6 +329,8 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
             # sobrecargar (es preferencia, no tope duro)
             libres = [u for u in vehiculos_cap
                       if float(vehiculos_cap[u]) + 1e-6 >= minimo] or list(vehiculos_cap)
+            libres_geo = [u for u in libres if _compatible(u, dia, centro)]
+            libres = libres_geo or libres
             cands = sorted(libres,
                            key=lambda u: (-af.get(str(u), 0),
                                           ocupado.get((u, dia), 0.0), str(u)))
@@ -301,6 +344,7 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
                           key=lambda u: (-(float(vehiculos_cap[u])
                                            - ocupado.get((u, dia), 0.0)), str(u)))
         ref[gid] = elegida
+        grupos_en.setdefault((elegida, dia), []).append(gid)
         ocupado[(elegida, dia)] = ocupado.get((elegida, dia), 0.0) + kg
         en_uso.add(elegida)
     return ref
