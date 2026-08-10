@@ -125,16 +125,24 @@ def test_construir_cache_zonas_sin_coincidencia_de_grupo_no_entra_en_la_cache(ap
 # ── guardar_mayoristas_convrp / obtener_mayoristas_guardados ───────────────
 def test_guardar_mayoristas_convrp_secuencia_por_proximidad(app_ctx):
     from logic.mayoristas_logic import guardar_mayoristas_convrp
-    # ruta con 2 sucursales; el mayorista sin histórico se inserta junto a
-    # la más cercana (Sur, sid=2), no al final por default.
+    from db import get_db, get_table
+    from sqlalchemy import select
+    # ruta con 2 sucursales; sin histórico, `_ordenar_mayoristas_en_ruta`
+    # ordena por cercanía al CENTROIDE de la ruta -- no por el orden en que
+    # aparecen en `por_ruta` (aquí se insertan a propósito en orden inverso
+    # al esperado, para probar que sí se reordenan).
+    lid = "507f1f77bcf86cd799439011"
     por_ruta = {
         ("V1", "LUNES"): [
-            {"id_cliente": 900, "nombre": "ABARROTES X", "peso_kg": 50.0,
+            {"id_cliente": 902, "nombre": "LEJANO", "peso_kg": 30.0,
+             "latitud": 25.000, "longitud": -100.000, "poblacion": "PRUEBA"},
+            {"id_cliente": 901, "nombre": "CERCANO", "peso_kg": 20.0,
              "latitud": 19.001, "longitud": -96.001, "poblacion": "PRUEBA"},
         ],
     }
     detalle = [
-        {"id_cliente": 900, "via_zona": "HISTORIA", "via_destino": "NUCLEO"},
+        {"id_cliente": 901, "via_zona": "HISTORIA", "via_destino": "NUCLEO"},
+        {"id_cliente": 902, "via_zona": "HISTORIA", "via_destino": "NUCLEO"},
     ]
     rutas = [
         {"_id": "vrpaf_v1_lunes", "sucursales": [
@@ -142,8 +150,17 @@ def test_guardar_mayoristas_convrp_secuencia_por_proximidad(app_ctx):
             {"num_tienda": 2, "latitud": 19.000, "longitud": -96.000, "orden": 2},
         ]},
     ]
-    n = guardar_mayoristas_convrp("507f1f77bcf86cd799439011", por_ruta, detalle, rutas)
-    assert n == 1
+    n = guardar_mayoristas_convrp(lid, por_ruta, detalle, rutas)
+    assert n == 2
+
+    db = get_db()
+    t = get_table("convrp_mayoristas")
+    filas = list(db.execute(
+        select(t).where(t.c.logistica_id == lid).order_by(t.c.orden)
+    ).mappings())
+    # el cercano (901) debe quedar con orden menor que el lejano (902),
+    # aunque en `por_ruta` se pasó primero el lejano.
+    assert [f["id_cliente"] for f in filas] == [901, 902]
 
 
 def test_guardar_mayoristas_convrp_reemplaza_corrida_anterior(app_ctx):
@@ -170,3 +187,58 @@ def test_guardar_mayoristas_convrp_sin_mayoristas_devuelve_cero(app_ctx):
     from logic.mayoristas_logic import guardar_mayoristas_convrp
     n = guardar_mayoristas_convrp("507f1f77bcf86cd799439013", {}, [], [])
     assert n == 0
+
+
+def test_guardar_mayoristas_convrp_fusiona_parada_partida_por_capacidad(app_ctx):
+    # `logic/consolidacion_mayoristas.partir_parada_por_capacidad` puede
+    # producir dos entradas con el mismo id_cliente en la misma ruta (mismo
+    # cliente, folio partido por capacidad). La PK de `convrp_mayoristas` es
+    # (logistica_id, unidad, dia, id_cliente) -- deben fusionarse en una sola
+    # fila sumando peso_kg, o el INSERT viola la PK y se pierde toda la
+    # corrida (la excepción amplia devolvería -1 después de un DELETE ya
+    # comprometido).
+    from logic.mayoristas_logic import guardar_mayoristas_convrp
+    from db import get_db, get_table
+    from sqlalchemy import select
+    lid = "507f1f77bcf86cd799439014"
+    rutas = [{"_id": "vrpaf_v1_lunes", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.0, "longitud": -96.0, "orden": 1}]}]
+    por_ruta = {("V1", "LUNES"): [
+        {"id_cliente": 5, "nombre": "PARTIDO", "peso_kg": 15.0,
+         "latitud": 19.0, "longitud": -96.0},
+        {"id_cliente": 5, "nombre": "PARTIDO", "peso_kg": 25.0,
+         "latitud": 19.0, "longitud": -96.0},
+    ]}
+    n = guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    assert n == 1
+
+    db = get_db()
+    t = get_table("convrp_mayoristas")
+    filas = list(db.execute(select(t).where(t.c.logistica_id == lid)).mappings())
+    assert len(filas) == 1
+    assert filas[0]["id_cliente"] == 5
+    assert filas[0]["peso_kg"] == 40.0
+
+
+def test_guardar_mayoristas_convrp_sin_coordenadas_no_rompe(app_ctx):
+    # Ejercita la rama `mayoristas_sin` de `_ordenar_mayoristas_en_ruta`
+    # (sin lat/lon, no puede ordenarse por proximidad) -- no debe reventar
+    # ni perderse la fila.
+    from logic.mayoristas_logic import guardar_mayoristas_convrp
+    from db import get_db, get_table
+    from sqlalchemy import select
+    lid = "507f1f77bcf86cd799439015"
+    rutas = [{"_id": "vrpaf_v1_lunes", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.0, "longitud": -96.0, "orden": 1}]}]
+    por_ruta = {("V1", "LUNES"): [
+        {"id_cliente": 6, "nombre": "SIN COORDS", "peso_kg": 12.0,
+         "latitud": None, "longitud": None},
+    ]}
+    n = guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    assert n == 1
+
+    db = get_db()
+    t = get_table("convrp_mayoristas")
+    filas = list(db.execute(select(t).where(t.c.logistica_id == lid)).mappings())
+    assert len(filas) == 1
+    assert filas[0]["id_cliente"] == 6

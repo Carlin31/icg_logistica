@@ -986,6 +986,13 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
     }
 
 
+def _vrpaf_id(unidad, dia) -> str:
+    """Mismo formato de ruta_id que `historico_logic.py:1311` -- se repite
+    aquí (en vez de importarlo) porque ese módulo no expone un helper
+    público; Task 3 reutiliza esta misma función."""
+    return f"vrpaf_{str(unidad).replace(' ', '_').lower()}_{str(dia).lower()}"
+
+
 def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
                               rutas: list) -> int:
     """
@@ -995,6 +1002,12 @@ def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
 
     `por_ruta` : {(unidad, dia): [mayorista, ...]} -- salida de
                  `construir_rutas_con_mayoristas` / `enganchar_mayoristas_por_zona`.
+                 Un mismo `id_cliente` puede aparecer más de una vez en la
+                 misma ruta (parada partida por capacidad, ver
+                 `logic/consolidacion_mayoristas.partir_parada_por_capacidad`)
+                 -- se fusionan en una sola fila sumando `peso_kg`, porque la
+                 tabla es una fila por cliente por ruta (PK incluye
+                 `id_cliente`, no folio).
     `detalle`  : lista con una fila por cliente (id_cliente, via_zona,
                  via_destino, ...) -- mismo `detalle` que esas funciones.
     `rutas`    : [{_id, sucursales:[{num_tienda, latitud, longitud, orden}]}]
@@ -1003,24 +1016,38 @@ def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
                  (histórico propio -> proximidad), así lo persistido no se
                  nota distinto para quien lo lee.
 
-    Devuelve el nº de filas escritas, o -1 si falló.
+    Devuelve el nº de filas escritas, **0 si no hubo mayoristas que correr**
+    (resultado válido), o **-1 si falló** -- el llamador debe poder
+    distinguir "no hubo mayoristas" de "no se pudieron guardar" (mismo
+    contrato que `guardar_excepciones_convrp`).
     """
     if not logistica_id:
         return 0
     ahora = datetime.now().isoformat()
     via_por_cliente = {d.get("id_cliente"): d for d in (detalle or [])}
     sucursales_por_rid = {r.get("_id"): r.get("sucursales", []) for r in (rutas or [])}
-    historico_orden = _cargar_historico_mayoristas(str(logistica_id))
     try:
+        historico_orden = _cargar_historico_mayoristas(str(logistica_id))
         db = get_db()
         t = get_table("convrp_mayoristas")
         db.execute(delete(t).where(t.c.logistica_id == logistica_id))
         filas = []
         for (unidad, dia), mayoristas in (por_ruta or {}).items():
-            rid = f"vrpaf_{str(unidad).replace(' ', '_').lower()}_{str(dia).lower()}"
+            rid = _vrpaf_id(unidad, dia)
             sucursales = sucursales_por_rid.get(rid, [])
+            # Partes de un mismo cliente partidas por capacidad
+            # (logic/consolidacion_mayoristas.py) comparten id_cliente en la
+            # misma ruta -- la tabla es una fila por cliente, no por folio.
+            por_cliente: dict = {}
+            for m in mayoristas:
+                cid = m.get("id_cliente")
+                if cid in por_cliente:
+                    por_cliente[cid]["peso_kg"] = (float(por_cliente[cid].get("peso_kg") or 0)
+                                                    + float(m.get("peso_kg") or 0))
+                else:
+                    por_cliente[cid] = dict(m)
             ordenados = _ordenar_mayoristas_en_ruta(
-                list(mayoristas), rid, historico_orden, sucursales)
+                list(por_cliente.values()), rid, historico_orden, sucursales)
             for orden, m in enumerate(ordenados, start=1):
                 d = via_por_cliente.get(m.get("id_cliente")) or {}
                 filas.append({
