@@ -62,12 +62,14 @@ REBALANCEO_GEOGRAFICO = True
 # canónica, en vez de generador desde cero).
 #   False = motor de afinidad actual, comportamiento idéntico (DEFAULT).
 #   True  = las rutas salen de la plantilla canónica vigente.
-# Se queda en False hasta que la validación de fidelidad y costo pase.
-# Pendiente antes de invertirlo: el modelo de tiempo parte el rígido g2 las 9
-# semanas cuando en la realidad viajó completo en 8 de 9 (alivio fantasma);
-# además la calibración se reabre en Fase 3, cuando los mayoristas hagan crecer
-# las rutas de ~7 a ~23 paradas y el piso de 38 min empiece a morder.
-CONVRP_ACTIVO = False
+# Los dos pendientes que mantenían este flag en False ya se resolvieron:
+# el modelo de tiempo (velocidad_para_km, dos regímenes calibrados) dejó de
+# partir rígidos por alivio fantasma, y los mayoristas ya están integrados
+# vía enganche_zona (rutas de ~7 a ~23 paradas). Verificado con
+# scripts/smoke_convrp.py contra las 9 semanas canónicas: 0 rígidos
+# partidos, 99.6 % de pico de utilización, mayoristas 91 % resueltos por
+# historia. Activado para prueba real 2026-08-07.
+CONVRP_ACTIVO = True
 
 # Con CONVRP_ESTRICTO=True un fallo del ConVRP REVIENTA en vez de caer al motor
 # de afinidad. Lo usa el arnés de validación: si mido fidelidad y por dentro
