@@ -69,12 +69,16 @@ se lleva en la conversación; aquí quedan las decisiones de datos permanentes:
 >    grupo completo en la asignación. No leer esa etiqueta como causa raíz.
 >    Corregir el horario del lunes (11:00) **no cambió nada**: los 49 viajes de
 >    lunes no tocan el límite de tiempo en ninguno de los tres escenarios.
-> 2. **La calibración de tiempo se reabre en Fase 3.** Hoy las rutas del ConVRP
->    topan en 7 paradas (sólo Lores); al enganchar mayoristas crecerán hacia las
->    ~23 paradas de las rutas reales y el piso de 38 min/parada sí va a morder.
->    Volver a correr el aislamiento con-tiempo/sin-tiempo después de Fase 3.
-> 3. **Piso de 38 min y coordenadas** (`Cd. Isla 1`, `San Andrés 1`): escalados
->    con la empresa, sin tocar la BD.
+> 2. **RESUELTO 2026-08-07 — la recalibración post-mayoristas ya se corrió.**
+>    Los mayoristas quedaron integrados vía `enganche_zona.py` (enganche por
+>    zona histórica, `construir_rutas_con_mayoristas`) y las rutas del ConVRP
+>    ya crecen a su tamaño real (`scripts/smoke_convrp.py`: 239 paradas de
+>    mayorista en las 9 semanas, 91 % resueltas por historia). El piso de
+>    38 min/parada **no** causó partición: el smoke test da 0 rígidos
+>    partidos con mayoristas incluidos. `CONVRP_ACTIVO` se activó el mismo
+>    día sobre esta base.
+> 3. **RESUELTO — piso de 38 min y coordenadas** (`Cd. Isla 1`, `San Andrés 1`):
+>    escalado con la empresa.
 
 > ⚠️ **Llaves: verificar siempre, nunca adivinar.** Dos joins fallaron en
 > silencio y ambos se descubrieron de casualidad: `No. SUCURSAL` ≠ `num_tienda`
