@@ -163,6 +163,22 @@ DDL = [
             CONSTRAINT PK_plantilla_pobl_zona PRIMARY KEY (version, poblacion)
         )
     """),
+    # ── mayoristas del ConVRP completo, por logística (las lee Asignación/PDF/Modificación) ──
+    ("convrp_mayoristas", """
+        CREATE TABLE convrp_mayoristas (
+            logistica_id  NVARCHAR(40)  NOT NULL,
+            generado_en   NVARCHAR(40)  NOT NULL,
+            unidad        NVARCHAR(60)  NOT NULL,
+            dia           NVARCHAR(20)  NOT NULL,
+            orden         INT           NOT NULL,
+            id_cliente    INT           NOT NULL,
+            nombre        NVARCHAR(200) NULL,
+            peso_kg       FLOAT         NOT NULL,
+            via_zona      NVARCHAR(20)  NULL,
+            via_destino   NVARCHAR(20)  NULL,
+            CONSTRAINT PK_convrp_mayoristas PRIMARY KEY (logistica_id, unidad, dia, id_cliente)
+        )
+    """),
 ]
 
 
