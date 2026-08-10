@@ -1069,3 +1069,79 @@ def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
         print(traceback.format_exc())
         print("=" * 70)
         return -1
+
+
+def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None":
+    """
+    Reconstruye la MISMA forma de respuesta que `calcular_distribucion_mayoristas`
+    a partir de lo guardado en `convrp_mayoristas` -- así los sitios que ya
+    consumen esa forma no cambian, sólo la llamada.
+
+    Devuelve None si no hay filas guardadas para esa logística (nunca un dict
+    vacío, que sería indistinguible de "esta corrida no tuvo mayoristas") --
+    el llamador debe caer a `calcular_distribucion_mayoristas` en ese caso.
+    """
+    oid = _id_valido(logistica_id)
+    if not oid:
+        return None
+    db = get_db()
+    t = get_table("convrp_mayoristas")
+    filas = list(db.execute(
+        select(t).where(t.c.logistica_id == logistica_id).order_by(
+            t.c.unidad, t.c.dia, t.c.orden)).mappings())
+    if not filas:
+        return None
+
+    sucursales_por_rid = {r.get("_id"): list(r.get("sucursales", [])) for r in (rutas or [])}
+    mayoristas_por_ruta: dict = {}
+    paradas_integradas: dict = {}
+    orden_sucursales: dict = {}
+    todos_mayoristas: list = []
+
+    por_rid: dict = {}
+    for f in filas:
+        rid = _vrpaf_id(f['unidad'], f['dia'])
+        por_rid.setdefault(rid, []).append(dict(f))
+
+    for rid, mays in por_rid.items():
+        sucursales_raw = sucursales_por_rid.get(rid, [])
+        sucursales = [dict(s, tipo="sucursal") for s in sucursales_raw]
+        for idx, suc in enumerate(sucursales, start=1):
+            suc["orden"] = idx
+
+        entradas = []
+        paradas = list(sucursales)
+        for f in sorted(mays, key=lambda x: x["orden"]):
+            entrada = {
+                "id_cliente": f["id_cliente"], "nombre": f["nombre"] or "",
+                "peso_kg": float(f["peso_kg"]), "ruta_id": rid, "orden": f["orden"],
+            }
+            entradas.append(entrada)
+            todos_mayoristas.append(dict(entrada))
+            paradas.append({
+                "tipo": "mayorista", "id_cliente": f["id_cliente"],
+                "nombre_base": f["nombre"] or "", "peso_kg": float(f["peso_kg"]),
+                "orden": f["orden"],
+            })
+        mayoristas_por_ruta[rid] = entradas
+
+        orden_map: dict = {}
+        for p in paradas:
+            if p.get("tipo") != "sucursal":
+                continue
+            nt = p.get("num_tienda")
+            if nt is not None:
+                orden_map[str(nt)] = p.get("orden")
+        orden_sucursales[rid] = orden_map
+        paradas_integradas[rid] = paradas
+
+    return {
+        "mayoristas_por_ruta": mayoristas_por_ruta,
+        "paradas_integradas": paradas_integradas,
+        "orden_sucursales": orden_sucursales,
+        "todos_mayoristas": todos_mayoristas,
+        "sin_asignar": [],
+        "sin_coords": [],
+        "pendientes": [],
+        "actualizado_en": filas[0]["generado_en"] if filas else None,
+    }

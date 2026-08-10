@@ -242,3 +242,34 @@ def test_guardar_mayoristas_convrp_sin_coordenadas_no_rompe(app_ctx):
     filas = list(db.execute(select(t).where(t.c.logistica_id == lid)).mappings())
     assert len(filas) == 1
     assert filas[0]["id_cliente"] == 6
+
+
+def test_obtener_mayoristas_guardados_reconstruye_forma_esperada(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439014"
+    rutas = [{"_id": "vrpaf_v1_lunes", "sucursales": [
+        {"num_tienda": 1, "nombre_base": "Suc 1", "latitud": 19.0, "longitud": -96.0,
+         "orden": 1, "peso_kg": 500}]}]
+    por_ruta = {("V1", "LUNES"): [
+        {"id_cliente": 5, "nombre": "ABARROTES Y", "peso_kg": 30.0,
+         "latitud": 19.001, "longitud": -96.001}]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    dist = obtener_mayoristas_guardados(lid, rutas)
+    assert dist is not None
+    assert dist["mayoristas_por_ruta"]["vrpaf_v1_lunes"][0]["id_cliente"] == 5
+    assert dist["mayoristas_por_ruta"]["vrpaf_v1_lunes"][0]["peso_kg"] == 30.0
+    paradas = dist["paradas_integradas"]["vrpaf_v1_lunes"]
+    assert any(p["tipo"] == "mayorista" and p["id_cliente"] == 5 for p in paradas)
+    assert any(p["tipo"] == "sucursal" and p["num_tienda"] == 1 for p in paradas)
+    assert dist["orden_sucursales"]["vrpaf_v1_lunes"]["1"] is not None
+
+
+def test_obtener_mayoristas_guardados_sin_filas_es_none(app_ctx):
+    # NOTA: se usa un lid distinto ("...9016") al del enunciado ("...9015")
+    # porque ese último ya lo puebla `test_guardar_mayoristas_convrp_sin_coordenadas_no_rompe`
+    # (fila id_cliente=6, nunca borrada) -- reutilizarlo hacía que esta prueba
+    # encontrara esa fila ajena y fallara la aserción `dist is None` de forma
+    # determinista, no por un error de la implementación.
+    from logic.mayoristas_logic import obtener_mayoristas_guardados
+    dist = obtener_mayoristas_guardados("507f1f77bcf86cd799439016", [])
+    assert dist is None
