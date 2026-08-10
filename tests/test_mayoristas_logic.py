@@ -120,3 +120,53 @@ def test_construir_cache_zonas_sin_coincidencia_de_grupo_no_entra_en_la_cache(ap
     cache = _construir_cache_zonas(db, rutas_sucursales)
     if cache:
         assert "RUTA_X" not in cache.values()
+
+
+# ── guardar_mayoristas_convrp / obtener_mayoristas_guardados ───────────────
+def test_guardar_mayoristas_convrp_secuencia_por_proximidad(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp
+    # ruta con 2 sucursales; el mayorista sin histórico se inserta junto a
+    # la más cercana (Sur, sid=2), no al final por default.
+    por_ruta = {
+        ("V1", "LUNES"): [
+            {"id_cliente": 900, "nombre": "ABARROTES X", "peso_kg": 50.0,
+             "latitud": 19.001, "longitud": -96.001, "poblacion": "PRUEBA"},
+        ],
+    }
+    detalle = [
+        {"id_cliente": 900, "via_zona": "HISTORIA", "via_destino": "NUCLEO"},
+    ]
+    rutas = [
+        {"_id": "vrpaf_v1_lunes", "sucursales": [
+            {"num_tienda": 1, "latitud": 19.500, "longitud": -96.500, "orden": 1},
+            {"num_tienda": 2, "latitud": 19.000, "longitud": -96.000, "orden": 2},
+        ]},
+    ]
+    n = guardar_mayoristas_convrp("507f1f77bcf86cd799439011", por_ruta, detalle, rutas)
+    assert n == 1
+
+
+def test_guardar_mayoristas_convrp_reemplaza_corrida_anterior(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp
+    from db import get_db, get_table
+    from sqlalchemy import select
+    lid = "507f1f77bcf86cd799439012"
+    rutas = [{"_id": "vrpaf_v1_lunes", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.0, "longitud": -96.0, "orden": 1}]}]
+    por_ruta_1 = {("V1", "LUNES"): [
+        {"id_cliente": 1, "nombre": "A", "peso_kg": 10.0, "latitud": 19.0, "longitud": -96.0}]}
+    por_ruta_2 = {("V1", "LUNES"): [
+        {"id_cliente": 2, "nombre": "B", "peso_kg": 20.0, "latitud": 19.0, "longitud": -96.0}]}
+    guardar_mayoristas_convrp(lid, por_ruta_1, [], rutas)
+    guardar_mayoristas_convrp(lid, por_ruta_2, [], rutas)
+    db = get_db()
+    t = get_table("convrp_mayoristas")
+    filas = list(db.execute(select(t).where(t.c.logistica_id == lid)).mappings())
+    assert len(filas) == 1
+    assert filas[0]["id_cliente"] == 2
+
+
+def test_guardar_mayoristas_convrp_sin_mayoristas_devuelve_cero(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp
+    n = guardar_mayoristas_convrp("507f1f77bcf86cd799439013", {}, [], [])
+    assert n == 0

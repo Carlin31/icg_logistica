@@ -16,7 +16,7 @@ from datetime import datetime
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from sqlalchemy import select, insert
+from sqlalchemy import select, insert, delete
 
 from config import es_semana_canonica
 from db import get_db, get_table
@@ -984,3 +984,61 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
         "pendientes": pendientes,
         "actualizado_en": datetime.now().isoformat(),
     }
+
+
+def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
+                              rutas: list) -> int:
+    """
+    Persiste el resultado del enganche COMPLETO (`construir_rutas_con_mayoristas`)
+    en `convrp_mayoristas`. Reemplaza la corrida anterior de esa logística
+    (mismo criterio que `convrp_integracion.guardar_excepciones_convrp`).
+
+    `por_ruta` : {(unidad, dia): [mayorista, ...]} -- salida de
+                 `construir_rutas_con_mayoristas` / `enganchar_mayoristas_por_zona`.
+    `detalle`  : lista con una fila por cliente (id_cliente, via_zona,
+                 via_destino, ...) -- mismo `detalle` que esas funciones.
+    `rutas`    : [{_id, sucursales:[{num_tienda, latitud, longitud, orden}]}]
+                 -- para calcular la posición del mayorista dentro de la ruta
+                 con el MISMO criterio que `calcular_distribucion_mayoristas`
+                 (histórico propio -> proximidad), así lo persistido no se
+                 nota distinto para quien lo lee.
+
+    Devuelve el nº de filas escritas, o -1 si falló.
+    """
+    if not logistica_id:
+        return 0
+    ahora = datetime.now().isoformat()
+    via_por_cliente = {d.get("id_cliente"): d for d in (detalle or [])}
+    sucursales_por_rid = {r.get("_id"): r.get("sucursales", []) for r in (rutas or [])}
+    historico_orden = _cargar_historico_mayoristas(str(logistica_id))
+    try:
+        db = get_db()
+        t = get_table("convrp_mayoristas")
+        db.execute(delete(t).where(t.c.logistica_id == logistica_id))
+        filas = []
+        for (unidad, dia), mayoristas in (por_ruta or {}).items():
+            rid = f"vrpaf_{str(unidad).replace(' ', '_').lower()}_{str(dia).lower()}"
+            sucursales = sucursales_por_rid.get(rid, [])
+            ordenados = _ordenar_mayoristas_en_ruta(
+                list(mayoristas), rid, historico_orden, sucursales)
+            for orden, m in enumerate(ordenados, start=1):
+                d = via_por_cliente.get(m.get("id_cliente")) or {}
+                filas.append({
+                    "logistica_id": logistica_id, "generado_en": ahora,
+                    "unidad": unidad, "dia": dia, "orden": orden,
+                    "id_cliente": m.get("id_cliente"),
+                    "nombre": (m.get("nombre") or "")[:200],
+                    "peso_kg": float(m.get("peso_kg") or 0),
+                    "via_zona": d.get("via_zona"), "via_destino": d.get("via_destino"),
+                })
+        if filas:
+            db.execute(insert(t), filas)
+        return len(filas)
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        print("=" * 70)
+        print(f"[convrp] NO SE GUARDARON LOS MAYORISTAS: {type(exc).__name__}: {exc}")
+        print("[convrp] las vistas caerán al cálculo en vivo para esta logística.")
+        print(traceback.format_exc())
+        print("=" * 70)
+        return -1
