@@ -275,6 +275,11 @@ Expected: `ImportError: cannot import name 'obtener_mayoristas_guardados'`.
 
 - [ ] **Step 3: Implementar `obtener_mayoristas_guardados()`**
 
+> **Nota (agregada tras la revisión de Task 2):** `_vrpaf_id(unidad, dia)` ya
+> existe en `logic/mayoristas_logic.py` (extraída durante Task 2 para evitar
+> duplicar el formato `f"vrpaf_..."` que también usa `logic/historico_logic.py:1311`).
+> Reutilízala aquí — NO vuelvas a escribir el f-string inline.
+
 Agregar a `logic/mayoristas_logic.py`, justo después de `guardar_mayoristas_convrp`:
 
 ```python
@@ -307,7 +312,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
 
     por_rid: dict = {}
     for f in filas:
-        rid = f"vrpaf_{str(f['unidad']).replace(' ', '_').lower()}_{str(f['dia']).lower()}"
+        rid = _vrpaf_id(f['unidad'], f['dia'])
         por_rid.setdefault(rid, []).append(dict(f))
 
     for rid, mays in por_rid.items():
