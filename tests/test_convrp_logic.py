@@ -661,3 +661,85 @@ def test_dia_alternativo_coocurrencia_cede_si_es_la_unica_opcion():
     resultado = _dia_alternativo(asign, a, pedidos, {}, {}, {"V1": 1000}, {},
                                  _sin_tiempo(coocurrencia_grupos={}))
     assert resultado == ("MARTES", "V1")          # única unidad: se acepta sin precedente
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Palanca 4 — ninguna ruta se queda con una sola sucursal, salvo que el
+# vehículo ya esté al límite de su capacidad (peso Lores + mayoristas).
+# Regla de negocio explícita del 2026-08-11, encontrada al revisar viajes
+# como San Bartolo (K16, 1 sola sucursal) en la logística real.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_solitaria_se_consolida_en_ruta_activa_compatible_con_cupo():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
+                 _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
+    pedidos = {1: 100, 2: 300, 3: 300}
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    assert ("V1", "LUNES") not in groups
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 3]
+    assert any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
+
+
+def test_solitaria_no_se_mueve_si_ya_esta_al_limite_de_capacidad():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
+                 _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
+    pedidos = {1: 1000, 2: 300, 3: 300}          # grupo 1 sola ya = cap de V1
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    assert sorted(m["sid"] for m in groups[("V1", "LUNES")]) == [1]
+    assert not any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
+
+
+def test_solitaria_sin_ruta_activa_ese_dia_queda_como_aviso():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1")]
+    pedidos = {1: 100}
+    caps = {"V1": 1000, "V2": 1000}              # V2 existe pero sin ninguna ruta ese día
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo())
+    assert ("V1", "LUNES") in groups
+    assert ("V2", "LUNES") not in groups         # nunca se estrena una unidad vacía
+    assert any(e["tipo"] == "AVISO_RUTA_SOLITARIA" for e in exc)
+
+
+def test_solitaria_respeta_coocurrencia_aunque_haya_cupo():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
+                 _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
+    pedidos = {1: 100, 2: 300, 3: 300}
+    caps = {"V1": 1000, "V2": 1000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos={}))
+    assert sorted(m["sid"] for m in groups[("V1", "LUNES")]) == [1]     # nunca coincidieron
+    assert any(e["tipo"] == "AVISO_RUTA_SOLITARIA" for e in exc)
+
+
+def test_solitaria_considera_mayoristas_al_evaluar_el_limite():
+    # Lores solo (100 kg) deja mucho margen en V1 (cap 1000), pero con los
+    # mayoristas ya anclados (900 kg) llega al límite -- no debe moverse.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
+                 _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
+    pedidos = {1: 100, 2: 300, 3: 300}
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia),
+        kg_mayoristas={1: 900})
+    assert sorted(m["sid"] for m in groups[("V1", "LUNES")]) == [1]
+    assert not any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
+
+
+def test_dos_solitarias_compatibles_se_consolidan_entre_si():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
+                 _grupo(2, "FLEXIBLE", "LUNES", [2], unidad_ref="V2")]
+    pedidos = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    assert len(groups) == 1                       # una sola ruta con las dos
+    assert sorted(next(iter(groups.values())), key=lambda m: m["sid"])[0]["sid"] == 1
+    assert sum(len(v) for v in groups.values()) == 2

@@ -380,6 +380,83 @@ def _dia_alternativo(asign, a, pedidos, volumenes, coords,
     return None
 
 
+def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
+                           vehiculos_vol, cfg, kg_may):
+    """
+    Palanca 4 (último paso, después de partir): ningún viaje debe quedar con
+    una sola sucursal salvo que el vehículo ya esté al límite de su
+    capacidad (peso Lores + mayoristas anclados) — regla de negocio explícita
+    del 2026-08-11.
+
+    Si hay margen, la sucursal solitaria se mueve a OTRA ruta YA ACTIVA ese
+    mismo día (nunca se estrena una unidad vacía sólo para esto), compatible
+    por historial real (mismo criterio que las palancas 1 y 2:
+    `_compatible_historico`) y con cupo. Si dos solitarias del mismo día son
+    compatibles entre sí, se juntan (cada una queda disponible como destino
+    de la otra en el mismo barrido).
+
+    "Al límite de su capacidad" se mide en PESO (kg Lores + kg de
+    mayoristas ya anclados a esa sucursal) contra `vehiculos_cap` — el mismo
+    sentido en que el resto del motor usa "capacidad". No repite el error de
+    contar sólo Lores: la carga de mayoristas es carga real de la ruta.
+
+    Determinista: una sola pasada sobre las rutas activas en el orden fijo
+    de `_rutas_activas`; fusionar nunca crea un solitario nuevo, sólo alarga
+    uno existente, así que no hace falta iterar.
+    """
+    excepciones: list = []
+    coocurrencia = cfg.get("coocurrencia_grupos")
+    for unidad, dia in _rutas_activas(asign):
+        sids = _sids_de_ruta(asign, unidad, dia)
+        if len(sids) != 1:
+            continue
+        sid = sids[0]
+        cap = _num(vehiculos_cap.get(unidad))
+        kg_actual = _num(pedidos.get(sid)) + _num(kg_may.get(sid))
+        if cap and kg_actual >= cap - 1e-6:
+            continue          # ya al límite: la excepción de una sola parada es válida
+        gid = next(g for g in asign
+                  if asign[g]["unidad"] == unidad and asign[g]["dia"] == dia)
+        a = asign[gid]
+        # candidatas: unidades YA ACTIVAS ese día (nunca abrir una vacía sólo
+        # para esto), compatibles por historial, ordenadas por carga
+        # descendente (consolidar en la más llena que todavía quepa).
+        activas_ese_dia = sorted({u for (u, d) in _rutas_activas(asign)
+                                  if d == dia and u != unidad})
+        candidatas = [u for u in activas_ese_dia
+                     if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
+        candidatas.sort(key=lambda u: (
+            -sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
+                for s in _sids_de_ruta(asign, u, dia)), u))
+        elegido = None
+        for u in candidatas:
+            destino = _sids_de_ruta(asign, u, dia) + [sid]
+            if _restriccion_violada(sorted(destino), u, pedidos, volumenes, coords,
+                                    vehiculos_cap, vehiculos_vol, cfg, dia=dia,
+                                    kg_mayoristas=kg_may) is None:
+                elegido = u
+                break
+        if elegido:
+            excepciones.append({
+                "tipo": "CONSOLIDADO_SOLITARIA", "grupo": a["grupo"],
+                "rigidez": a["rigidez"], "restriccion": None,
+                "desde_unidad": unidad, "a_unidad": elegido, "dia": dia,
+                "motivo": f"{unidad}/{dia} quedaba con una sola sucursal sin "
+                          f"llegar al límite de capacidad; se consolidó en {elegido}",
+            })
+            a["unidad"] = elegido
+        else:
+            excepciones.append({
+                "tipo": "AVISO_RUTA_SOLITARIA", "grupo": a["grupo"],
+                "rigidez": a["rigidez"], "restriccion": None,
+                "unidad": unidad, "dia": dia,
+                "motivo": f"{unidad}/{dia} quedó con una sola sucursal sin llegar "
+                          f"al límite de capacidad, pero ninguna ruta activa ese "
+                          f"día tuvo precedente histórico y cupo para recibirla",
+            })
+    return excepciones
+
+
 def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dict,
                                      plantilla: list, vehiculos_cap: dict,
                                      vehiculos_vol: dict, cfg: dict = None,
@@ -546,6 +623,11 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             })
             if destino is None:
                 break                      # sin destino: no seguir partiendo
+
+    # ── 3b. Palanca 4: ninguna ruta se queda con una sola sucursal, salvo
+    #      que ya esté al límite de su capacidad (peso Lores + mayoristas). ──
+    excepciones += _consolidar_solitarios(asign, pedidos, volumenes, coords,
+                                          vehiculos_cap, vehiculos_vol, cfg, kg_may)
 
     # ── 4. Salida en el formato que consume el resto del motor ──
     groups: dict = {}
