@@ -45,15 +45,13 @@ def main():
     with app.app_context():
         from db import get_db, get_table
         from logic.plantilla_canonica import obtener_grupos, version_vigente
-        from logic.convrp_validacion import asignar_unidad_ref, kg_representativo
+        from logic.convrp_validacion import (asignar_unidad_ref, kg_representativo,
+                                             coocurrencia_grupos)
         from logic.vrp_logic import obtener_capacidades_vehiculos
 
         db = get_db()
         caps = obtener_capacidades_vehiculos()
         plantilla = obtener_grupos()
-        coords = {int(s.num_tienda): (float(s.latitud), float(s.longitud))
-                  for s in db.execute(select(get_table("sucursales"))).mappings()
-                  if s.get("latitud") is not None and s.get("num_tienda") is not None}
         if not plantilla:
             print("No hay plantilla vigente.")
             return 1
@@ -152,9 +150,13 @@ def main():
         objetivo = {d: max(1, round(n / max(n_sem, 1))) for d, n in por_dia.items()}
         print("viajes/día en la operación real:",
               {d: objetivo[d] for d in sorted(objetivo)})
+        semanas_filas = [json.loads(r["filas"] or "[]") for r in semanas
+                         if r["tipo_registro"] == "sucursales"
+                         and "julio" not in str(r["nombre"]).lower()]
+        coo = coocurrencia_grupos(grupo_de, semanas_filas)
         nueva = asignar_unidad_ref(plantilla, {g: dict(c) for g, c in afinidad.items()},
                                    kg_tipico, caps, viajes_objetivo=objetivo,
-                                   kg_minimo=kg_minimo, coords=coords)
+                                   kg_minimo=kg_minimo, coocurrencia=coo)
 
         actual = {int(g["grupo"]): g.get("unidad_ref") for g in plantilla}
         dia_de = {int(g["grupo"]): str(g.get("dia_preferido") or g.get("dia")).upper()

@@ -217,59 +217,84 @@ def test_el_minimo_no_infla_el_empaque():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Filtro geográfico — encontrado en producción el 2026-08-10: F 350_2 jueves
-# apiló Tuxtepec (grupo 8) con Veracruz (grupos 28/35), 127 km, porque la
-# afinidad/capacidad decían que "cabía" sin ninguna noción de distancia. El
-# histórico real de esa semana nunca los puso en el mismo camión.
+# Filtro de coocurrencia — encontrado en producción el 2026-08-10.
+#
+# Primer intento: filtrar por distancia (centroide, 60 km). Descartado con
+# datos reales: hay pares que SÍ viajaron juntos a 84 km (grupos 9/19, F 350_1
+# martes) y una pareja que NUNCA coincidió a sólo 58 km (grupos 19/22 — J 19
+# jueves mezcló Amatitlán/Carrillo 2 con Temascal/Los Naranjos, cero
+# precedente en 11 semanas). La distancia no discrimina bien en ningún
+# sentido; el historial real de qué grupos SÍ compartieron camión-día sí.
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_geografia_separa_grupos_lejanos_si_hay_alternativa():
+def test_coocurrencia_separa_grupos_sin_precedente_si_hay_alternativa():
     from logic.convrp_validacion import asignar_unidad_ref
-    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
-              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
-    coords = {1: (0.0, 0.0), 2: (2.0, 0.0)}     # ~222 km -- supera MAX_KM_ENGANCHE
-    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}     # ambos "quieren" V1 por historia
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
+    # 1 y 3 sí compartieron camión alguna vez; 1 y 2 nunca.
+    coocurrencia = {frozenset((1, 3)): 2}
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}     # ambos "quieren" V1 por afinidad
     kg = {1: 100, 2: 100}
     caps = {"V1": 1000, "V2": 1000}
-    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coords=coords)
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coocurrencia=coocurrencia)
     assert ref[1] == "V1"
-    assert ref[2] == "V2"          # geo-incompatible con V1 -> cede a V2
+    assert ref[2] == "V2"          # sin precedente con lo que ya hay en V1 -> cede a V2
 
 
-def test_geografia_cede_si_es_la_unica_unidad():
-    # Sin alternativa, mejor asignar lejos que dejar el grupo sin camión.
+def test_coocurrencia_cede_si_es_la_unica_unidad():
+    # Sin alternativa, mejor una combinación sin precedente que sin camión.
     from logic.convrp_validacion import asignar_unidad_ref
-    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
-              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
-    coords = {1: (0.0, 0.0), 2: (2.0, 0.0)}
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
     afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
     kg = {1: 100, 2: 100}
-    ref = asignar_unidad_ref(grupos, afinidad, kg, {"V1": 1000}, coords=coords)
+    ref = asignar_unidad_ref(grupos, afinidad, kg, {"V1": 1000}, coocurrencia={})
     assert ref == {1: "V1", 2: "V1"}
 
 
-def test_geografia_no_bloquea_grupos_cercanos():
-    # Regresión: dos grupos de la misma zona (< 60 km) se siguen consolidando
-    # en el mismo camión como antes del filtro.
+def test_coocurrencia_permite_grupos_con_precedente_real():
+    # Regresión: si el histórico SÍ los puso juntos alguna vez, se consolidan
+    # igual que antes del filtro (aunque estén "lejos" en línea recta).
     from logic.convrp_validacion import asignar_unidad_ref
-    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
-              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
-    coords = {1: (0.0, 0.0), 2: (0.01, 0.0)}    # ~1.1 km
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
+    coocurrencia = {frozenset((1, 2)): 3}
     afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
     kg = {1: 100, 2: 100}
     caps = {"V1": 1000, "V2": 1000}
-    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coords=coords)
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps, coocurrencia=coocurrencia)
     assert ref == {1: "V1", 2: "V1"}
 
 
-def test_sin_coords_el_filtro_no_actua():
-    # Comportamiento previo intacto si no se pasa `coords` (compatibilidad con
-    # los llamadores que aún no la tienen disponible).
+def test_sin_coocurrencia_el_filtro_no_actua():
+    # Comportamiento previo intacto si no se pasa `coocurrencia` (compatibilidad
+    # con los llamadores que aún no la tienen disponible).
     from logic.convrp_validacion import asignar_unidad_ref
-    grupos = [{"grupo": 1, "dia_preferido": "LUNES", "sucursales": [1]},
-              {"grupo": 2, "dia_preferido": "LUNES", "sucursales": [2]}]
+    grupos = [{"grupo": 1, "dia_preferido": "LUNES"},
+              {"grupo": 2, "dia_preferido": "LUNES"}]
     afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
     kg = {1: 100, 2: 100}
     caps = {"V1": 1000, "V2": 1000}
     ref = asignar_unidad_ref(grupos, afinidad, kg, caps)
     assert ref == {1: "V1", 2: "V1"}
+
+
+# ── coocurrencia_grupos (contra semanas sintéticas) ─────────────────────────
+def test_coocurrencia_grupos_cuenta_semanas_compartidas():
+    from logic.convrp_validacion import coocurrencia_grupos
+    grupo_de = {1: 10, 2: 10, 3: 20, 4: 30}
+    semana_a = [_fila(1, "V1", "LUNES"), _fila(3, "V1", "LUNES")]           # 10-20
+    semana_b = [_fila(1, "V1", "LUNES"), _fila(3, "V1", "LUNES")]           # 10-20 otra vez
+    semana_c = [_fila(1, "V1", "LUNES"), _fila(4, "V2", "MARTES")]         # 10 y 30, distinto viaje
+    coo = coocurrencia_grupos(grupo_de, [semana_a, semana_b, semana_c])
+    assert coo[frozenset((10, 20))] == 2
+    assert frozenset((10, 30)) not in coo      # nunca compartieron (unidad,día)
+
+
+def test_coocurrencia_grupos_ignora_mayoristas():
+    from logic.convrp_validacion import coocurrencia_grupos
+    grupo_de = {1: 10, 2: 20}
+    semana = [_fila(1, "V1", "LUNES"), _fila(2, "V1", "LUNES"),
+              {"id_cliente": 99, "tipo": "mayorista", "vehiculo": "V1", "dia_semana": "LUNES"}]
+    coo = coocurrencia_grupos(grupo_de, [semana])
+    assert coo == {frozenset((10, 20)): 1}

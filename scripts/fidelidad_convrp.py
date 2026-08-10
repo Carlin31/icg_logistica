@@ -103,7 +103,7 @@ def main():
             nombre_test, filas_test = semanas[k]
             plantilla = construir_plantilla_desde(
                 entrena, ventana_dia=ventana, ventana_unidad=ventana_u,
-                vehiculos_cap=(caps if unidad_global else None), coords=coords)
+                vehiculos_cap=(caps if unidad_global else None))
             pedidos = {}
             for f in filas_test:
                 if f.get("tipo") != "mayorista" and f.get("id_sucursal") is not None:

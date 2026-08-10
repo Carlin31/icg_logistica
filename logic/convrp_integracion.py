@@ -55,6 +55,28 @@ def _afinidad_de_plantilla(plantilla: list) -> dict:
     return salida
 
 
+def _coocurrencia_de_bd(plantilla: list) -> dict:
+    """
+    Coocurrencia real grupo-a-grupo (ver `convrp_validacion.coocurrencia_grupos`)
+    desde `rutas_historicas`. Se recalcula en cada corrida en vez de persistirse
+    junto a la plantilla: es barata (unas pocas semanas, unos cientos de filas)
+    y evita otra columna que se pueda quedar desincronizada.
+
+    Mismas semanas "confirmadas" que usa el resto del arnés de calibración
+    (excluye las de julio, aún no confirmadas — ver `calibrar_unidad_ref.py`).
+    """
+    from logic.convrp_validacion import coocurrencia_grupos
+    grupo_de = {s: int(g["grupo"]) for g in plantilla for s in g.get("sucursales", [])}
+    db = get_db()
+    t = get_table("rutas_historicas")
+    semanas = []
+    for r in db.execute(select(t.c.tipo_registro, t.c.nombre, t.c.filas)).mappings():
+        if r["tipo_registro"] != "sucursales" or "julio" in str(r["nombre"]).lower():
+            continue
+        semanas.append(_json.loads(r["filas"]) if r["filas"] else [])
+    return coocurrencia_grupos(grupo_de, semanas)
+
+
 def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
                             coords_dict: dict, vehiculos_cap: dict,
                             vehiculos_vol: dict, depot: tuple,
@@ -88,7 +110,8 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
             f"silencio. Recarga la plantilla (scripts/cargar_plantilla.py).")
     cfg = dict(cfg_por_defecto(), depot=depot,
                horarios_por_dia=horarios_por_dia(),
-               afinidad_unidad=_afinidad_de_plantilla(plantilla))
+               afinidad_unidad=_afinidad_de_plantilla(plantilla),
+               coocurrencia_grupos=_coocurrencia_de_bd(plantilla))
     groups, excepciones = construir_groups_desde_plantilla(
         pedidos_dict, volumenes_dict or {}, coords_dict, plantilla,
         vehiculos_cap, vehiculos_vol or {}, cfg,

@@ -32,7 +32,6 @@ poder distinguir después alivio real de alivio fantasma — el modelo de tiempo
 sobrestima en rutas de muchas paradas chicas (ver nota de calibración).
 """
 from logic.logistica_tiempo import evaluar_ruta_por_tiempo
-from logic.enganche_zona import _haversine_km, MAX_KM_ENGANCHE
 
 DIAS_ORDEN = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
 
@@ -79,32 +78,32 @@ def _num(x) -> float:
         return 0.0
 
 
-def _centroide(sids, coords) -> "tuple | None":
-    pts = [coords[s] for s in (sids or []) if coords and s in coords]
-    if not pts:
-        return None
-    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+def _grupos_de_ruta(asign, unidad, dia):
+    return [a["grupo"] for a in asign.values() if a["unidad"] == unidad and a["dia"] == dia]
 
 
-def _geo_compatible(centro_g, sids_destino, coords) -> bool:
+def _compatible_historico(gid, unidad, dia, asign, coocurrencia) -> bool:
     """
-    True si el destino no tiene ya un grupo a más de MAX_KM_ENGANCHE del
-    centroide `centro_g` (centroide a centroide, mismo criterio que
-    `asignar_unidad_ref` en convrp_validacion.py). Sin coordenada de alguno de
-    los dos lados no se puede evaluar: no bloquea (degradación segura).
+    True si `gid` puede compartir camión/día con lo que ya está asignado en
+    (unidad, dia), según si ALGUNA vez compartieron viaje en el histórico real
+    (`coocurrencia`, ver `convrp_validacion.coocurrencia_grupos`). Sin datos
+    de coocurrencia, no bloquea (degradación segura).
 
-    Encontrado en producción (2026-08-10): al ceder `unidad_ref` por TIEMPO, el
-    grupo 19 (Carlos A. Carrillo 2 + Amatitlán) caía a F 350_3, que esa semana
-    ya llevaba Jalapa de Díaz — 89 km, camión distinto en la realidad. El
-    reparto de unidad/día sólo miraba peso/afinidad/consolidación, nunca
-    distancia.
+    Por qué coocurrencia y no distancia: se probó con centroide/60 km primero
+    y la distancia no es una señal confiable para esta decisión — hay pares
+    reales que SÍ viajaron juntos a 84 km (grupos 9/19) y una pareja que NUNCA
+    coincidió a sólo 58 km (grupos 19/22, hallado el 2026-08-10: al ceder
+    `unidad_ref` por TIEMPO, el grupo 19 caía a J 19, que esa semana ya
+    llevaba Temascal/Los Naranjos — ningún precedente en 11 semanas, aunque la
+    distancia por sí sola no lo hubiera bloqueado). El histórico de
+    coocurrencia responde la pregunta correcta directamente.
     """
-    if centro_g is None or not sids_destino:
+    if coocurrencia is None:
         return True
-    centro_d = _centroide(sids_destino, coords)
-    if centro_d is None:
-        return True
-    return _haversine_km(*centro_g, *centro_d) <= MAX_KM_ENGANCHE
+    for gid2 in _grupos_de_ruta(asign, unidad, dia):
+        if gid2 != gid and coocurrencia.get(frozenset((gid, gid2)), 0) == 0:
+            return False
+    return True
 
 
 # ── evaluación de una ruta (qué restricción ata, si alguna) ─────────────────
@@ -293,13 +292,13 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                                     for s in _sids_de_ruta(asign, u, dia)),
                                -_num(af.get(u)), str(u)))
             # Al ceder la preferida no cualquier consolidación sirve: si la
-            # unidad candidata ya lleva ese día un grupo a más de 60 km, se
-            # descarta primero — salvo que sea la única opción (ver
-            # `_geo_compatible`).
-            centro_g = _centroide(a["miembros"], coords)
-            otras_geo = [u for u in otras
-                        if _geo_compatible(centro_g, _sids_de_ruta(asign, u, dia), coords)]
-            otras = otras_geo or otras
+            # unidad candidata ya lleva ese día un grupo con el que nunca
+            # compartió camión en el histórico, se descarta primero — salvo
+            # que sea la única opción (ver `_compatible_historico`).
+            coocurrencia = cfg.get("coocurrencia_grupos")
+            otras_compat = [u for u in otras
+                           if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
+            otras = otras_compat or otras
             elegido, restr_ref = None, None
             for i, unidad in enumerate([ref] + otras if ref else otras):
                 destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
@@ -359,21 +358,21 @@ def _dia_alternativo(asign, a, pedidos, volumenes, coords,
     """Otro día ADMISIBLE (en orden de preferencia) donde el grupo quepa.
     El grupo se mueve completo — el día es atributo del bloque.
 
-    Dos pasadas: primero sólo destinos geo-compatibles (mismo criterio que
-    `_asignar_unidades`), y sólo si ninguno sirve se repite sin ese filtro —
-    mejor un destino lejano que un grupo sin día."""
-    centro_g = _centroide(a["miembros"], coords)
-    for exigir_geo in (True, False):
+    Dos pasadas: primero sólo destinos compatibles por historial (mismo
+    criterio que `_asignar_unidades`), y sólo si ninguno sirve se repite sin
+    ese filtro — mejor un destino sin precedente que un grupo sin día."""
+    coocurrencia = cfg.get("coocurrencia_grupos")
+    for exigir_compat in (True, False):
         for dia in a["dias_admisibles"]:
             if dia == a["dia"]:
                 continue
             for unidad in [a["unidad_ref"]] + sorted(vehiculos_cap):
                 if unidad not in vehiculos_cap:
                     continue
-                sids_destino = _sids_de_ruta(asign, unidad, dia)
-                if exigir_geo and not _geo_compatible(centro_g, sids_destino, coords):
+                if exigir_compat and not _compatible_historico(
+                        a["grupo"], unidad, dia, asign, coocurrencia):
                     continue
-                destino = sids_destino + list(a["miembros"])
+                destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
                 if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
                                         coords, vehiculos_cap, vehiculos_vol,
                                         cfg, dia=dia) is None:
