@@ -32,6 +32,7 @@ poder distinguir después alivio real de alivio fantasma — el modelo de tiempo
 sobrestima en rutas de muchas paradas chicas (ver nota de calibración).
 """
 from logic.logistica_tiempo import evaluar_ruta_por_tiempo
+from logic.enganche_zona import _haversine_km, MAX_KM_ENGANCHE
 
 DIAS_ORDEN = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
 
@@ -76,6 +77,34 @@ def _num(x) -> float:
         return float(x or 0)
     except (TypeError, ValueError):
         return 0.0
+
+
+def _centroide(sids, coords) -> "tuple | None":
+    pts = [coords[s] for s in (sids or []) if coords and s in coords]
+    if not pts:
+        return None
+    return (sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts))
+
+
+def _geo_compatible(centro_g, sids_destino, coords) -> bool:
+    """
+    True si el destino no tiene ya un grupo a más de MAX_KM_ENGANCHE del
+    centroide `centro_g` (centroide a centroide, mismo criterio que
+    `asignar_unidad_ref` en convrp_validacion.py). Sin coordenada de alguno de
+    los dos lados no se puede evaluar: no bloquea (degradación segura).
+
+    Encontrado en producción (2026-08-10): al ceder `unidad_ref` por TIEMPO, el
+    grupo 19 (Carlos A. Carrillo 2 + Amatitlán) caía a F 350_3, que esa semana
+    ya llevaba Jalapa de Díaz — 89 km, camión distinto en la realidad. El
+    reparto de unidad/día sólo miraba peso/afinidad/consolidación, nunca
+    distancia.
+    """
+    if centro_g is None or not sids_destino:
+        return True
+    centro_d = _centroide(sids_destino, coords)
+    if centro_d is None:
+        return True
+    return _haversine_km(*centro_g, *centro_d) <= MAX_KM_ENGANCHE
 
 
 # ── evaluación de una ruta (qué restricción ata, si alguna) ─────────────────
@@ -263,6 +292,14 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 key=lambda u: (-sum(_num(pedidos.get(s))
                                     for s in _sids_de_ruta(asign, u, dia)),
                                -_num(af.get(u)), str(u)))
+            # Al ceder la preferida no cualquier consolidación sirve: si la
+            # unidad candidata ya lleva ese día un grupo a más de 60 km, se
+            # descarta primero — salvo que sea la única opción (ver
+            # `_geo_compatible`).
+            centro_g = _centroide(a["miembros"], coords)
+            otras_geo = [u for u in otras
+                        if _geo_compatible(centro_g, _sids_de_ruta(asign, u, dia), coords)]
+            otras = otras_geo or otras
             elegido, restr_ref = None, None
             for i, unidad in enumerate([ref] + otras if ref else otras):
                 destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
@@ -320,18 +357,27 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
 def _dia_alternativo(asign, a, pedidos, volumenes, coords,
                      vehiculos_cap, vehiculos_vol, cfg):
     """Otro día ADMISIBLE (en orden de preferencia) donde el grupo quepa.
-    El grupo se mueve completo — el día es atributo del bloque."""
-    for dia in a["dias_admisibles"]:
-        if dia == a["dia"]:
-            continue
-        for unidad in [a["unidad_ref"]] + sorted(vehiculos_cap):
-            if unidad not in vehiculos_cap:
+    El grupo se mueve completo — el día es atributo del bloque.
+
+    Dos pasadas: primero sólo destinos geo-compatibles (mismo criterio que
+    `_asignar_unidades`), y sólo si ninguno sirve se repite sin ese filtro —
+    mejor un destino lejano que un grupo sin día."""
+    centro_g = _centroide(a["miembros"], coords)
+    for exigir_geo in (True, False):
+        for dia in a["dias_admisibles"]:
+            if dia == a["dia"]:
                 continue
-            destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
-            if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
-                                    coords, vehiculos_cap, vehiculos_vol,
-                                    cfg, dia=dia) is None:
-                return dia, unidad
+            for unidad in [a["unidad_ref"]] + sorted(vehiculos_cap):
+                if unidad not in vehiculos_cap:
+                    continue
+                sids_destino = _sids_de_ruta(asign, unidad, dia)
+                if exigir_geo and not _geo_compatible(centro_g, sids_destino, coords):
+                    continue
+                destino = sids_destino + list(a["miembros"])
+                if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
+                                        coords, vehiculos_cap, vehiculos_vol,
+                                        cfg, dia=dia) is None:
+                    return dia, unidad
     return None
 
 

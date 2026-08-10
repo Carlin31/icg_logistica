@@ -584,3 +584,87 @@ def test_la_afinidad_no_rompe_la_consolidacion():
     groups, _ = construir_groups_desde_plantilla(
         pedidos, {}, {}, plantilla, caps, {}, cfg)
     assert len(groups) == 1 and ("USADA", "LUNES") in groups
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Geografía al ceder unidad/día — encontrado en producción el 2026-08-10:
+# el grupo 19 (Carlos A. Carrillo 2 + Amatitlán) no cabía en F 350_1/JUEVES
+# por TIEMPO y el motor lo cedía a F 350_3, que esa semana ya llevaba Jalapa
+# de Díaz — 89 km, un camión que en la realidad nunca hace esa combinación.
+# El reparto de unidad/día sólo miraba peso/afinidad/consolidación, nunca
+# distancia entre grupos.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_al_ceder_unidad_prefiere_la_geograficamente_compatible():
+    coords = {
+        1: (19.0, -96.0), 2: (19.0, -96.0),      # grupo 1 (V1): no cabe, cede
+        3: (19.0, -96.05), 4: (19.0, -96.05),    # grupo cerca (V3), ~5 km de 1/2
+        5: (20.0, -96.0), 6: (20.0, -96.0),      # grupo lejos (V2), ~111 km de 1/2
+    }
+    plantilla = [
+        _grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1", dias_admisibles=["LUNES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [5, 6], unidad_ref="V2", dias_admisibles=["LUNES"]),
+        _grupo(3, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V3", dias_admisibles=["LUNES"]),
+    ]
+    # kg: lejos (2000) > cerca (1900) > el que cede (1800) -- los dos primeros
+    # ya están asignados a su unidad_ref cuando toca repartir el que cede, así
+    # que sin geografía "otras" preferiría V2 por venir más cargada (2000>1900).
+    pedidos = {1: 900, 2: 900, 3: 950, 4: 950, 5: 1000, 6: 1000}
+    caps = {"V1": 1000, "V2": 5000, "V3": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, coords, plantilla, caps, {}, _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [1, 2, 3, 4]
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [5, 6]
+
+
+def test_al_ceder_unidad_la_geografia_cede_si_es_la_unica_opcion():
+    # Sin V3 (la opción cercana), el grupo 1 debe ir a V2 igual -- mejor lejos
+    # que sin camión.
+    coords = {
+        1: (19.0, -96.0), 2: (19.0, -96.0),
+        5: (20.0, -96.0), 6: (20.0, -96.0),
+    }
+    plantilla = [
+        _grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1", dias_admisibles=["LUNES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [5, 6], unidad_ref="V2", dias_admisibles=["LUNES"]),
+    ]
+    pedidos = {1: 900, 2: 900, 5: 1000, 6: 1000}
+    caps = {"V1": 1000, "V2": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, coords, plantilla, caps, {}, _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 5, 6]
+
+
+def test_dia_alternativo_prefiere_destino_geograficamente_compatible():
+    # _dia_alternativo aislada: MARTES ya tiene un grupo lejano en V1 y uno
+    # cercano en V2. El grupo que busca día debe resolver a V2/MARTES.
+    from logic.convrp_logic import _dia_alternativo
+    coords = {
+        3: (19.0, -96.0), 4: (19.0, -96.0),        # el grupo que se mueve
+        7: (20.0, -96.0), 8: (20.0, -96.0),        # ya en V1/MARTES -- lejos
+        9: (19.0, -96.05), 10: (19.0, -96.05),     # ya en V2/MARTES -- cerca
+    }
+    asign = {
+        3: {"grupo": 3, "unidad": "V1", "dia": "MARTES", "miembros": [7, 8],
+            "unidad_ref": "V1", "rigidez": "RIGIDO", "dias_admisibles": ["MARTES"]},
+        4: {"grupo": 4, "unidad": "V2", "dia": "MARTES", "miembros": [9, 10],
+            "unidad_ref": "V2", "rigidez": "RIGIDO", "dias_admisibles": ["MARTES"]},
+    }
+    a = {"grupo": 2, "unidad": "V1", "dia": "LUNES", "miembros": [3, 4],
+         "unidad_ref": "V1", "rigidez": "FLEXIBLE", "dias_admisibles": ["LUNES", "MARTES"]}
+    pedidos = {3: 300, 4: 300, 7: 100, 8: 100, 9: 150, 10: 150}
+    caps = {"V1": 1000, "V2": 1000}
+    resultado = _dia_alternativo(asign, a, pedidos, {}, coords, caps, {}, _sin_tiempo())
+    assert resultado == ("MARTES", "V2")
+
+
+def test_dia_alternativo_cede_geografia_si_es_la_unica_opcion():
+    from logic.convrp_logic import _dia_alternativo
+    coords = {3: (19.0, -96.0), 4: (19.0, -96.0), 7: (20.0, -96.0), 8: (20.0, -96.0)}
+    asign = {3: {"grupo": 3, "unidad": "V1", "dia": "MARTES", "miembros": [7, 8],
+                "unidad_ref": "V1", "rigidez": "RIGIDO", "dias_admisibles": ["MARTES"]}}
+    a = {"grupo": 2, "unidad": "V1", "dia": "LUNES", "miembros": [3, 4],
+         "unidad_ref": "V1", "rigidez": "FLEXIBLE", "dias_admisibles": ["LUNES", "MARTES"]}
+    pedidos = {3: 300, 4: 300, 7: 100, 8: 100}
+    resultado = _dia_alternativo(asign, a, pedidos, {}, coords, {"V1": 1000}, {}, _sin_tiempo())
+    assert resultado == ("MARTES", "V1")          # única unidad: se acepta lejos
