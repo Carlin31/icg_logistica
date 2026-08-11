@@ -71,6 +71,12 @@ REBALANCEO_GEOGRAFICO = True
 # historia. Activado para prueba real 2026-08-07.
 CONVRP_ACTIVO = True
 
+# Enganche completo de mayoristas (Fase 3, enganche_zona.py). Depende de
+# CONVRP_ACTIVO -- construir_rutas_con_mayoristas() llama internamente a
+# construir_groups_convrp() en cada pasada de su punto fijo. Apagado hasta
+# probar contra una logística sandbox y correr scripts/smoke_convrp.py.
+ENGANCHE_ZONA_ACTIVO = False
+
 # Con CONVRP_ESTRICTO=True un fallo del ConVRP REVIENTA en vez de caer al motor
 # de afinidad. Lo usa el arnés de validación: si mido fidelidad y por dentro
 # corrió el otro motor, el número no significa nada. En producción va en False
@@ -1101,20 +1107,46 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     convrp_groups = None
     convrp_excepciones: list = []
     convrp_meta: dict = {}
+    convrp_mayoristas_por_ruta: dict = {}
+    convrp_mayoristas_detalle: list = []
     if CONVRP_ACTIVO:
         try:
             from logic.convrp_integracion import (
-                construir_groups_convrp, guardar_excepciones_convrp)
+                construir_groups_convrp, construir_rutas_con_mayoristas,
+                guardar_excepciones_convrp)
             _cfgm = db.execute(select(get_table("configuracion"))).mappings().first() or {}
             _depot = (float(_cfgm.get("matriz_lat") or MATRIZ_LAT_DEFAULT),
                       float(_cfgm.get("matriz_lon") or MATRIZ_LON_DEFAULT))
-            convrp_groups, convrp_excepciones, convrp_meta = construir_groups_convrp(
-                pedidos_dict, volumenes_dict, coords_dict,
-                vehiculos_cap, obtener_volumenes_vehiculos(), _depot)
+            if ENGANCHE_ZONA_ACTIVO:
+                from logic.mayoristas_logic import _leer_pesos_mayoristas, _leer_coords_mayoristas
+                pedidos_may, nombres_may = _leer_pesos_mayoristas(db, oid)
+                ids_may = {p["id_cliente"] for p in pedidos_may}
+                coords_may = _leer_coords_mayoristas(db, ids_may)
+                kg_por_cliente: dict = {}
+                for p in pedidos_may:
+                    kg_por_cliente[p["id_cliente"]] = kg_por_cliente.get(p["id_cliente"], 0.0) + float(p["peso"])
+                lista_mayoristas = [
+                    {"id_cliente": cid, "nombre": (coords_may.get(cid) or {}).get("nombre") or nombres_may.get(cid, ""),
+                     "poblacion": (coords_may.get(cid) or {}).get("poblacion"),
+                     "latitud": (coords_may.get(cid) or {}).get("latitud"),
+                     "longitud": (coords_may.get(cid) or {}).get("longitud"),
+                     "peso_kg": kg}
+                    for cid, kg in kg_por_cliente.items() if kg > 0
+                ]
+                (convrp_groups, convrp_mayoristas_por_ruta, convrp_excepciones,
+                 convrp_mayoristas_detalle, convrp_meta) = construir_rutas_con_mayoristas(
+                    pedidos_dict, volumenes_dict, coords_dict,
+                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot, lista_mayoristas)
+            else:
+                convrp_groups, convrp_excepciones, convrp_meta = construir_groups_convrp(
+                    pedidos_dict, volumenes_dict, coords_dict,
+                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot)
             guardar_excepciones_convrp(oid, convrp_excepciones)
             print(f"[convrp] plantilla v{convrp_meta.get('version_plantilla')}: "
                   f"{convrp_meta.get('viajes')} viajes, "
-                  f"{len(convrp_excepciones)} excepciones")
+                  f"{len(convrp_excepciones)} excepciones"
+                  + (f", {sum(len(v) for v in convrp_mayoristas_por_ruta.values())} mayoristas"
+                     if ENGANCHE_ZONA_ACTIVO else ""))
         except Exception as e:  # noqa: BLE001
             # Degradación RUIDOSA: caer al motor de afinidad sin avisar es el
             # mismo patrón de fallo silencioso que ya mordió tres veces (llave
@@ -1124,6 +1156,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             # dentro corrió el otro motor no significa nada).
             import traceback
             convrp_groups = None
+            convrp_mayoristas_por_ruta = {}
             print("=" * 70)
             print(f"[convrp] ERROR: {type(e).__name__}: {e}")
             print("[convrp] SE USÓ EL MOTOR DE AFINIDAD, no la plantilla canónica.")
@@ -1347,6 +1380,18 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     # ── 8. Guardar en producción (SQL Server) ─────────────────────────────────
     now_iso = datetime.now().isoformat()
     _guardar_detalle_vrp_en_asignaciones(oid, detalle_por_dia, now_iso)
+
+    if ENGANCHE_ZONA_ACTIVO and convrp_mayoristas_por_ruta:
+        from logic.mayoristas_logic import guardar_mayoristas_convrp
+        rutas_para_guardar = [
+            {"_id": rid, "sucursales": info["sucursales"]}
+            for dia_key, rutas_dia in detalle_por_dia.items()
+            for rid, info in rutas_dia.items()
+        ]
+        n_may = guardar_mayoristas_convrp(
+            oid, convrp_mayoristas_por_ruta, convrp_mayoristas_detalle, rutas_para_guardar)
+        print(f"[convrp] mayoristas guardados: {n_may}")
+
     _guardar_reporte_vrp_en_sql(oid, report_rows, lambda_afinidad, now_iso)
 
     return {
