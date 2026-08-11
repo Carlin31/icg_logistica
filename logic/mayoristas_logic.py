@@ -1122,6 +1122,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
     paradas_integradas: dict = {}
     orden_sucursales: dict = {}
     todos_mayoristas: list = []
+    sin_coords: list = []
 
     for rid in todos_los_rid:
         sucursales_raw = sucursales_por_rid.get(rid, [])
@@ -1135,6 +1136,14 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
             cat = coords_may.get(f["id_cliente"]) or {}
             lat_m = cat.get("latitud")
             lon_m = cat.get("longitud")
+            if lat_m is None or lon_m is None:
+                sin_coords.append({
+                    "id_cliente": f["id_cliente"],
+                    "nombre": f["nombre"] or cat.get("nombre") or "",
+                    "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
+                    "poblacion": cat.get("poblacion") or "",
+                })
+                continue
             p = {
                 "tipo": "mayorista", "id_cliente": f["id_cliente"],
                 "nombre": f["nombre"] or cat.get("nombre") or "",
@@ -1142,10 +1151,9 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
                 "latitud": lat_m, "longitud": lon_m,
                 "poblacion": cat.get("poblacion") or "",
                 "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
-                "desvio_m": round((_haversine_km(
+                "desvio_m": round(_haversine_km(
                     centro_raw[0] or lat_m or 0, centro_raw[1] or lon_m or 0,
-                    lat_m or 0, lon_m or 0,
-                ) if lat_m is not None and lon_m is not None else 0.0) * 1000, 1),
+                    lat_m, lon_m) * 1000, 1),
             }
             pos = _insertar_pos_proxima(paradas, p)
             paradas.insert(pos, p)
@@ -1173,7 +1181,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
         "orden_sucursales": orden_sucursales,
         "todos_mayoristas": todos_mayoristas,
         "sin_asignar": [],
-        "sin_coords": [],
+        "sin_coords": sin_coords,
         "pendientes": [],
         "actualizado_en": filas[0]["generado_en"] if filas else None,
     }

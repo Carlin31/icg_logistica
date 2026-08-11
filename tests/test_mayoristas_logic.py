@@ -245,21 +245,28 @@ def test_guardar_mayoristas_convrp_sin_coordenadas_no_rompe(app_ctx):
 
 
 def test_obtener_mayoristas_guardados_reconstruye_forma_esperada(app_ctx):
+    # id_cliente 709 ("SUPER LA DESPENSA") en vez del 5 original del enunciado:
+    # 5 nunca fue una fila real en `clientes_mayoristas`, y desde el fix de
+    # "mayoristas sin coordenadas van a sin_coords" (última ronda de
+    # revisión), un id sin coords reales ya NO aparece en
+    # `mayoristas_por_ruta`/`paradas_integradas` (aparece en `sin_coords`) --
+    # este test necesita un id con coords reales para seguir ejercitando el
+    # camino normal (con coords) que es lo que verifica.
     from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
     lid = "507f1f77bcf86cd799439014"
     rutas = [{"_id": "vrpaf_v1_lunes", "sucursales": [
         {"num_tienda": 1, "nombre_base": "Suc 1", "latitud": 19.0, "longitud": -96.0,
          "orden": 1, "peso_kg": 500}]}]
     por_ruta = {("V1", "LUNES"): [
-        {"id_cliente": 5, "nombre": "ABARROTES Y", "peso_kg": 30.0,
+        {"id_cliente": 709, "nombre": "ABARROTES Y", "peso_kg": 30.0,
          "latitud": 19.001, "longitud": -96.001}]}
     guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
     dist = obtener_mayoristas_guardados(lid, rutas)
     assert dist is not None
-    assert dist["mayoristas_por_ruta"]["vrpaf_v1_lunes"][0]["id_cliente"] == 5
+    assert dist["mayoristas_por_ruta"]["vrpaf_v1_lunes"][0]["id_cliente"] == 709
     assert dist["mayoristas_por_ruta"]["vrpaf_v1_lunes"][0]["peso_kg"] == 30.0
     paradas = dist["paradas_integradas"]["vrpaf_v1_lunes"]
-    assert any(p["tipo"] == "mayorista" and p["id_cliente"] == 5 for p in paradas)
+    assert any(p["tipo"] == "mayorista" and p["id_cliente"] == 709 for p in paradas)
     assert any(p["tipo"] == "sucursal" and p["num_tienda"] == 1 for p in paradas)
     assert dist["orden_sucursales"]["vrpaf_v1_lunes"]["1"] is not None
 
@@ -337,3 +344,21 @@ def test_obtener_mayoristas_guardados_orden_consistente_entre_mayoristas_por_rut
     parada = next(p for p in dist["paradas_integradas"]["vrpaf_v1_viernes"]
                   if p["tipo"] == "mayorista")
     assert entrada["orden"] == parada["orden"]
+
+
+def test_obtener_mayoristas_guardados_sin_coordenadas_va_a_sin_coords(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439020"
+    rutas = [{"_id": "vrpaf_v1_sabado", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.0, "longitud": -96.0, "orden": 1}]}]
+    # id_cliente sin fila en clientes_mayoristas -> sin coordenadas
+    # (verificado directamente contra la BD antes de escribir esta prueba:
+    # 999999 no existe en clientes_mayoristas en este entorno)
+    por_ruta = {("V1", "SABADO"): [
+        {"id_cliente": 999999, "nombre": "SIN COORDS", "peso_kg": 15.0,
+         "latitud": None, "longitud": None}]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    dist = obtener_mayoristas_guardados(lid, rutas)
+    assert any(m["id_cliente"] == 999999 for m in dist["sin_coords"])
+    assert dist["mayoristas_por_ruta"]["vrpaf_v1_sabado"] == []
+    assert not any(p.get("id_cliente") == 999999 for p in dist["paradas_integradas"]["vrpaf_v1_sabado"])
