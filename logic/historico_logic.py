@@ -1381,7 +1381,13 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     now_iso = datetime.now().isoformat()
     _guardar_detalle_vrp_en_asignaciones(oid, detalle_por_dia, now_iso)
 
-    if ENGANCHE_ZONA_ACTIVO:
+    if ENGANCHE_ZONA_ACTIVO and CONVRP_ACTIVO:
+        # Blindaje contra mala configuración: si alguien enciende
+        # ENGANCHE_ZONA_ACTIVO sin CONVRP_ACTIVO, el bloque de arriba nunca
+        # corrió construir_rutas_con_mayoristas -- sin este chequeo,
+        # guardar_mayoristas_convrp se llamaría igual con
+        # convrp_mayoristas_por_ruta vacío y borraría en silencio cualquier
+        # mayorista ya guardado de una corrida anterior válida.
         from logic.mayoristas_logic import guardar_mayoristas_convrp
         rutas_para_guardar = [
             {"_id": rid, "sucursales": [
