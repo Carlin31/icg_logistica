@@ -1105,17 +1105,25 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
     coords_may = _leer_coords_mayoristas(db, ids)
 
     sucursales_por_rid = {r.get("_id"): list(r.get("sucursales", [])) for r in (rutas or [])}
-    mayoristas_por_ruta: dict = {rid: [] for rid in sucursales_por_rid}
-    paradas_integradas: dict = {}
-    orden_sucursales: dict = {}
-    todos_mayoristas: list = []
 
     por_rid: dict = {}
     for f in filas:
         rid = _vrpaf_id(f['unidad'], f['dia'])
         por_rid.setdefault(rid, []).append(dict(f))
 
-    for rid in sucursales_por_rid:
+    # Unión: una ruta puede tener mayoristas guardados aunque `rutas` (lo que
+    # pasó el llamador) no la incluya -- p. ej. cuando el llamador pasa un
+    # subconjunto (router/asignacion_router.py:148 llama con [ruta], una
+    # sola). Nunca se descarta un mayorista persistido en silencio sólo
+    # porque el llamador no mandó esa ruta.
+    todos_los_rid = set(sucursales_por_rid) | set(por_rid)
+
+    mayoristas_por_ruta: dict = {rid: [] for rid in todos_los_rid}
+    paradas_integradas: dict = {}
+    orden_sucursales: dict = {}
+    todos_mayoristas: list = []
+
+    for rid in todos_los_rid:
         sucursales_raw = sucursales_por_rid.get(rid, [])
         sucursales = [dict(s, tipo="sucursal") for s in sucursales_raw]
         for idx, suc in enumerate(sucursales, start=1):
@@ -1123,24 +1131,17 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
 
         paradas = list(sucursales)
         centro_raw = _ruta_centroid(sucursales_raw)
-        entradas = []
         for f in sorted(por_rid.get(rid, []), key=lambda x: x["orden"]):
             cat = coords_may.get(f["id_cliente"]) or {}
             lat_m = cat.get("latitud")
             lon_m = cat.get("longitud")
-            entrada = {
-                "id_cliente": f["id_cliente"], "nombre": f["nombre"] or cat.get("nombre") or "",
-                "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
-                "latitud": lat_m, "longitud": lon_m,
-                "poblacion": cat.get("poblacion") or "",
-            }
-            entradas.append(entrada)
-            todos_mayoristas.append(dict(entrada))
             p = {
                 "tipo": "mayorista", "id_cliente": f["id_cliente"],
+                "nombre": f["nombre"] or cat.get("nombre") or "",
                 "nombre_base": f["nombre"] or cat.get("nombre") or "",
                 "latitud": lat_m, "longitud": lon_m,
-                "peso_kg": float(f["peso_kg"]),
+                "poblacion": cat.get("poblacion") or "",
+                "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
                 "desvio_m": round((_haversine_km(
                     centro_raw[0] or lat_m or 0, centro_raw[1] or lon_m or 0,
                     lat_m or 0, lon_m or 0,
@@ -1148,11 +1149,14 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
             }
             pos = _insertar_pos_proxima(paradas, p)
             paradas.insert(pos, p)
-        mayoristas_por_ruta[rid] = entradas
 
         for idx, p in enumerate(paradas, start=1):
             p["orden"] = idx
         paradas_integradas[rid] = paradas
+
+        entradas = [dict(p) for p in paradas if p.get("tipo") == "mayorista"]
+        mayoristas_por_ruta[rid] = entradas
+        todos_mayoristas.extend(dict(e) for e in entradas)
 
         orden_map: dict = {}
         for p in paradas:

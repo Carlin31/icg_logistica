@@ -303,3 +303,37 @@ def test_obtener_mayoristas_guardados_no_colisiona_orden_y_trae_coords(app_ctx):
     mayorista = next(p for p in paradas if p["tipo"] == "mayorista")
     assert mayorista["latitud"] is not None
     assert mayorista["longitud"] is not None
+
+
+def test_obtener_mayoristas_guardados_ruta_ausente_en_rutas_no_se_pierde(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439018"
+    rutas_guardado = [{"_id": "vrpaf_v1_jueves", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.0, "longitud": -96.0, "orden": 1}]}]
+    por_ruta = {("V1", "JUEVES"): [
+        {"id_cliente": 709, "nombre": "SUPER LA DESPENSA", "peso_kg": 25.0,
+         "latitud": 19.370, "longitud": -96.375}]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas_guardado)
+    # el llamador ahora pide SIN pasar esa ruta (simula un llamador que manda
+    # un subconjunto de rutas, como router/asignacion_router.py)
+    dist = obtener_mayoristas_guardados(lid, [])
+    assert dist is not None
+    assert dist["mayoristas_por_ruta"]["vrpaf_v1_jueves"][0]["id_cliente"] == 709
+
+
+def test_obtener_mayoristas_guardados_orden_consistente_entre_mayoristas_por_ruta_y_paradas(app_ctx):
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439019"
+    rutas = [{"_id": "vrpaf_v1_viernes", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.500, "longitud": -96.500, "orden": 1},
+        {"num_tienda": 2, "latitud": 19.000, "longitud": -96.000, "orden": 2}]}]
+    por_ruta = {("V1", "VIERNES"): [
+        {"id_cliente": 709, "nombre": "SUPER LA DESPENSA", "peso_kg": 25.0,
+         "latitud": 19.001, "longitud": -96.001}]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    dist = obtener_mayoristas_guardados(lid, rutas)
+    entrada = dist["mayoristas_por_ruta"]["vrpaf_v1_viernes"][0]
+    assert "orden" in entrada
+    parada = next(p for p in dist["paradas_integradas"]["vrpaf_v1_viernes"]
+                  if p["tipo"] == "mayorista")
+    assert entrada["orden"] == parada["orden"]
