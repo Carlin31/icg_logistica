@@ -27,7 +27,7 @@ from bson.errors import InvalidId
 from sqlalchemy import select, insert, update, delete, or_, func
 
 from db import get_db, get_table, transaccion
-from logic.mayoristas_logic import calcular_distribucion_mayoristas, _integrar_paradas
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, _integrar_paradas, obtener_mayoristas_guardados
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -804,13 +804,12 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
             "nombre_r":     nombre_r,
         }
 
-    dist = calcular_distribucion_mayoristas(
-        logistica_id,
-        [
-            {"_id": rid, "sucursales": sucs, "cap_ton": meta_por_ruta.get(rid, {}).get("cap_ton")}
-            for rid, sucs in sucursales_por_ruta.items()
-        ],
-    )
+    _rutas_para_mayoristas = [
+        {"_id": rid, "sucursales": sucs, "cap_ton": meta_por_ruta.get(rid, {}).get("cap_ton")}
+        for rid, sucs in sucursales_por_ruta.items()
+    ]
+    dist = (obtener_mayoristas_guardados(logistica_id, _rutas_para_mayoristas)
+            or calcular_distribucion_mayoristas(logistica_id, _rutas_para_mayoristas))
 
     # mayoristas_overrides desde tabla normalizada (clave reconstruida a
     # documento(str)/id_cliente(int) -- ver _clave_a_python)
