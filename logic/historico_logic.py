@@ -1381,10 +1381,14 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     now_iso = datetime.now().isoformat()
     _guardar_detalle_vrp_en_asignaciones(oid, detalle_por_dia, now_iso)
 
-    if ENGANCHE_ZONA_ACTIVO and convrp_mayoristas_por_ruta:
+    if ENGANCHE_ZONA_ACTIVO:
         from logic.mayoristas_logic import guardar_mayoristas_convrp
         rutas_para_guardar = [
-            {"_id": rid, "sucursales": info["sucursales"]}
+            {"_id": rid, "sucursales": [
+                dict(s, latitud=coords_dict.get(s["num_tienda"], (None, None))[0],
+                     longitud=coords_dict.get(s["num_tienda"], (None, None))[1])
+                for s in info["sucursales"]
+            ]}
             for dia_key, rutas_dia in detalle_por_dia.items()
             for rid, info in rutas_dia.items()
         ]
