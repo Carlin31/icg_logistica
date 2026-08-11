@@ -75,18 +75,21 @@ CONVRP_ACTIVO = True
 # CONVRP_ACTIVO -- construir_rutas_con_mayoristas() llama internamente a
 # construir_groups_convrp() en cada pasada de su punto fijo.
 #
-# REVERTIDO el 2026-08-10, mismo día que se activó: la revisión final de
-# todo el plan encontró que `obtener_mayoristas_por_ruta`/`obtener_geometria_ruta`
-# (asignacion_logic.py) arman `rutas` con `obtener_rutas()` (rutas_config,
-# clave mongo_id) mientras `convrp_mayoristas` queda indexado por
-# `vrpaf_{unidad}_{dia}` (mismo formato que asignaciones_rutas) -- espacios
-# de ID disjuntos, nunca hacen match. Confirmado con datos reales: 0 de 29
-# rutas de rutas_config recibían mayoristas tras activar el flag, así que la
-# página de Asignación (mapa, badges de peso) se quedaba sin mayoristas en
-# vez de caer al cálculo en vivo (el `or` nunca se dispara porque igual hay
-# filas guardadas, sólo que bajo la llave equivocada). Corrigiendo antes de
-# reactivar.
-ENGANCHE_ZONA_ACTIVO = False
+# Activado, revertido y reactivado el mismo día (2026-08-10): la revisión
+# final del plan encontró que 5 de los 7 sitios de lectura (4 en
+# asignacion_logic.py + 1 en asignacion_router.py) arman `rutas` en el
+# espacio de IDs de `rutas_config` (mongo_id, catálogo estático del flujo
+# de Asignación/ajuste de vehículos) — nunca coincide con las claves
+# `vrpaf_{unidad}_{dia}` que usa `convrp_mayoristas`. Esos 5 sitios se
+# revirtieron a `calcular_distribucion_mayoristas()` puro (ver
+# `logic/asignacion_logic.py`/`router/asignacion_router.py`, commit de ese
+# revert). Sólo `logic/modificacion_logic.py` y `logic/pdf_logic.py` -- que
+# sí leen de `asignaciones_rutas`/`asignaciones_sucursales`, el espacio
+# vrpaf_ correcto -- consumen el enganche completo. Reverificado con datos
+# reales tras el revert: 12/29 rutas con mayoristas, 45 mayoristas, nombres
+# correctos, en ambas funciones reales (`obtener_rutas_para_modificar`,
+# `_rutas_desde_asignaciones`).
+ENGANCHE_ZONA_ACTIVO = True
 
 # Con CONVRP_ESTRICTO=True un fallo del ConVRP REVIENTA en vez de caer al motor
 # de afinidad. Lo usa el arnés de validación: si mido fidelidad y por dentro
