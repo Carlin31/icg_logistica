@@ -273,3 +273,33 @@ def test_obtener_mayoristas_guardados_sin_filas_es_none(app_ctx):
     from logic.mayoristas_logic import obtener_mayoristas_guardados
     dist = obtener_mayoristas_guardados("507f1f77bcf86cd799439016", [])
     assert dist is None
+
+
+def test_obtener_mayoristas_guardados_no_colisiona_orden_y_trae_coords(app_ctx):
+    # id_cliente 709 ("SUPER LA DESPENSA") se eligió porque ya existe como
+    # fila real en `clientes_mayoristas` en este entorno (verificado por
+    # consulta directa antes de escribir la prueba) -- `obtener_mayoristas_guardados`
+    # backfillea lat/lon desde esa tabla por `id_cliente`, no desde lo que se
+    # le pasa a `guardar_mayoristas_convrp` (esa tabla ni siquiera tiene
+    # columnas de coordenadas), así que un id inventado (p.ej. 900) resolvería
+    # a coords None y la aserción fallaría por falta de fixture, no por un
+    # bug real. Se usa un id ya presente para no tener que insertar y limpiar
+    # una fila de prueba en una tabla que ningún otro test de este archivo toca.
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439017"
+    rutas = [{"_id": "vrpaf_v1_martes", "sucursales": [
+        {"num_tienda": 1, "latitud": 19.500, "longitud": -96.500, "orden": 1},
+        {"num_tienda": 2, "latitud": 19.000, "longitud": -96.000, "orden": 2},
+    ]}]
+    por_ruta = {("V1", "MARTES"): [
+        {"id_cliente": 709, "nombre": "SUPER LA DESPENSA", "peso_kg": 40.0,
+         "latitud": 19.370, "longitud": -96.376, "poblacion": "José Cardel"},
+    ]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    dist = obtener_mayoristas_guardados(lid, rutas)
+    paradas = dist["paradas_integradas"]["vrpaf_v1_martes"]
+    ordenes = [p["orden"] for p in paradas]
+    assert len(ordenes) == len(set(ordenes)), f"orden colisiona: {ordenes}"
+    mayorista = next(p for p in paradas if p["tipo"] == "mayorista")
+    assert mayorista["latitud"] is not None
+    assert mayorista["longitud"] is not None

@@ -1074,8 +1074,17 @@ def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
 def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None":
     """
     Reconstruye la MISMA forma de respuesta que `calcular_distribucion_mayoristas`
-    a partir de lo guardado en `convrp_mayoristas` -- así los sitios que ya
-    consumen esa forma no cambian, sólo la llamada.
+    a partir de lo guardado en `convrp_mayoristas` -- backfillea coordenadas
+    desde `clientes_mayoristas` y re-intercala con las sucursales por
+    proximidad (mismo `_insertar_pos_proxima` que usa el cálculo en vivo),
+    para que el orden de paradas, el mapa y el reporte OSRM no vean ninguna
+    diferencia frente al parche en vivo.
+
+    Nota: NO reconstruye `documento` -- el motor completo trabaja a nivel
+    CLIENTE, no por documento/pedido individual (ver Task 4: los pedidos de
+    un mismo cliente se suman en uno solo antes de correr el enganche), así
+    que esa granularidad ya se pierde antes de llegar a `convrp_mayoristas`.
+    No es un bug de esta función, es una propiedad del motor completo.
 
     Devuelve None si no hay filas guardadas para esa logística (nunca un dict
     vacío, que sería indistinguible de "esta corrida no tuvo mayoristas") --
@@ -1092,8 +1101,11 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
     if not filas:
         return None
 
+    ids = {f["id_cliente"] for f in filas}
+    coords_may = _leer_coords_mayoristas(db, ids)
+
     sucursales_por_rid = {r.get("_id"): list(r.get("sucursales", [])) for r in (rutas or [])}
-    mayoristas_por_ruta: dict = {}
+    mayoristas_por_ruta: dict = {rid: [] for rid in sucursales_por_rid}
     paradas_integradas: dict = {}
     orden_sucursales: dict = {}
     todos_mayoristas: list = []
@@ -1103,27 +1115,44 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
         rid = _vrpaf_id(f['unidad'], f['dia'])
         por_rid.setdefault(rid, []).append(dict(f))
 
-    for rid, mays in por_rid.items():
+    for rid in sucursales_por_rid:
         sucursales_raw = sucursales_por_rid.get(rid, [])
         sucursales = [dict(s, tipo="sucursal") for s in sucursales_raw]
         for idx, suc in enumerate(sucursales, start=1):
             suc["orden"] = idx
 
-        entradas = []
         paradas = list(sucursales)
-        for f in sorted(mays, key=lambda x: x["orden"]):
+        centro_raw = _ruta_centroid(sucursales_raw)
+        entradas = []
+        for f in sorted(por_rid.get(rid, []), key=lambda x: x["orden"]):
+            cat = coords_may.get(f["id_cliente"]) or {}
+            lat_m = cat.get("latitud")
+            lon_m = cat.get("longitud")
             entrada = {
-                "id_cliente": f["id_cliente"], "nombre": f["nombre"] or "",
-                "peso_kg": float(f["peso_kg"]), "ruta_id": rid, "orden": f["orden"],
+                "id_cliente": f["id_cliente"], "nombre": f["nombre"] or cat.get("nombre") or "",
+                "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
+                "latitud": lat_m, "longitud": lon_m,
+                "poblacion": cat.get("poblacion") or "",
             }
             entradas.append(entrada)
             todos_mayoristas.append(dict(entrada))
-            paradas.append({
+            p = {
                 "tipo": "mayorista", "id_cliente": f["id_cliente"],
-                "nombre_base": f["nombre"] or "", "peso_kg": float(f["peso_kg"]),
-                "orden": f["orden"],
-            })
+                "nombre_base": f["nombre"] or cat.get("nombre") or "",
+                "latitud": lat_m, "longitud": lon_m,
+                "peso_kg": float(f["peso_kg"]),
+                "desvio_m": round((_haversine_km(
+                    centro_raw[0] or lat_m or 0, centro_raw[1] or lon_m or 0,
+                    lat_m or 0, lon_m or 0,
+                ) if lat_m is not None and lon_m is not None else 0.0) * 1000, 1),
+            }
+            pos = _insertar_pos_proxima(paradas, p)
+            paradas.insert(pos, p)
         mayoristas_por_ruta[rid] = entradas
+
+        for idx, p in enumerate(paradas, start=1):
+            p["orden"] = idx
+        paradas_integradas[rid] = paradas
 
         orden_map: dict = {}
         for p in paradas:
@@ -1133,7 +1162,6 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
             if nt is not None:
                 orden_map[str(nt)] = p.get("orden")
         orden_sucursales[rid] = orden_map
-        paradas_integradas[rid] = paradas
 
     return {
         "mayoristas_por_ruta": mayoristas_por_ruta,
