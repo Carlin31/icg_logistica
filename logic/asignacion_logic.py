@@ -1673,8 +1673,8 @@ def obtener_mayoristas_por_ruta(logistica_id: str) -> dict:
       }
     """
     try:
-        dist = (obtener_mayoristas_guardados(logistica_id, obtener_rutas())
-                or calcular_distribucion_mayoristas(logistica_id))
+        rutas = obtener_rutas()
+        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
         return {
             "mayoristas": dist.get("mayoristas_por_ruta", {}),
             "orden_sucursales": dist.get("orden_sucursales", {}),
@@ -1739,8 +1739,8 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
     # ── Paradas ordenadas (cercanía) ────────────────────────────
     paradas: list = []
     try:
-        dist = (obtener_mayoristas_guardados(logistica_id, obtener_rutas())
-                or calcular_distribucion_mayoristas(logistica_id))
+        rutas = obtener_rutas()
+        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
         base = dist.get("paradas_integradas", {}).get(ruta_id, [])
         for p in base:
             lat = p.get("latitud")
