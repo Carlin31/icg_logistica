@@ -24,7 +24,7 @@ from reportlab.platypus import (
 )
 
 from db import get_db, get_table
-from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, _insertar_pos_proxima, obtener_mayoristas_guardados
 from logic.modificacion_logic import obtener_modificacion_previa, guardar_modificacion
 from logic.plantilla_canonica import obtener_grupos
 from logic.groq_logic import generar_nombre_poblacion
@@ -588,7 +588,8 @@ def _rutas_desde_asignaciones(db, oid) -> list:
         })
 
     if rutas_base:
-        dist = calcular_distribucion_mayoristas(str(oid), rutas_base)
+        dist = (obtener_mayoristas_guardados(str(oid), rutas_base)
+                or calcular_distribucion_mayoristas(str(oid), rutas_base))
         may_por_ruta = dist.get("mayoristas_por_ruta", {})
         orden_suc_dist = dist.get("orden_sucursales", {})
         for r in rutas:
