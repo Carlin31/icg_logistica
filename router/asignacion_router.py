@@ -144,8 +144,8 @@ def get_calcular_tiempos_ruta(ruta_id: str):
             return jsonify({"error": "Ruta no encontrada"}), 404
         pesos     = obtener_pesos(lid)
         # Recalcular paradas integradas por cercanía para incluir mayoristas
-        from logic.mayoristas_logic import calcular_distribucion_mayoristas
-        dist = calcular_distribucion_mayoristas(lid, [ruta])
+        from logic.mayoristas_logic import calcular_distribucion_mayoristas, obtener_mayoristas_guardados
+        dist = obtener_mayoristas_guardados(lid, [ruta]) or calcular_distribucion_mayoristas(lid, [ruta])
         paradas = dist.get("paradas_integradas", {}).get(ruta_id)
         resultado = calcular_tiempos_ruta(ruta, pesos, paradas=paradas)
         return jsonify(resultado)
