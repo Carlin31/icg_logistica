@@ -467,11 +467,26 @@ En `logic/historico_logic.py`, dentro del bloque `if CONVRP_ACTIVO:` (línea ~11
 
 En `logic/historico_logic.py`, justo después de `_guardar_detalle_vrp_en_asignaciones(oid, detalle_por_dia, now_iso)` (línea 1349), agregar:
 
+> **Nota (agregada tras la revisión de Task 4):** el bloque de abajo YA
+> incluye dos correcciones encontradas en revisión de código, sobre la
+> versión original de este paso: (1) el `if` ya NO exige
+> `convrp_mayoristas_por_ruta` truthy -- exigirlo se saltaba el `DELETE`
+> dentro de `guardar_mayoristas_convrp` en una semana sin mayoristas y
+> dejaba mayoristas viejos persistidos; (2) las sucursales que se pasan a
+> `guardar_mayoristas_convrp` ahora llevan `latitud`/`longitud` (desde
+> `coords_dict`, ya en scope) -- sin esto, `_ordenar_mayoristas_en_ruta`
+> nunca podía calcular el centroide de la ruta y caía siempre al
+> desempate más débil.
+
 ```python
-    if ENGANCHE_ZONA_ACTIVO and convrp_mayoristas_por_ruta:
+    if ENGANCHE_ZONA_ACTIVO:
         from logic.mayoristas_logic import guardar_mayoristas_convrp
         rutas_para_guardar = [
-            {"_id": rid, "sucursales": info["sucursales"]}
+            {"_id": rid, "sucursales": [
+                dict(s, latitud=coords_dict.get(s["num_tienda"], (None, None))[0],
+                     longitud=coords_dict.get(s["num_tienda"], (None, None))[1])
+                for s in info["sucursales"]
+            ]}
             for dia_key, rutas_dia in detalle_por_dia.items()
             for rid, info in rutas_dia.items()
         ]
