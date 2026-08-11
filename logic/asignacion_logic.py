@@ -51,7 +51,7 @@ from bson.errors import InvalidId
 from sqlalchemy import select, insert, update, delete
 
 from db import get_db, get_table, transaccion
-from logic.mayoristas_logic import calcular_distribucion_mayoristas, obtener_mayoristas_guardados
+from logic.mayoristas_logic import calcular_distribucion_mayoristas
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -526,7 +526,14 @@ def calcular_tiempos_multiples_rutas(rutas: list, pesos: dict, logistica_id: str
     paradas_map: dict = {}
     if logistica_id:
         try:
-            dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
+            # NO usar obtener_mayoristas_guardados aquí: `rutas` en este sitio
+            # viene del payload del frontend, en el espacio de IDs de
+            # rutas_config (mongo_id) -- convrp_mayoristas está indexado por
+            # vrpaf_{unidad}_{dia}, el de asignaciones_rutas/ConVRP. Nunca
+            # coinciden; usarlo aquí dejaba el peso de mayoristas en cero en
+            # vez de caer al cálculo en vivo (encontrado 2026-08-10, revertido
+            # el mismo día).
+            dist = calcular_distribucion_mayoristas(logistica_id, rutas)
             paradas_map = dist.get("paradas_integradas", {})
         except Exception:
             paradas_map = {}
@@ -1033,7 +1040,11 @@ def _cargar_datos_mayoristas(logistica_id: str, rutas: list | None = None) -> tu
                                 Usada para identificar candidatos al agregar (MAY-2).
     """
     try:
-        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
+        # NO usar obtener_mayoristas_guardados: `rutas` llega desde
+        # generar_asignacion_optimizada() con el payload del frontend
+        # (espacio de IDs de rutas_config/mongo_id), incompatible con las
+        # claves vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
+        dist = calcular_distribucion_mayoristas(logistica_id, rutas)
         return dist.get("mayoristas_por_ruta", {}), dist.get("todos_mayoristas", [])
     except Exception as e:
         print(f"[_cargar_datos_mayoristas] Error al calcular cercania: {e}")
@@ -1673,8 +1684,10 @@ def obtener_mayoristas_por_ruta(logistica_id: str) -> dict:
       }
     """
     try:
-        rutas = obtener_rutas()
-        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
+        # NO usar obtener_mayoristas_guardados: obtener_rutas() lee
+        # rutas_config (mongo_id), incompatible con las claves
+        # vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
+        dist = calcular_distribucion_mayoristas(logistica_id)
         return {
             "mayoristas": dist.get("mayoristas_por_ruta", {}),
             "orden_sucursales": dist.get("orden_sucursales", {}),
@@ -1739,8 +1752,10 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
     # ── Paradas ordenadas (cercanía) ────────────────────────────
     paradas: list = []
     try:
-        rutas = obtener_rutas()
-        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
+        # NO usar obtener_mayoristas_guardados: obtener_rutas() lee
+        # rutas_config (mongo_id), incompatible con las claves
+        # vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
+        dist = calcular_distribucion_mayoristas(logistica_id)
         base = dist.get("paradas_integradas", {}).get(ruta_id, [])
         for p in base:
             lat = p.get("latitud")
