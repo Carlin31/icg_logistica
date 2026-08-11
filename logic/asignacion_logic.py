@@ -51,7 +51,7 @@ from bson.errors import InvalidId
 from sqlalchemy import select, insert, update, delete
 
 from db import get_db, get_table, transaccion
-from logic.mayoristas_logic import calcular_distribucion_mayoristas
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, obtener_mayoristas_guardados
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -526,7 +526,7 @@ def calcular_tiempos_multiples_rutas(rutas: list, pesos: dict, logistica_id: str
     paradas_map: dict = {}
     if logistica_id:
         try:
-            dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+            dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
             paradas_map = dist.get("paradas_integradas", {})
         except Exception:
             paradas_map = {}
@@ -1033,7 +1033,7 @@ def _cargar_datos_mayoristas(logistica_id: str, rutas: list | None = None) -> tu
                                 Usada para identificar candidatos al agregar (MAY-2).
     """
     try:
-        dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+        dist = obtener_mayoristas_guardados(logistica_id, rutas) or calcular_distribucion_mayoristas(logistica_id, rutas)
         return dist.get("mayoristas_por_ruta", {}), dist.get("todos_mayoristas", [])
     except Exception as e:
         print(f"[_cargar_datos_mayoristas] Error al calcular cercania: {e}")
@@ -1673,7 +1673,8 @@ def obtener_mayoristas_por_ruta(logistica_id: str) -> dict:
       }
     """
     try:
-        dist = calcular_distribucion_mayoristas(logistica_id)
+        dist = (obtener_mayoristas_guardados(logistica_id, obtener_rutas())
+                or calcular_distribucion_mayoristas(logistica_id))
         return {
             "mayoristas": dist.get("mayoristas_por_ruta", {}),
             "orden_sucursales": dist.get("orden_sucursales", {}),
@@ -1738,7 +1739,8 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
     # ── Paradas ordenadas (cercanía) ────────────────────────────
     paradas: list = []
     try:
-        dist = calcular_distribucion_mayoristas(logistica_id)
+        dist = (obtener_mayoristas_guardados(logistica_id, obtener_rutas())
+                or calcular_distribucion_mayoristas(logistica_id))
         base = dist.get("paradas_integradas", {}).get(ruta_id, [])
         for p in base:
             lat = p.get("latitud")
