@@ -73,9 +73,10 @@ CONVRP_ACTIVO = True
 
 # Enganche completo de mayoristas (Fase 3, enganche_zona.py). Depende de
 # CONVRP_ACTIVO -- construir_rutas_con_mayoristas() llama internamente a
-# construir_groups_convrp() en cada pasada de su punto fijo. Apagado hasta
-# probar contra una logística sandbox y correr scripts/smoke_convrp.py.
-ENGANCHE_ZONA_ACTIVO = False
+# construir_groups_convrp() en cada pasada de su punto fijo. Activado el
+# 2026-08-10 tras probar contra una logística real (29 rutas, 45 mayoristas
+# enganchados y persistidos/leídos correctamente) y 255 pruebas en verde.
+ENGANCHE_ZONA_ACTIVO = True
 
 # Con CONVRP_ESTRICTO=True un fallo del ConVRP REVIENTA en vez de caer al motor
 # de afinidad. Lo usa el arnés de validación: si mido fidelidad y por dentro
