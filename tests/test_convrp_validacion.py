@@ -266,6 +266,64 @@ def test_coocurrencia_permite_grupos_con_precedente_real():
     assert ref == {1: "V1", 2: "V1"}
 
 
+def test_coocurrencia_abre_unidad_fresca_si_el_cupo_ya_se_lleno_sin_precedente():
+    # Hallado en producción el 2026-08-11: F 350_2 (Tuxtepec) jueves se quedó
+    # con el grupo de Veracruz 1/Tejería. El filtro de coocurrencia sólo elige
+    # ENTRE lo que ya está abierto ese día -- nunca abre una unidad nueva. Si
+    # los grupos más pesados ya llenaron el cupo del día antes de que le
+    # tocara su turno a este grupo, su unidad de mayor afinidad real (T 20)
+    # nunca llegó a abrirse, y "cede" apilándolo en lo que sea que ya esté
+    # abierto aunque tenga cero precedente. Mejor abrir una unidad fresca
+    # compatible -- igual que ya se hace cuando lo que falta es capacidad.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "JUEVES"},
+              {"grupo": 2, "dia_preferido": "JUEVES"}]
+    afinidad = {1: {"V1": 9}, 2: {"V2": 5}}   # el 2 nunca viajó en V1
+    coocurrencia = {}                          # 1 y 2 nunca compartieron camión-día
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps,
+                             viajes_objetivo={"JUEVES": 1}, coocurrencia=coocurrencia)
+    assert ref[1] == "V1"
+    assert ref[2] == "V2"      # abre V2 (fresca, con precedente propio) en vez de apilar en V1
+
+
+def test_coocurrencia_no_abre_unidad_fresca_si_la_afinidad_propia_es_debil():
+    # Medido contra 9 semanas de historia real: abrir una unidad fresca cada
+    # vez que "no hay precedente" (afinidad 0 o 1 con la fresca) subió JUEVES
+    # de 8 a 11 viajes/semana -- casi todos sin evidencia real de que ESE
+    # grupo prefiera esa unidad, sólo que técnicamente nunca coincidió con lo
+    # ya abierto. El rescate sólo debe activarse cuando el grupo mismo tiene
+    # afinidad fuerte (>=2 semanas) con la unidad fresca -- si no, mejor
+    # ceder como antes que abrir un camión de más por una corazonada débil.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "JUEVES"},
+              {"grupo": 2, "dia_preferido": "JUEVES"}]
+    afinidad = {1: {"V1": 9}, 2: {"V2": 1}}   # el 2 sólo viajó en V2 una vez
+    coocurrencia = {}
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps,
+                             viajes_objetivo={"JUEVES": 1}, coocurrencia=coocurrencia)
+    assert ref[2] == "V1"      # afinidad débil con V2: cede en V1 en vez de abrirla
+
+
+def test_coocurrencia_sigue_cediendo_si_no_hay_unidad_fresca_disponible():
+    # Si ya no queda ninguna unidad sin abrir ese día, sigue aplicando el
+    # "cede" de siempre -- el rescate de arriba sólo entra cuando de verdad
+    # hay una unidad fresca a la que abrir.
+    from logic.convrp_validacion import asignar_unidad_ref
+    grupos = [{"grupo": 1, "dia_preferido": "JUEVES"},
+              {"grupo": 2, "dia_preferido": "JUEVES"}]
+    afinidad = {1: {"V1": 9}, 2: {"V1": 9}}
+    coocurrencia = {}
+    kg = {1: 100, 2: 100}
+    caps = {"V1": 1000}       # única unidad de la flota: no hay fresca que abrir
+    ref = asignar_unidad_ref(grupos, afinidad, kg, caps,
+                             viajes_objetivo={"JUEVES": 1}, coocurrencia=coocurrencia)
+    assert ref == {1: "V1", 2: "V1"}
+
+
 def test_sin_coocurrencia_el_filtro_no_actua():
     # Comportamiento previo intacto si no se pasa `coocurrencia` (compatibilidad
     # con los llamadores que aún no la tienen disponible).

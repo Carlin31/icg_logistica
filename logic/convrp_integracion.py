@@ -317,6 +317,29 @@ def _anclar_kg_mayoristas(por_ruta: dict, detalle: list, groups: dict,
     return kg, anclas
 
 
+def _elegir_mejor_pasada(historial: list) -> int:
+    """
+    Cuando el enganche de mayoristas no llega a punto fijo en `max_pasadas`,
+    hay que elegir con QUÉ pasada quedarse. Hallado en producción
+    2026-08-12: el enganche entra en un ciclo de 2 que nunca converge, y
+    quedarse con la ÚLTIMA pasada (lo que hacía antes) depende sólo de la
+    paridad de `max_pasadas` -- con 4 (par) el corte caía siempre en la
+    mitad "mala" del ciclo, con grupos completos desviados de su unidad_ref
+    sin ningún motivo geográfico (Tuxtepec+Veracruz en un camión, luego
+    Veracruz+Amatitlán en otro, cada semana un par distinto).
+
+    Se elige la pasada con MENOS excepciones (desviaciones de unidad/día/
+    partición): es la más fiel al historial, el mismo criterio que ya usa
+    `calibrar_unidad_ref.py` para calificar una asignación. Empate → la
+    pasada más temprana (determinista).
+
+    `historial`: [{"excepciones": [...]}, ...] en orden de pasada.
+    Devuelve el índice elegido.
+    """
+    return min(range(len(historial)),
+              key=lambda i: (len(historial[i]["excepciones"]), i))
+
+
 def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
                                    vehiculos_cap: dict, vehiculos_vol: dict,
                                    depot: tuple, mayoristas: list,
@@ -346,6 +369,7 @@ def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
     excepciones: list = []
     coords_rutas: dict = {}
     convergio, pasada = False, 0
+    historial: list = []
     for pasada in range(1, int(max_pasadas) + 1):
         groups, excepciones, meta = construir_groups_convrp(
             pedidos, volumenes, coords, vehiculos_cap, vehiculos_vol, depot,
@@ -354,10 +378,26 @@ def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
         por_ruta, detalle = enganchar_mayoristas_por_zona(
             groups, mayoristas, coords_rutas)
         nuevo_kg, anclas = _anclar_kg_mayoristas(por_ruta, detalle, groups, coords)
+        historial.append(dict(kg_may=kg_may, groups=groups, excepciones=excepciones,
+                              por_ruta=por_ruta, detalle=detalle, meta=meta,
+                              coords_rutas=coords_rutas))
         if nuevo_kg == kg_may:
             convergio = True
             break
         kg_may = nuevo_kg
+
+    pasada_elegida = pasada
+    if not convergio and len(historial) > 1:
+        # No hay punto fijo (típico: ciclo de 2) -- en vez de quedarse con
+        # la última pasada por pura paridad de `max_pasadas`, usa la más
+        # fiel al historial (ver `_elegir_mejor_pasada`).
+        idx = _elegir_mejor_pasada(historial)
+        pasada_elegida = idx + 1
+        elegida = historial[idx]
+        kg_may, groups, excepciones, por_ruta, detalle, meta, coords_rutas = (
+            elegida["kg_may"], elegida["groups"], elegida["excepciones"],
+            elegida["por_ruta"], elegida["detalle"], elegida["meta"],
+            elegida["coords_rutas"])
 
     # ── garantía dura: ninguna ruta por encima del 100 % ──
     kg_lores = {clave: sum(float(pedidos.get(m["sid"]) or 0) for m in miembros)
@@ -377,13 +417,16 @@ def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
             d["via_destino"] = "REUBICADO_CUPO"
 
     meta = dict(meta or {}, pasadas_mayoristas=pasada, convergio_mayoristas=convergio,
+                pasada_elegida=pasada_elegida,
                 kg_mayoristas_anclados=round(sum(kg_may.values()), 1),
                 viajes_solo_mayoristas=len([k for k in por_ruta
                                             if k not in groups and por_ruta[k]]))
     if not convergio:
         print("=" * 70)
         print(f"[convrp] el enganche de mayoristas NO llegó a punto fijo en "
-              f"{max_pasadas} pasadas: se usa la última asignación.")
+              f"{max_pasadas} pasadas (probable ciclo); se usa la pasada "
+              f"{pasada_elegida} de {max_pasadas} (la de menos desviaciones "
+              f"de unidad_ref, {len(excepciones)}).")
         print("[convrp] revisa `detalle` — puede haber clientes oscilando entre "
               "dos rutas y el reparto de carga no es el óptimo.")
         print("=" * 70)

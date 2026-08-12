@@ -188,6 +188,54 @@ def test_grupo_conserva_unidad_ref_cuando_cabe_aunque_haya_otras_libres():
     assert not exc
 
 
+# ══ 3b. `unidad_forzada`: regla de negocio, nunca cede ══════════════════════
+# Hallado en producción 2026-08-12: el enganche de mayoristas por zona
+# (fixed-point de construir_rutas_con_mayoristas, hasta 4 pasadas) oscila sin
+# converger para ciertas semanas, y según en qué pasada se corte el tope, dos
+# grupos MARTES intercambiaban unidad entre sí (Tuxtepec caía en F 350_1 y
+# Cosamaloapan en F 350_2, al revés de siempre). Arreglar la oscilación de
+# raíz mueve otras rutas de forma impredecible; `unidad_forzada` ancla la
+# unidad de referencia de un grupo puntual sin tocar el reparto de nadie más.
+def test_unidad_forzada_se_queda_fija_aunque_no_quepa_ni_se_pueda_partir():
+    # Un solo miembro: no hay nada que partir ni otro día admisible al que
+    # moverse -- aísla el efecto de `unidad_forzada` en la palanca 1 (unidad)
+    # de las palancas 2/3 (día, partición), que no se tocaron.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1")]
+    plantilla[0]["unidad_forzada"] = True
+    pedidos = {1: 400}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 5000},
+        {"V1": 99, "V2": 99}, _sin_tiempo(),
+        kg_mayoristas={1: 700})                       # 1100 > 1000: no cabe
+    assert not [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
+    assert ("V1", "LUNES") in groups
+    assert ("V2", "LUNES") not in groups
+
+
+def test_sin_forzar_el_mismo_caso_si_cede():
+    # Control: sin `unidad_forzada`, el mismo escenario SÍ cede a V2 (V2 tiene
+    # cupo de sobra y nada la descarta) -- confirma que la prueba de arriba
+    # de verdad ejercita el camino que antes se tomaba.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1")]
+    pedidos = {1: 400}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 5000},
+        {"V1": 99, "V2": 99}, _sin_tiempo(), kg_mayoristas={1: 700})
+    assert [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
+    assert ("V2", "LUNES") in groups
+
+
+def test_unidad_forzada_no_cambia_nada_cuando_ya_cabria_de_todos_modos():
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1")]
+    plantilla[0]["unidad_forzada"] = True
+    pedidos = {1: 100, 2: 100}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 5000, "V2": 5000},
+        {"V1": 99, "V2": 99}, _sin_tiempo())
+    assert ("V1", "LUNES") in groups
+    assert not exc
+
+
 # ══ 4. Palanca 2: mover de día, sólo dentro de los admisibles ══════════════
 def test_mueve_a_otro_dia_admisible_cuando_no_hay_unidad_libre():
     # Una sola unidad: no hay palanca de unidad. El flexible admite MARTES.

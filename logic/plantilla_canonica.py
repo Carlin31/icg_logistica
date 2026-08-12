@@ -36,6 +36,7 @@ _RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BRIDGE_CSV_DEFAULT = os.path.join(_RAIZ, "datos", "mapeo_no_a_numtienda.csv")
 DIAS_CSV_DEFAULT = os.path.join(_RAIZ, "datos", "dias_admisibles_por_grupo.csv")
 UNIDAD_CSV_DEFAULT = os.path.join(_RAIZ, "datos", "unidad_ref_por_grupo.csv")
+FORZAR_CSV_DEFAULT = os.path.join(_RAIZ, "datos", "grupos_unidad_forzada.csv")
 
 
 # ── normalización ──────────────────────────────────────────────────────────
@@ -114,7 +115,8 @@ def _leer_bridge(bridge_csv: str) -> dict:
 # ── parseo PURO (sin BD; testeable) ────────────────────────────────────────
 def parsear_plantilla(xlsx_path: str, bridge_csv: str = None,
                       poblacion_csv: str = None, dias_csv: str = None,
-                      unidades: list = None, unidad_csv: str = None) -> dict:
+                      unidades: list = None, unidad_csv: str = None,
+                      forzar_csv: str = None) -> dict:
     """
     Lee el Excel canónico + el bridge (+ opcional población→zona) y devuelve el
     payload parseado SIN tocar la BD. No versiona ni escribe: es la parte pura,
@@ -249,6 +251,24 @@ def parsear_plantilla(xlsx_path: str, bridge_csv: str = None,
                 + ", ".join(f"g{g}:{a}->{b}" for g, a, b in cambios[:12])
                 + (" …" if len(cambios) > 12 else ""))
 
+    # ── unidad_forzada (grupos_unidad_forzada.csv) ──
+    # Regla de negocio puntual, no una recalibración: el grupo listado NUNCA
+    # cede su unidad_ref, sin importar sobrecupo (ver `asignar_unidades` en
+    # convrp_logic.py). Hallado en producción 2026-08-12: el enganche de
+    # mayoristas por zona oscila sin converger entre pasadas, y según en cuál
+    # se corte el tope, Tuxtepec (grupo 1) y Cosamaloapan (grupo 4) quedaban
+    # intercambiados entre F 350_2 y F 350_1. Arreglar la oscilación de raíz
+    # movería otras rutas de forma impredecible; esto ancla sólo estos dos
+    # grupos sin tocar el resto del reparto de la semana.
+    forzar_csv = forzar_csv or FORZAR_CSV_DEFAULT
+    forzados: set = set()
+    if os.path.exists(forzar_csv):
+        zdf = pd.read_csv(forzar_csv, encoding="utf-8-sig")
+        zdf.columns = [c.strip() for c in zdf.columns]
+        forzados = {int(r["grupo"]) for _, r in zdf.iterrows()}
+    for gd in grupos:
+        gd["unidad_forzada"] = gd["grupo"] in forzados
+
     # ── días admisibles por grupo (dias_admisibles_por_grupo.csv) ──
     # Un grupo sólo puede moverse dentro de estos días (rígido y flexible por
     # igual: rigidez de composición y flexibilidad de día son dimensiones
@@ -379,7 +399,7 @@ def parsear_plantilla(xlsx_path: str, bridge_csv: str = None,
 def cargar_plantilla_desde_excel(xlsx_path: str, bridge_csv: str = None,
                                  poblacion_csv: str = None, dias_csv: str = None,
                                  nota: str = None, semanas_analisis: int = 9,
-                                 unidad_csv: str = None) -> dict:
+                                 unidad_csv: str = None, forzar_csv: str = None) -> dict:
     """
     Parsea la plantilla y escribe una VERSIÓN NUEVA. Nunca borra: marca la
     anterior vigente=0. Advierte (warnings) por filas 'revisado_ok' (dist>2 km
@@ -402,7 +422,7 @@ def cargar_plantilla_desde_excel(xlsx_path: str, bridge_csv: str = None,
             "resolver y la preferencia de unidad se ignoraría en silencio.")
     p = parsear_plantilla(xlsx_path, bridge_csv=bridge_csv,
                           poblacion_csv=poblacion_csv, dias_csv=dias_csv,
-                          unidad_csv=unidad_csv,
+                          unidad_csv=unidad_csv, forzar_csv=forzar_csv,
                           unidades=unidades)
     bridge, grupos, miembros = p["bridge"], p["grupos"], p["miembros"]
     zonas, poblaciones, warnings = p["zonas"], p["poblaciones"], p["warnings"]
@@ -517,6 +537,7 @@ def obtener_grupos(version: int = None) -> list:
         out.append(dict(grupo=g, rigidez=r["rigidez"], dia=r["dia"],
                         tam=r["tam"], cohesion=r["cohesion"], unidad_ref=r["unidad_ref"],
                         unidades_afines=r.get("unidades_afines"),
+                        unidad_forzada=bool(r.get("unidad_forzada")),
                         que_hace_vrp=r["que_hace_vrp"],
                         sucursales=sorted(miembros.get(g, [])),
                         dias_admisibles=[d for _, d, _ in sorted(dias.get(g, []))],

@@ -69,9 +69,6 @@ C_BLANCO   = colors.white
 C_MAY_BG   = colors.HexColor("#FFF7ED")   # fondo fila mayorista
 C_MAY_TEXT = colors.HexColor("#EA580C")   # texto naranja
 C_MAY_SUBTOT = colors.HexColor("#FFEDD5") # subtotal cuando hay mayoristas
-# ── Rojo para paradas no entregables por tiempo (Fase A) ──────
-C_TARDE_BG   = colors.HexColor("#FEE2E2")  # fondo fila fuera de horario
-C_TARDE_TEXT = colors.HexColor("#B91C1C")  # texto rojo
 
 ORDEN_DIA = {"lunes": 1, "martes": 2, "miercoles": 3, "jueves": 4, "viernes": 5}
 ABREV_DIA = {
@@ -382,7 +379,9 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
 
         for i, p in enumerate(paradas):
             es_may = p["_tipo"] == "mayorista"
-            entregable = p.get("_entregable", True)
+            # `_entregable` (Fase A, ver arriba) se sigue calculando y lo usa
+            # Fase B para reubicar fuera de horario -- sólo se dejó de pintar
+            # en el PDF (a petición del negocio, 2026-08-12).
             p_kg   = float(p.get("peso_kg", 0))
             pct_r  = (p_kg / peso_ruta * 100) if peso_ruta else 0
 
@@ -394,28 +393,21 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
                 nt     = p.get("num_tienda")
                 p_vol  = vol_map.get(int(nt), 0.0) if nt is not None else 0.0
 
-            if not entregable:
-                nombre = f"{nombre}  ·  FUERA DE HORARIO"
-
             vol_txt = f"{p_vol:.3f}" if p_vol > 0 else "—"
-            # Rojo si no es entregable por tiempo; si no, naranja mayorista / negro sucursal.
-            col = C_TARDE_TEXT if not entregable else (C_MAY_TEXT if es_may else colors.black)
+            col = C_MAY_TEXT if es_may else colors.black
 
             data_rows.append([
                 _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(aux_txt, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(str(p.get("orden", i + 1)), sz=SZ_DAT, color=col),
-                _p(nombre, sz=SZ_DAT, color=col, bold=es_may or (not entregable)),
+                _p(nombre, sz=SZ_DAT, color=col, bold=es_may),
                 _pr(f"{int(p_kg):,}", sz=SZ_DAT, color=col),
                 _pr(vol_txt, sz=SZ_DAT, color=col),
                 _pc(f"{pct_r:.0f}%", sz=SZ_DAT, color=col),
             ])
 
             ridx = 2 + len(data_rows) - 1
-            if not entregable:
-                # Fondo rojo: parada que no se alcanza a entregar antes del cierre
-                style_extra.append(("BACKGROUND", (0, ridx), (-1, ridx), C_TARDE_BG))
-            elif es_may:
+            if es_may:
                 # Fondo naranja para toda la fila de mayorista
                 style_extra.append(("BACKGROUND", (0, ridx), (-1, ridx), C_MAY_BG))
             elif es_sub:
@@ -435,9 +427,6 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
         if n_may:
             lbl_partes.append(f"{n_may} may.")
         total_lbl = f"TOTAL {dia_lbl}  ·  " + "  +  ".join(lbl_partes)
-        n_tarde = sum(1 for p in paradas if not p.get("_entregable", True))
-        if n_tarde:
-            total_lbl += f"  ·  {n_tarde} FUERA DE HORARIO"
 
         vol_ruta = sum(
             vol_map.get(int(p.get("num_tienda")), 0.0)
@@ -650,6 +639,48 @@ def _pesos_mayoristas(db, oid: str) -> dict:
     return resultado
 
 
+def _agrupar_documentos_por_cliente(mayoristas_raw: list) -> dict:
+    """
+    Agrupa los folios (`documento`) de `extraccion.mayoristas` por cliente y
+    los formatea ('BB3909/10/11'). Sirve para reponer `documento` en las
+    entradas que vienen de `convrp_mayoristas`, que trabaja a nivel cliente
+    y no lo conserva (ver mayoristas_logic.obtener_mayoristas_guardados).
+    """
+    por_cliente: dict = {}
+    for m in mayoristas_raw or []:
+        codigo = m.get("codigo") or m.get("id_cliente")
+        doc = m.get("documento")
+        if codigo is None or not doc:
+            continue
+        try:
+            id_int = int(str(codigo).split(".")[0])
+        except (TypeError, ValueError):
+            continue
+        por_cliente.setdefault(id_int, []).append(str(doc))
+    return {id_int: _formatear_docs_agrupados(docs) for id_int, docs in por_cliente.items()}
+
+
+def _documentos_por_cliente(db, oid) -> dict:
+    """Lee `extraccion.mayoristas` y devuelve {id_cliente: 'BB3909/10/11'}."""
+    try:
+        tabla = get_table("extraccion")
+        fila = db.execute(select(tabla.c.mayoristas).where(tabla.c.logistica_id == oid)).mappings().first()
+        if fila and fila["mayoristas"]:
+            return _agrupar_documentos_por_cliente(json.loads(fila["mayoristas"]))
+    except Exception as e:
+        print(f"[_documentos_por_cliente] {e}")
+    return {}
+
+
+def _backfill_documento(mayoristas: list, doc_por_cliente: dict) -> None:
+    """Rellena `documento` (in-place) en mayoristas que no lo traen."""
+    for m in mayoristas:
+        if not m.get("documento"):
+            id_cl = m.get("id_cliente")
+            if id_cl is not None:
+                m["documento"] = doc_por_cliente.get(int(id_cl), "")
+
+
 def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     """
     Genera el reporte PDF de pesos.
@@ -694,6 +725,17 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
             "No se encontraron datos para generar el reporte. "
             "Completa al menos la etapa de Asignación (Paso 3) y guarda antes de generar el PDF."
         )
+
+    # ── 2.5 Reponer `documento` de mayoristas que llegaron sin él ─
+    # Tanto la Modificación guardada como la distribución calculada pueden
+    # traer mayoristas armados por convrp_mayoristas (trabaja a nivel
+    # cliente, sin folio individual — ver mayoristas_logic.py:1083). Se
+    # aplica sobre `rutas` sin importar el origen (0/1/2) para que el PDF
+    # siempre muestre el folio si existe en extraccion.mayoristas.
+    doc_por_cliente = _documentos_por_cliente(db, oid)
+    if doc_por_cliente:
+        for ruta in rutas:
+            _backfill_documento(ruta.get("mayoristas", []), doc_por_cliente)
 
     # ── 3. Enriquecer peso_kg de mayoristas desde extraccion ─────
     # La distribución calculada no guarda pesos individuales, por lo que

@@ -192,6 +192,16 @@ def construir_plantilla_desde(semanas: list, umbral: float = UMBRAL_COVIAJE,
 
 PERCENTIL_CAPACIDAD = 0.90
 
+# Rescate de unidad fresca (ver `asignar_unidad_ref`): sólo se abre una
+# unidad sin abrir ese día si el grupo mismo viajó ahí al menos estas
+# semanas. Medido contra 9 semanas reales: sin este piso, "sin precedente"
+# resultó ser el caso común (historial de sólo 9 semanas) y JUEVES pasó de
+# 8 a 11 viajes/semana rescatando afinidades de 0-1 semana que no son
+# evidencia real de nada. Con el piso en 2 se sigue arreglando el caso que
+# lo motivó (grupo 28 Veracruz 1/Tejería, afinidad T 20:2) sin abrir
+# camiones de más por corazonadas débiles.
+UMBRAL_AFINIDAD_RESCATE = 2
+
 
 def kg_representativo(totales, percentil: float = PERCENTIL_CAPACIDAD) -> float:
     """
@@ -326,15 +336,34 @@ def asignar_unidad_ref(grupos: list, afinidad: dict, kg_tipico: dict,
         # de 30.9 a 33.9 contra 30.7 reales: la consolidación por tope es la
         # que más pesa en la fidelidad agregada, así que manda primero y la
         # coocurrencia filtra dentro de lo que ese orden deja disponible.
-        universo = (sorted(en_uso) if (tope is not None and len(en_uso) >= tope)
-                    else sorted(vehiculos_cap))
+        tope_alcanzado = tope is not None and len(en_uso) >= tope
+        universo = sorted(en_uso) if tope_alcanzado else sorted(vehiculos_cap)
         # el camión tiene que poder con la semana alta del grupo
         aptas = [u for u in universo if float(vehiculos_cap[u]) + 1e-6 >= minimo]
         universo = aptas or universo
         # coocurrencia: no apilar con un grupo con el que nunca compartió
-        # camión-día; si eso deja el universo vacío, se cede (mejor una
-        # combinación sin precedente que un grupo sin camión)
+        # camión-día
         compatibles = [u for u in universo if _compatible(u, dia, gid)]
+        if not compatibles and tope_alcanzado:
+            # Ninguna unidad ya abierta tiene precedente real con este grupo
+            # (hallado en producción 2026-08-11: Tuxtepec + Veracruz en el
+            # mismo F 350_2 jueves porque T 20 -su unidad de mayor afinidad-
+            # nunca llegó a abrirse ese día, y el "cede" de abajo apilaba en
+            # lo que hubiera). Antes de apilar sin precedente, se intenta
+            # abrir una unidad fresca compatible, igual que ya se hace más
+            # abajo cuando lo que falta es capacidad. Si tampoco hay unidad
+            # fresca disponible, sigue aplicando el "cede" original. Y sólo
+            # cuenta si el grupo mismo tiene afinidad fuerte con ella — una
+            # unidad fresca "compatible" por no tener historial (0-1 semana)
+            # no es evidencia de nada, sólo infla el conteo de viajes.
+            frescas = [u for u in sorted(vehiculos_cap)
+                      if u not in en_uso and af.get(str(u), 0) >= UMBRAL_AFINIDAD_RESCATE]
+            if frescas:
+                frescas_aptas = [u for u in frescas if float(vehiculos_cap[u]) + 1e-6 >= minimo] or frescas
+                frescas = [u for u in frescas_aptas if _compatible(u, dia, gid)] or frescas_aptas
+                compatibles = frescas
+        # si sigue vacío, se cede (mejor una combinación sin precedente que
+        # un grupo sin camión)
         universo = compatibles or universo
         # más afinidad primero; sin historia, la unidad menos comprometida ese
         # día (reparte en vez de apilar); desempate final por nombre.

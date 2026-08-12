@@ -274,6 +274,16 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
         for gid in gids:
             a = asign[gid]
             ref = a["unidad_ref"] if a["unidad_ref"] in vehiculos_cap else None
+            if a.get("unidad_forzada") and ref:
+                # Regla de negocio puntual: esta unidad NUNCA se cede, ni por
+                # sobrecupo (hallado en producción 2026-08-12: el enganche de
+                # mayoristas por zona oscila sin converger, y según en qué
+                # pasada se corte intercambiaba Tuxtepec/Cosamaloapan entre
+                # F 350_2 y F 350_1). No participa del reparto normal — si de
+                # verdad no cabe, la partición de más abajo se encarga, pero
+                # nunca se mueve el grupo entero a otra unidad en silencio.
+                a["unidad"] = ref
+                continue
             # Al ceder la preferida se busca CONSOLIDAR: primero las unidades que
             # ya llevan carga ese día (la más llena que todavía admita el grupo),
             # y sólo al final una vacía. Ordenar por carga ASCENDENTE dispersaría
@@ -496,7 +506,8 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
         asign[int(g["grupo"])] = dict(
             grupo=int(g["grupo"]), rigidez=str(g.get("rigidez", "")).upper(),
             unidad=unidad, unidad_ref=unidad_ref, dia=dia, dia_preferido=dia,
-            dias_admisibles=adm, miembros=activos)
+            dias_admisibles=adm, miembros=activos,
+            unidad_forzada=bool(g.get("unidad_forzada")))
 
     # ── 2. Palanca 1: repartir en la flota (unidad_ref = preferencia) ──
     desviaciones = _asignar_unidades(asign, pedidos, volumenes, coords,
