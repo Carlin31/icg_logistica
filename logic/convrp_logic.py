@@ -266,8 +266,11 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     unidad_ref nunca pasa por el filtro de coocurrencia, los dos quedaban
     juntos sin ningún precedente histórico entre ellos, y ninguna de las
     reglas existentes lo detectaba. Reservando el turno de cada grupo
-    todavía pendiente, un grupo que cede jamás pisa por accidente la unidad
-    de otro que aún no decidió lo suyo.
+    todavía pendiente, un grupo que cede no pisa por accidente la unidad de
+    otro que aún no decidió lo suyo — salvo en el último recurso (ningún
+    destino admite al grupo en absoluto), donde la reserva también se
+    ignora: ahí ya no hay una unidad "mejor" que proteger, sólo la de más
+    espacio libre para que la partición pele lo mínimo.
 
     (Se probó primero separar esto en dos fases -- TODOS reclaman su propia
     referencia antes de que NADIE ceda -- pero eso rompía la garantía de
@@ -391,16 +394,10 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                     return _num(vehiculos_cap.get(u)) - ocupado
 
                 elegido = min(candidatos, key=lambda u: (-_libre(u), str(u)))
-                # "Cabe sola en su preferida: consérvala" tiene que mirar lo
-                # que YA hay en `ref` -- comparar sólo el peso del grupo
-                # contra la capacidad cruda de `ref`, ignorando lo que otro
-                # grupo (mismo `unidad_ref`) ya dejó ahí, da un falso "sí
-                # cabe" y hacina dos grupos muy por encima del cupo real.
-                if ref:
-                    destino_ref = sorted(_sids_de_ruta(asign, ref, dia) + list(a["miembros"]))
-                    if _restriccion_violada(destino_ref, ref, pedidos, volumenes, coords,
-                                            vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
-                        elegido = ref     # cabe junto con lo que ya hay: consérvala
+                # No hace falta reintentar `ref` aquí: el chequeo de la línea
+                # ~319 ya probó esta misma condición (ocupación combinada)
+                # contra los mismos datos, y nada en `asign` cambió desde
+                # entonces — si no cupo ahí, sigue sin caber.
             a["unidad"] = elegido
             if ref and elegido != ref:
                 desviaciones.append({

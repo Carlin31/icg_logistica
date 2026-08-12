@@ -712,7 +712,7 @@ def test_dia_alternativo_coocurrencia_cede_si_es_la_unica_opcion():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Fase A: reclamo de unidad_ref propia — encontrado en producción 2026-08-12:
+# Reserva de unidad_ref pendiente — encontrado en producción 2026-08-12:
 # grupo 19 (Amatitlán/Carlos A. Carrillo 2, ref F 350_1) no cabía por TIEMPO
 # en F 350_1 y cedía. Entre las unidades vacías, T 20 resultó "compatible"
 # (nada había ahí todavía) y el desempate la eligió. El problema: T 20 era
@@ -722,16 +722,19 @@ def test_dia_alternativo_coocurrencia_cede_si_es_la_unica_opcion():
 # propia unidad_ref ya tenía cupo y la usó directo — un grupo usando SU
 # PROPIA unidad_ref nunca pasa por el filtro de coocurrencia, así que los
 # dos quedaron juntos sin ningún precedente histórico entre ellos y sin
-# ninguna excepción registrada.
+# ninguna excepción registrada. (Se probó primero partir la asignación en
+# dos fases -- todos reclaman antes de que nadie ceda -- pero eso rompía
+# `test_grupo_que_no_cabe_en_ninguna_unidad_va_a_la_de_mas_espacio_libre`;
+# la solución quedó como reserva dentro de la MISMA pasada de siempre, ver
+# docstring de `_asignar_unidades`.)
 # ═══════════════════════════════════════════════════════════════════════════
 
-def test_fase_a_reclama_unidad_propia_antes_que_otro_grupo_la_ocupe_cediendo():
+def test_reserva_de_unidad_pendiente_evita_que_otro_grupo_la_ocupe_cediendo():
     # grupo 1 (1800 kg, sin unidad_ref válida en la flota -> cede desde el
     # principio) se procesa ANTES que grupo 2 (100 kg, ref=V2, RIGIDO) por
-    # ser más pesado. Sin la Fase A reclamando primero, grupo 1 puede
-    # colarse en V2 (vacía en ese momento) antes que grupo 2 llegue a
-    # reclamarla -- y como no hay coocurrencia entre 1 y 2, ese apilado no
-    # tiene ningún precedente real.
+    # ser más pesado. Sin la reserva, grupo 1 puede colarse en V2 (vacía en
+    # ese momento) antes que grupo 2 llegue a reclamarla -- y como no hay
+    # coocurrencia entre 1 y 2, ese apilado no tiene ningún precedente real.
     plantilla = [
         _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref="SIN_FLOTA"),
         _grupo(2, "RIGIDO", "LUNES", [3], unidad_ref="V2"),
@@ -747,6 +750,22 @@ def test_fase_a_reclama_unidad_propia_antes_que_otro_grupo_la_ocupe_cediendo():
     # grupo 1 nunca se apila en V2 (cero precedente con grupo 2)
     v2_sids = [m["sid"] for m in groups[("V2", "LUNES")]]
     assert 1 not in v2_sids and 2 not in v2_sids
+
+
+def test_reserva_de_unidad_pendiente_cede_si_es_la_unica_opcion_viable():
+    # Sin otra unidad en la flota, la reserva también cede -- mismo patrón
+    # que la compatibilidad por coocurrencia (ver
+    # test_al_ceder_unidad_coocurrencia_cede_si_es_la_unica_opcion): mejor
+    # una combinación sin turno respetado que un grupo sin camión.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref="SIN_FLOTA"),
+        _grupo(2, "RIGIDO", "LUNES", [3], unidad_ref="V2"),
+    ]
+    pedidos = {1: 900, 2: 900, 3: 100}
+    caps = {"V2": 5000}                    # única unidad de la flota
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos={}))
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 3]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
