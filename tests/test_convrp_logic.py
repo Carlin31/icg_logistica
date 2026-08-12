@@ -712,6 +712,44 @@ def test_dia_alternativo_coocurrencia_cede_si_es_la_unica_opcion():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Fase A: reclamo de unidad_ref propia — encontrado en producción 2026-08-12:
+# grupo 19 (Amatitlán/Carlos A. Carrillo 2, ref F 350_1) no cabía por TIEMPO
+# en F 350_1 y cedía. Entre las unidades vacías, T 20 resultó "compatible"
+# (nada había ahí todavía) y el desempate la eligió. El problema: T 20 era
+# la unidad de referencia RÍGIDA de grupo 11 (El Tejar/Antón Lizardo/
+# Jamapa), que esa semana pesaba un poco MENOS que grupo 19 y por eso se
+# procesaba después. Cuando le tocó su turno, grupo 11 encontró que su
+# propia unidad_ref ya tenía cupo y la usó directo — un grupo usando SU
+# PROPIA unidad_ref nunca pasa por el filtro de coocurrencia, así que los
+# dos quedaron juntos sin ningún precedente histórico entre ellos y sin
+# ninguna excepción registrada.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_fase_a_reclama_unidad_propia_antes_que_otro_grupo_la_ocupe_cediendo():
+    # grupo 1 (1800 kg, sin unidad_ref válida en la flota -> cede desde el
+    # principio) se procesa ANTES que grupo 2 (100 kg, ref=V2, RIGIDO) por
+    # ser más pesado. Sin la Fase A reclamando primero, grupo 1 puede
+    # colarse en V2 (vacía en ese momento) antes que grupo 2 llegue a
+    # reclamarla -- y como no hay coocurrencia entre 1 y 2, ese apilado no
+    # tiene ningún precedente real.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref="SIN_FLOTA"),
+        _grupo(2, "RIGIDO", "LUNES", [3], unidad_ref="V2"),
+    ]
+    pedidos = {1: 900, 2: 900, 3: 100}   # grupo1 = 1800 kg, grupo2 = 100 kg
+    caps = {"V2": 5000, "V3": 5000}
+    coocurrencia = {}                      # 1 y 2 nunca compartieron camión-día
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, {}, plantilla, caps, {},
+        _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    # grupo 2 reclama V2 sin obstáculos, sólo con lo suyo
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [3]
+    # grupo 1 nunca se apila en V2 (cero precedente con grupo 2)
+    v2_sids = [m["sid"] for m in groups[("V2", "LUNES")]]
+    assert 1 not in v2_sids and 2 not in v2_sids
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Palanca 4 — ninguna ruta se queda con una sola sucursal, salvo que el
 # vehículo ya esté al límite de su capacidad (peso Lores + mayoristas).
 # Regla de negocio explícita del 2026-08-11, encontrada al revisar viajes

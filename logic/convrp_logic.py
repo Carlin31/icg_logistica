@@ -248,14 +248,43 @@ def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
 def _asignar_unidades(asign, pedidos, volumenes, coords,
                       vehiculos_cap, vehiculos_vol, cfg):
     """
-    Reparte los grupos de cada día entre las unidades.
+    Reparte los grupos de cada día entre las unidades: una sola pasada por
+    peso descendente (first-fit decreasing) — cada grupo intenta primero su
+    propia `unidad_ref` y, si no cabe, cede a otra de la flota.
 
-    `unidad_ref` es PREFERENCIA con penalización: se intenta primero y sólo se
-    cede si el grupo no cabe ahí. El resto de unidades se prueba por carga
-    ascendente (desempate por nombre) — determinista. Esto resuelve el reparto
-    en la asignación, no a base de reparaciones acotadas: si varios grupos
-    comparten `unidad_ref` el mismo día, se distribuyen en la flota libre en vez
-    de saturar una unidad y terminar partiendo grupos.
+    Al ceder, un grupo NUNCA puede tomar la `unidad_ref` de OTRO grupo que
+    todavía no tuvo su turno esta pasada (protegida como "reservada" hasta
+    que a ese otro grupo le toque decidir) — salvo que sea la ÚNICA opción
+    viable, igual que ya ocurre con la compatibilidad por coocurrencia.
+
+    Por qué esta protección — hallado en producción 2026-08-12: un grupo
+    cediendo podía "ocupar" de buena fe una unidad vacía que en realidad
+    era la `unidad_ref` de OTRO grupo que esa semana pesaba un poco menos y
+    todavía no le tocaba su turno (grupo 19, Amatitlán/Carlos A. Carrillo 2,
+    se coló en T 20 antes que grupo 11, El Tejar/Antón Lizardo/Jamapa,
+    RIGIDO, dueño legítimo de T 20). Como un grupo usando SU PROPIA
+    unidad_ref nunca pasa por el filtro de coocurrencia, los dos quedaban
+    juntos sin ningún precedente histórico entre ellos, y ninguna de las
+    reglas existentes lo detectaba. Reservando el turno de cada grupo
+    todavía pendiente, un grupo que cede jamás pisa por accidente la unidad
+    de otro que aún no decidió lo suyo.
+
+    (Se probó primero separar esto en dos fases -- TODOS reclaman su propia
+    referencia antes de que NADIE ceda -- pero eso rompía la garantía de
+    "el más pesado tiene primera opción sobre el espacio libre" que ya
+    tenía su propio test desde el incidente del 6-10 abril: un grupo más
+    pesado que cualquier unidad podía terminar en una unidad más chica de
+    lo necesario porque, para cuando llegaba su turno de ceder, grupos más
+    livianos ya habían reclamado con toda legitimidad las unidades grandes
+    en la fase previa. La protección por reserva, en cambio, corre dentro
+    de la MISMA pasada de siempre y sólo bloquea el destino puntual que le
+    pertenece a otro grupo, sin tocar el orden ni el resto del reparto.)
+
+    El resto del contrato es el mismo que antes: `unidad_ref` es
+    PREFERENCIA con penalización; se cede por carga descendente (consolidar
+    antes que dispersar) con desempate por afinidad histórica: si varios
+    grupos comparten `unidad_ref` el mismo día, se distribuyen en la flota
+    libre en vez de saturar una unidad y terminar partiendo grupos.
 
     Devuelve la lista de excepciones MOVIDO_UNIDAD (desviaciones de la
     preferencia). Es idempotente: se puede volver a llamar tras mover un día.
@@ -271,9 +300,12 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
         # los grupos más pesados primero (first-fit decreasing), desempate por id
         gids = sorted(por_dia[dia],
                       key=lambda g: (-_kg_grupo(asign[g], pedidos), g))
-        for gid in gids:
+        ref_de = {g: (asign[g]["unidad_ref"] if asign[g]["unidad_ref"] in vehiculos_cap
+                      else None) for g in gids}
+
+        for idx, gid in enumerate(gids):
             a = asign[gid]
-            ref = a["unidad_ref"] if a["unidad_ref"] in vehiculos_cap else None
+            ref = ref_de[gid]
             if a.get("unidad_forzada") and ref:
                 # Regla de negocio puntual: esta unidad NUNCA se cede, ni por
                 # sobrecupo (hallado en producción 2026-08-12: el enganche de
@@ -284,6 +316,16 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 # nunca se mueve el grupo entero a otra unidad en silencio.
                 a["unidad"] = ref
                 continue
+            if ref:
+                destino = _sids_de_ruta(asign, ref, dia) + list(a["miembros"])
+                restr_ref = _restriccion_violada(
+                    sorted(destino), ref, pedidos, volumenes, coords,
+                    vehiculos_cap, vehiculos_vol, cfg, dia=dia)
+                if restr_ref is None:
+                    a["unidad"] = ref
+                    continue
+            else:
+                restr_ref = None
             # Al ceder la preferida se busca CONSOLIDAR: primero las unidades que
             # ya llevan carga ese día (la más llena que todavía admita el grupo),
             # y sólo al final una vacía. Ordenar por carga ASCENDENTE dispersaría
@@ -301,6 +343,13 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 key=lambda u: (-sum(_num(pedidos.get(s))
                                     for s in _sids_de_ruta(asign, u, dia)),
                                -_num(af.get(u)), str(u)))
+            # Al ceder la preferida, ninguna unidad que sea la `unidad_ref` de
+            # OTRO grupo todavía pendiente (más liviano, sin su turno aún) es
+            # un destino válido -- salvo que sea la única opción. Así un grupo
+            # que cede nunca se cuela en el lugar de otro que aún no decidió.
+            reservadas = {ref_de[g2] for g2 in gids[idx + 1:] if ref_de[g2]}
+            otras_sin_reservar = [u for u in otras if u not in reservadas]
+            otras = otras_sin_reservar or otras
             # Al ceder la preferida no cualquier consolidación sirve: si la
             # unidad candidata ya lleva ese día un grupo con el que nunca
             # compartió camión en el histórico, se descarta primero — salvo
@@ -309,8 +358,8 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
             otras_compat = [u for u in otras
                            if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
             otras = otras_compat or otras
-            elegido, restr_ref = None, None
-            for i, unidad in enumerate([ref] + otras if ref else otras):
+            elegido = None
+            for unidad in otras:
                 destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
                 violacion = _restriccion_violada(
                     sorted(destino), unidad, pedidos, volumenes, coords,
@@ -318,12 +367,11 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 if violacion is None:
                     elegido = unidad
                     break
-                if ref and i == 0:
-                    restr_ref = violacion       # por qué no cupo en la preferida
             if elegido is None:
                 # Ningún destino admite el grupo completo (p. ej. pesa más que
                 # cualquier vehículo). Va a la unidad con MÁS ESPACIO LIBRE del
-                # día, para que la partición posterior pele lo mínimo.
+                # día (sin restricción de reserva -- es el último recurso), para
+                # que la partición posterior pele lo mínimo.
                 #
                 # "Más vacía" NO es "la que lleva menos kilos": con todas las
                 # unidades en cero eso desempataba por nombre y mandaba un grupo
@@ -343,10 +391,16 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                     return _num(vehiculos_cap.get(u)) - ocupado
 
                 elegido = min(candidatos, key=lambda u: (-_libre(u), str(u)))
-                if ref and _restriccion_violada(
-                        sorted(a["miembros"]), ref, pedidos, volumenes, coords,
-                        vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
-                    elegido = ref     # cabe sola en su preferida: consérvala
+                # "Cabe sola en su preferida: consérvala" tiene que mirar lo
+                # que YA hay en `ref` -- comparar sólo el peso del grupo
+                # contra la capacidad cruda de `ref`, ignorando lo que otro
+                # grupo (mismo `unidad_ref`) ya dejó ahí, da un falso "sí
+                # cabe" y hacina dos grupos muy por encima del cupo real.
+                if ref:
+                    destino_ref = sorted(_sids_de_ruta(asign, ref, dia) + list(a["miembros"]))
+                    if _restriccion_violada(destino_ref, ref, pedidos, volumenes, coords,
+                                            vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
+                        elegido = ref     # cabe junto con lo que ya hay: consérvala
             a["unidad"] = elegido
             if ref and elegido != ref:
                 desviaciones.append({
