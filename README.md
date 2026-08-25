@@ -212,7 +212,8 @@ segundo grupo → geografía de ruta → viaje de mayoristas solo).
 `convrp_integracion.construir_rutas_con_mayoristas()` cierra el circuito: la
 carga de mayoristas se ancla a una sucursal del grupo destino y **entra a las
 restricciones del motor**, así que el sobrecupo que provoca dispara las palancas
-(unidad → día → partir) en vez de aparecer al pintar el PDF. El enganche y el
+(unidad → día → partir → consolidar solitarias → rellenar capacidad libre) en
+vez de aparecer al pintar el PDF. El enganche y el
 reparto son mutuamente dependientes, así que iteran a punto fijo con tope de
 pasadas; al final `reubicar_mayoristas_por_cupo()` garantiza que ninguna ruta
 quede por encima de su capacidad.
