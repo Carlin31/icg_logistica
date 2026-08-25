@@ -853,3 +853,97 @@ def test_dos_solitarias_compatibles_se_consolidan_entre_si():
 # ══ 10. Palanca 5: relleno de capacidad libre ═══════════════════════════════
 def test_cfg_por_defecto_incluye_relleno_capacidad_activado():
     assert cfg_por_defecto()["relleno_capacidad"] is True
+
+
+def test_relleno_capacidad_mueve_grupo_compatible_a_ruta_con_espacio():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado de su hogar V3/MARTES
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V1" and asign[2]["dia"] == "LUNES"
+    assert any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+def test_relleno_capacidad_no_mueve_sin_coocurrencia():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos={}), {})
+    assert asign[2]["unidad"] == "V2" and asign[2]["dia"] == "LUNES"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_grupo_con_unidad_forzada():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"], "unidad_forzada": True},
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_fuera_de_dias_admisibles():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["MARTES"]},          # LUNES no es admisible para él
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_grupo_que_ya_esta_en_su_hogar():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V2", "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # ya está en SU propio hogar
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"              # nunca se toca: no está desviado
+    assert not exc

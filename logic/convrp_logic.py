@@ -524,6 +524,87 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
     return excepciones
 
 
+def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
+                              vehiculos_vol, cfg, kg_may):
+    """
+    Palanca 5 (último paso, después de consolidar solitarias): ninguna ruta
+    debe quedar con capacidad libre mientras exista, en otra unidad/día
+    admisible, un grupo YA DESVIADO de su propio unidad_ref/dia_preferido
+    que quepa completo -- regla de negocio del 2026-08-25, encontrada al
+    revisar un caso real: el grupo 19 (Amatitlán/Carlos A. Carrillo 2,
+    FLEXIBLE, unidad_ref F 350_1) cedía su lugar por sobrecupo en algún
+    punto del reparto (los FLEXIBLE ceden primero, ver
+    `_candidatos_a_mover`) y nada lo traía de vuelta aunque después quedara
+    espacio libre en F 350_1/MARTES, su hogar histórico.
+
+    Sólo son candidatos los grupos que YA ESTÁN DESVIADOS de su propio
+    (unidad_ref, dia_preferido) -- un grupo que nunca se movió de su lugar
+    preferido no se toca, para no sacarlo de su hogar sólo por rellenar el
+    espacio de OTRA ruta.
+
+    Determinista: cada grupo se mueve como máximo UNA vez en toda la
+    pasada -- una sola pasada sobre las rutas activas, sin punto fijo,
+    mismo criterio que la Palanca 2 y `_consolidar_solitarios` para no
+    reproducir el tipo de oscilación ya documentado con mayoristas.
+    """
+    excepciones: list = []
+    coocurrencia = cfg.get("coocurrencia_grupos")
+    movidos: set = set()
+
+    def _ocupado(unidad, dia):
+        sids = _sids_de_ruta(asign, unidad, dia)
+        return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in sids)
+
+    def _ocupacion_pct(unidad, dia):
+        cap = _num(vehiculos_cap.get(unidad))
+        return (_ocupado(unidad, dia) / cap) if cap else 1.0
+
+    orden_rutas = sorted(_rutas_activas(asign), key=lambda k: (_ocupacion_pct(*k), k))
+
+    for (unidad, dia) in orden_rutas:
+        candidatos = []
+        for gid in sorted(asign):
+            a = asign[gid]
+            if a["grupo"] in movidos:
+                continue
+            if (a["unidad"], a["dia"]) == (unidad, dia):
+                continue
+            if a.get("unidad_forzada"):
+                continue
+            if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
+                continue
+            if dia not in a["dias_admisibles"]:
+                continue
+            if not _compatible_historico(a["grupo"], unidad, dia, asign, coocurrencia):
+                continue
+            destino = sorted(_sids_de_ruta(asign, unidad, dia) + list(a["miembros"]))
+            if _restriccion_violada(destino, unidad, pedidos, volumenes, coords,
+                                    vehiculos_cap, vehiculos_vol, cfg, dia=dia,
+                                    kg_mayoristas=kg_may) is not None:
+                continue
+            candidatos.append(a)
+
+        if not candidatos:
+            continue
+
+        elegido = candidatos[0]
+        excepciones.append({
+            "tipo": "RELLENO_CAPACIDAD_LIBRE", "grupo": elegido["grupo"],
+            "rigidez": elegido["rigidez"], "restriccion": None,
+            "desde_unidad": elegido["unidad"], "desde_dia": elegido["dia"],
+            "a_unidad": unidad, "a_dia": dia,
+            "motivo_regreso_hogar": False,
+            "motivo": f"{unidad}/{dia} con capacidad libre; se acomodó el "
+                      f"grupo {elegido['grupo']} desde "
+                      f"{elegido['unidad']}/{elegido['dia']}",
+        })
+        elegido["unidad"] = unidad
+        elegido["dia"] = dia
+        movidos.add(elegido["grupo"])
+
+    return excepciones
+
+
 def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dict,
                                      plantilla: list, vehiculos_cap: dict,
                                      vehiculos_vol: dict, cfg: dict = None,
