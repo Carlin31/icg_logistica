@@ -575,7 +575,7 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
 
     for (unidad, dia) in orden_rutas:
         cap = _num(vehiculos_cap.get(unidad))
-        while True:
+        for _ in range(len(asign) + 1):
             candidatos = []
             for gid in sorted(asign):
                 a = asign[gid]
