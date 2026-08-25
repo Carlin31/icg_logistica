@@ -1104,3 +1104,34 @@ def test_relleno_capacidad_desactivado_no_cambia_nada():
         _sin_tiempo(relleno_capacidad=False))
     assert ("V2", "LUNES") in groups                 # ya NO se rellena
     assert not any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Regresión — inspirada en el caso real que motivó esta palanca: la logística
+# del 24-28 de agosto 2026 mostraba F 350_1/MARTES con sólo 2,318 de 3,900 kg
+# (59 %) mientras el grupo 19 (Amatitlán + Carlos A. Carrillo 2, FLEXIBLE,
+# hogar histórico F 350_1) no aparecía ahí. Este fixture usa pesos pequeños
+# (no los kg reales del reporte) elegidos para que grupo19 -- con
+# `unidad_ref` inválida en esta flota -- se procese ANTES que el grupo ancla
+# en la pasada de reparto (más pesado primero) y caiga en la unidad de
+# respaldo por desempate alfabético; el ancla reclama F 350_1 normalmente.
+# Así queda "desviado" desde el arranque sin necesitar simular sobrecupo, y
+# la Palanca 5 debe traerlo de vuelta a F 350_1/MARTES, vaciando el respaldo.
+# ═══════════════════════════════════════════════════════════════════════════
+def test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo():
+    plantilla = [
+        {"grupo": 30, "rigidez": "RIGIDO", "dia": "MARTES", "unidad_ref": "F350_1",
+         "sucursales": [101, 102], "dias_admisibles": ["MARTES"]},   # ancla
+        {"grupo": 19, "rigidez": "FLEXIBLE", "dia": "MARTES", "unidad_ref": "NO_ASIGNADA",
+         "sucursales": [86, 100], "dias_admisibles": ["MARTES"]},    # Amatitlán + Carrillo 2
+    ]
+    pedidos = {101: 150, 102: 150,      # grupo 30 (ancla) = 300
+               86: 250, 100: 250}       # grupo 19 = 500, procesa primero (más pesado)
+    caps = {"F350_1": 3900, "AUX20": 3900}   # "AUX20" < "F350_1" alfabéticamente
+    vols = {"F350_1": 99, "AUX20": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("F350_1", "MARTES")]) == [86, 100, 101, 102]
+    assert ("AUX20", "MARTES") not in groups
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert relleno and relleno[0]["grupo"] == 19
