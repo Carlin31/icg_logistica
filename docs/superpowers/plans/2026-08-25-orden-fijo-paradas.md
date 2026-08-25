@@ -383,16 +383,23 @@ def test_obtener_orden_fijo_lee_la_tabla_real(app_ctx):
 
     t = get_table("orden_fijo_paradas")
     regla_prueba = "prueba_test_orden_fijo_paradas"
+    # num_tienda con centinelas fuera de rango (nunca 1-101, el rango real de
+    # sucursales): con IDs pequeños (1, 2) el insert desechable coexiste en
+    # silencio con la fila real num_tienda=2 de tuxtepec_f350_2 (la PK es
+    # (nombre_regla, num_tienda), no solo num_tienda) y el dict de
+    # obtener_orden_fijo -- keyed solo por num_tienda -- queda con un ganador
+    # indefinido para esa clave (hallazgo real durante la implementación).
+    sid_a, sid_b = 999901, 999902
     with transaccion() as conn:
         conn.execute(t.delete().where(t.c.nombre_regla == regla_prueba))
         conn.execute(t.insert(), [
-            {"nombre_regla": regla_prueba, "num_tienda": 1, "posicion": 1},
-            {"nombre_regla": regla_prueba, "num_tienda": 2, "posicion": 2},
+            {"nombre_regla": regla_prueba, "num_tienda": sid_a, "posicion": 1},
+            {"nombre_regla": regla_prueba, "num_tienda": sid_b, "posicion": 2},
         ])
     try:
         orden_fijo = obtener_orden_fijo(get_db())
-        assert orden_fijo.get(1) == (regla_prueba, 1)
-        assert orden_fijo.get(2) == (regla_prueba, 2)
+        assert orden_fijo.get(sid_a) == (regla_prueba, 1)
+        assert orden_fijo.get(sid_b) == (regla_prueba, 2)
     finally:
         with transaccion() as conn:
             conn.execute(t.delete().where(t.c.nombre_regla == regla_prueba))
