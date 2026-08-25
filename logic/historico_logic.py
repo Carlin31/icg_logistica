@@ -101,6 +101,7 @@ CONVRP_ESTRICTO = False
 from logic.vrp_afinidad.afinidad import construir_afinidad
 from logic.vrp_afinidad.clarke_wright import haversine as _haversine_cw, Ruta as _Ruta_CW
 from logic.vrp_afinidad.estado_vrp import calcular_estado as _calcular_estado_cw
+from logic.orden_fijo_paradas import obtener_orden_fijo, aplicar_orden_fijo
 
 try:
     import pandas as pd
@@ -1297,6 +1298,8 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     rows: list = []
     report_rows: list = []
 
+    orden_fijo = obtener_orden_fijo(db)
+
     for (veh, dia), miembros in sorted(groups.items()):
         total_kg = sum(pedidos_dict.get(m["sid"], 0) for m in miembros)
         cap      = vehiculos_cap.get(veh, 3500)
@@ -1327,10 +1330,13 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
             "notas":        notas_sb,
         })
 
-        # Orden: prioriza la secuencia histórica de cada parada. Las paradas
-        # sin historial válido (nuevas o reasignadas) se insertan por
-        # proximidad geográfica, sin descartar el orden histórico del resto.
-        ordered = ordenar_paradas_por_historico(miembros, coords_dict)
+        # Orden: si TODA la ruta pertenece a la misma regla de orden fijo,
+        # ese orden gana sobre historial y geografía (ver
+        # logic/orden_fijo_paradas.py). Si no aplica, sigue el camino normal:
+        # prioriza la secuencia histórica; las paradas sin historial válido
+        # se insertan por proximidad geográfica.
+        ordered = (aplicar_orden_fijo(miembros, orden_fijo)
+                  or ordenar_paradas_por_historico(miembros, coords_dict))
 
         for i, sid in enumerate(ordered, 1):
             rows.append({

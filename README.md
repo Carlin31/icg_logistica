@@ -218,6 +218,14 @@ reparto son mutuamente dependientes, así que iteran a punto fijo con tope de
 pasadas; al final `reubicar_mayoristas_por_cupo()` garantiza que ninguna ruta
 quede por encima de su capacidad.
 
+**Orden fijo de paradas:** `logic/orden_fijo_paradas.py` permite fijar, por
+regla nombrada (tabla `orden_fijo_paradas`, cargada vía
+`scripts/cargar_orden_fijo.py` desde `datos/orden_fijo_paradas.csv`), un
+orden de visita explícito para un conjunto de sucursales. Cuando TODA una
+ruta generada coincide con una regla, ese orden gana sobre el histórico y la
+geografía en `ordenar_paradas_por_historico()`; si la ruta mezcla sucursales
+ajenas a la regla, no se aplica ningún pin.
+
 El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
 `logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
 comportamiento es idéntico al motor de afinidad actual.
