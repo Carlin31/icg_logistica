@@ -542,6 +542,15 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
     preferido no se toca, para no sacarlo de su hogar sólo por rellenar el
     espacio de OTRA ruta.
 
+    Recorre las rutas activas de MENOR a MAYOR % de ocupación (la más vacía
+    elige primero) y, para cada una, rellena repetidamente con el mejor
+    grupo candidato disponible hasta que ya no quepa ninguno más:
+      1. Si algún candidato tiene a esta ruta como su propio
+         unidad_ref/dia_preferido (puede volver a casa), se prefiere
+         siempre sobre cualquier otro.
+      2. Si ninguno "vuelve a casa", se elige el que deje la ocupación más
+         cerca del 100 % sin excederla.
+
     Determinista: cada grupo se mueve como máximo UNA vez en toda la
     pasada -- una sola pasada sobre las rutas activas, sin punto fijo,
     mismo criterio que la Palanca 2 y `_consolidar_solitarios` para no
@@ -559,65 +568,66 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
         cap = _num(vehiculos_cap.get(unidad))
         return (_ocupado(unidad, dia) / cap) if cap else 1.0
 
+    def _kg_candidato(a):
+        return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in a["miembros"])
+
     orden_rutas = sorted(_rutas_activas(asign), key=lambda k: (_ocupacion_pct(*k), k))
 
     for (unidad, dia) in orden_rutas:
-        candidatos = []
-        for gid in sorted(asign):
-            a = asign[gid]
-            if a["grupo"] in movidos:
-                continue
-            if (a["unidad"], a["dia"]) == (unidad, dia):
-                continue
-            if a.get("unidad_forzada"):
-                continue
-            if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
-                continue
-            if dia not in a["dias_admisibles"]:
-                continue
-            if not _compatible_historico(a["grupo"], unidad, dia, asign, coocurrencia):
-                continue
-            destino = sorted(_sids_de_ruta(asign, unidad, dia) + list(a["miembros"]))
-            if _restriccion_violada(destino, unidad, pedidos, volumenes, coords,
-                                    vehiculos_cap, vehiculos_vol, cfg, dia=dia,
-                                    kg_mayoristas=kg_may) is not None:
-                continue
-            candidatos.append(a)
-
-        if not candidatos:
-            continue
-
-        en_casa = [a for a in candidatos
-                  if a["unidad_ref"] == unidad and a["dia_preferido"] == dia]
-        pool = en_casa or candidatos
-
         cap = _num(vehiculos_cap.get(unidad))
-        ocupado_actual = _ocupado(unidad, dia)
+        while True:
+            candidatos = []
+            for gid in sorted(asign):
+                a = asign[gid]
+                if a["grupo"] in movidos:
+                    continue
+                if (a["unidad"], a["dia"]) == (unidad, dia):
+                    continue
+                if a.get("unidad_forzada"):
+                    continue
+                if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
+                    continue
+                if dia not in a["dias_admisibles"]:
+                    continue
+                if not _compatible_historico(a["grupo"], unidad, dia, asign, coocurrencia):
+                    continue
+                destino = sorted(_sids_de_ruta(asign, unidad, dia) + list(a["miembros"]))
+                if _restriccion_violada(destino, unidad, pedidos, volumenes, coords,
+                                        vehiculos_cap, vehiculos_vol, cfg, dia=dia,
+                                        kg_mayoristas=kg_may) is not None:
+                    continue
+                candidatos.append(a)
 
-        def _kg_candidato(a):
-            return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in a["miembros"])
+            if not candidatos:
+                break
 
-        def _pct_resultante(a, _ocupado=ocupado_actual, _cap=cap):
-            return ((_ocupado + _kg_candidato(a)) / _cap) if _cap else 0.0
+            en_casa = [a for a in candidatos
+                      if a["unidad_ref"] == unidad and a["dia_preferido"] == dia]
+            pool = en_casa or candidatos
 
-        pool_ordenado = sorted(pool, key=lambda a: (-_pct_resultante(a), a["grupo"]))
-        elegido = pool_ordenado[0]
-        es_regreso = bool(en_casa)
+            ocupado_actual = _ocupado(unidad, dia)
 
-        excepciones.append({
-            "tipo": "RELLENO_CAPACIDAD_LIBRE", "grupo": elegido["grupo"],
-            "rigidez": elegido["rigidez"], "restriccion": None,
-            "desde_unidad": elegido["unidad"], "desde_dia": elegido["dia"],
-            "a_unidad": unidad, "a_dia": dia,
-            "motivo_regreso_hogar": es_regreso,
-            "motivo": f"{unidad}/{dia} con capacidad libre; se acomodó el "
-                      f"grupo {elegido['grupo']} desde "
-                      f"{elegido['unidad']}/{elegido['dia']}"
-                      + (" (regresa a su unidad/día preferido)" if es_regreso else ""),
-        })
-        elegido["unidad"] = unidad
-        elegido["dia"] = dia
-        movidos.add(elegido["grupo"])
+            def _pct_resultante(a, _ocupado=ocupado_actual, _cap=cap):
+                return ((_ocupado + _kg_candidato(a)) / _cap) if _cap else 0.0
+
+            pool_ordenado = sorted(pool, key=lambda a: (-_pct_resultante(a), a["grupo"]))
+            elegido = pool_ordenado[0]
+            es_regreso = bool(en_casa)
+
+            excepciones.append({
+                "tipo": "RELLENO_CAPACIDAD_LIBRE", "grupo": elegido["grupo"],
+                "rigidez": elegido["rigidez"], "restriccion": None,
+                "desde_unidad": elegido["unidad"], "desde_dia": elegido["dia"],
+                "a_unidad": unidad, "a_dia": dia,
+                "motivo_regreso_hogar": es_regreso,
+                "motivo": f"{unidad}/{dia} con capacidad libre; se acomodó el "
+                          f"grupo {elegido['grupo']} desde "
+                          f"{elegido['unidad']}/{elegido['dia']}"
+                          + (" (regresa a su unidad/día preferido)" if es_regreso else ""),
+            })
+            elegido["unidad"] = unidad
+            elegido["dia"] = dia
+            movidos.add(elegido["grupo"])
 
     return excepciones
 

@@ -1015,3 +1015,27 @@ def test_relleno_capacidad_sin_candidato_en_casa_maximiza_ocupacion():
     relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
     assert relleno[0]["grupo"] == 3
     assert relleno[0]["motivo_regreso_hogar"] is False
+
+
+def test_relleno_capacidad_puede_rellenar_con_mas_de_un_grupo():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V4", "dia_preferido": "JUEVES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]},
+    }
+    pedidos = {1: 100, 2: 300, 3: 300}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000, "V4": 1000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1, frozenset((2, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V1" and asign[2]["dia"] == "LUNES"
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert len(relleno) == 2
