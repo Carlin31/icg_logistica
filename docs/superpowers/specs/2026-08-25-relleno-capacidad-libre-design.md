@@ -53,6 +53,14 @@ simplemente se queda con la capacidad libre que ya tenía.
   - grupos con `unidad_forzada=True` (nunca se mueven, misma regla que
     `_asignar_unidades`).
   - el propio grupo si ya está en su ruta destino evaluada.
+  - **grupos que ya están en su propio `unidad_ref`/`dia_preferido`.**
+    Sin esta exclusión, la palanca podría sacar un grupo de su hogar
+    histórico solo para rellenar el espacio de OTRA ruta que pasa los
+    demás chequeos — exactamente lo contrario de la intención (hallazgo
+    de la fase de planeación, 2026-08-25). Solo son candidatos los grupos
+    **ya desviados** de su hogar (por sobrecupo resuelto en una palanca
+    anterior); un grupo que nunca se movió de su lugar preferido no es
+    tocado por esta palanca bajo ninguna circunstancia.
 - **Validación de cada candidato** (idéntica a las demás palancas, mismas
   funciones reutilizadas):
   1. `_compatible_historico(grupo, unidad_destino, dia_destino, asign, coocurrencia)`
@@ -115,6 +123,7 @@ para (unidad, dia) en _rutas_activas(asign) ordenadas por % ocupación ascendent
         si (a["unidad"], a["dia"]) != (unidad, dia)
         y a["grupo"] not in movidos
         y not a.get("unidad_forzada")
+        y (a["unidad"], a["dia"]) != (a["unidad_ref"], a["dia_preferido"])  # ya desviado
         y dia en a["dias_admisibles"]          # el destino debe ser admisible
         y _compatible_historico(a["grupo"], unidad, dia, asign, coocurrencia)
         y _restriccion_violada(sids_destino_actuales + a["miembros"], unidad,
@@ -182,6 +191,9 @@ contra las 9 semanas canónicas, confirmando en particular:
    nunca vista) → no se mueve nada.
 3. Ruta con espacio libre pero el único candidato que cabría tiene
    `unidad_forzada=True` → no se mueve.
+3b. Ruta con espacio libre y un grupo compatible que cabría, pero ese
+    grupo YA está en su propio `unidad_ref`/`dia_preferido` (nunca se
+    desvió) → no se mueve, aunque pasaría todos los demás chequeos.
 4. Ruta con espacio libre pero el candidato no tiene ese día en
    `dias_admisibles` → no se mueve.
 5. **Regreso a casa gana sobre maximizar %:** dos candidatos válidos caben,
