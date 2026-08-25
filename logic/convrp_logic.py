@@ -587,16 +587,33 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
         if not candidatos:
             continue
 
-        elegido = candidatos[0]
+        en_casa = [a for a in candidatos
+                  if a["unidad_ref"] == unidad and a["dia_preferido"] == dia]
+        pool = en_casa or candidatos
+
+        cap = _num(vehiculos_cap.get(unidad))
+        ocupado_actual = _ocupado(unidad, dia)
+
+        def _kg_candidato(a):
+            return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in a["miembros"])
+
+        def _pct_resultante(a, _ocupado=ocupado_actual, _cap=cap):
+            return ((_ocupado + _kg_candidato(a)) / _cap) if _cap else 0.0
+
+        pool_ordenado = sorted(pool, key=lambda a: (-_pct_resultante(a), a["grupo"]))
+        elegido = pool_ordenado[0]
+        es_regreso = bool(en_casa)
+
         excepciones.append({
             "tipo": "RELLENO_CAPACIDAD_LIBRE", "grupo": elegido["grupo"],
             "rigidez": elegido["rigidez"], "restriccion": None,
             "desde_unidad": elegido["unidad"], "desde_dia": elegido["dia"],
             "a_unidad": unidad, "a_dia": dia,
-            "motivo_regreso_hogar": False,
+            "motivo_regreso_hogar": es_regreso,
             "motivo": f"{unidad}/{dia} con capacidad libre; se acomodó el "
                       f"grupo {elegido['grupo']} desde "
-                      f"{elegido['unidad']}/{elegido['dia']}",
+                      f"{elegido['unidad']}/{elegido['dia']}"
+                      + (" (regresa a su unidad/día preferido)" if es_regreso else ""),
         })
         elegido["unidad"] = unidad
         elegido["dia"] = dia

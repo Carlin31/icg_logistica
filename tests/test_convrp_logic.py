@@ -966,3 +966,52 @@ def test_relleno_capacidad_no_mueve_grupo_que_ya_esta_en_su_hogar():
         asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
     assert asign[2]["unidad"] == "V2"              # nunca se toca: no está desviado
     assert not exc
+
+
+def test_relleno_capacidad_prioriza_regreso_a_casa_sobre_maximizar_ocupacion():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MIERCOLES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, NO es hogar de V1/LUNES, kg alto
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]}, # desviado, SÍ es hogar de V1/LUNES, kg bajo
+    }
+    pedidos = {1: 100, 2: 850, 3: 500}
+    caps = {"V1": 1000, "V2": 5000, "V3": 5000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    assert asign[2]["unidad"] == "V2" and asign[2]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert len(relleno) == 1 and relleno[0]["grupo"] == 3
+    assert relleno[0]["motivo_regreso_hogar"] is True
+
+
+def test_relleno_capacidad_sin_candidato_en_casa_maximiza_ocupacion():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, ninguno es hogar de V1/LUNES
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V4", "dia_preferido": "JUEVES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]}, # desviado, kg alto: deja mejor % en V1
+    }
+    pedidos = {1: 100, 2: 200, 3: 850}
+    caps = {"V1": 1000, "V2": 5000, "V3": 5000, "V4": 5000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert relleno[0]["grupo"] == 3
+    assert relleno[0]["motivo_regreso_hogar"] is False
