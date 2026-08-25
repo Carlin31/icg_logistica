@@ -50,6 +50,11 @@ CONVRP_VELOCIDAD_KMH = 35.0
 CONVRP_VELOCIDAD_POR_TRAMO = True
 CONVRP_DEPOT = (18.87, -96.95)
 
+# Interruptor dedicado de la Palanca 5 (relleno de capacidad libre). Permite
+# apagarla sin tocar CONVRP_ACTIVO si algo sale mal en producción -- mismo
+# patrón que REBALANCEO_GEOGRAFICO en historico_logic.py.
+CONVRP_RELLENO_CAPACIDAD = True
+
 
 def cfg_por_defecto() -> dict:
     return {
@@ -61,6 +66,7 @@ def cfg_por_defecto() -> dict:
         "velocidad_kmh": CONVRP_VELOCIDAD_KMH,
         "velocidad_por_tramo": CONVRP_VELOCIDAD_POR_TRAMO,
         "depot": CONVRP_DEPOT,
+        "relleno_capacidad": CONVRP_RELLENO_CAPACIDAD,
     }
 
 
@@ -518,6 +524,114 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
     return excepciones
 
 
+def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
+                              vehiculos_vol, cfg, kg_may):
+    """
+    Palanca 5 (último paso, después de consolidar solitarias): ninguna ruta
+    debe quedar con capacidad libre mientras exista, en otra unidad/día
+    admisible, un grupo YA DESVIADO de su propio unidad_ref/dia_preferido
+    que quepa completo -- regla de negocio del 2026-08-25, encontrada al
+    revisar un caso real: el grupo 19 (Amatitlán/Carlos A. Carrillo 2,
+    FLEXIBLE, unidad_ref F 350_1) cedía su lugar por sobrecupo en algún
+    punto del reparto (los FLEXIBLE ceden primero, ver
+    `_candidatos_a_mover`) y nada lo traía de vuelta aunque después quedara
+    espacio libre en F 350_1/MARTES, su hogar histórico.
+
+    Sólo son candidatos los grupos que YA ESTÁN DESVIADOS de su propio
+    (unidad_ref, dia_preferido) -- un grupo que nunca se movió de su lugar
+    preferido no se toca, para no sacarlo de su hogar sólo por rellenar el
+    espacio de OTRA ruta.
+
+    Recorre las rutas activas de MENOR a MAYOR % de ocupación (la más vacía
+    elige primero) y, para cada una, rellena repetidamente con el mejor
+    grupo candidato disponible hasta que ya no quepa ninguno más:
+      1. Si algún candidato tiene a esta ruta como su propio
+         unidad_ref/dia_preferido (puede volver a casa), se prefiere
+         siempre sobre cualquier otro.
+      2. Si ninguno "vuelve a casa", se elige el que deje la ocupación más
+         cerca del 100 % sin excederla.
+
+    Determinista: cada grupo se mueve como máximo UNA vez en toda la
+    pasada -- una sola pasada sobre las rutas activas, sin punto fijo,
+    mismo criterio que la Palanca 2 y `_consolidar_solitarios` para no
+    reproducir el tipo de oscilación ya documentado con mayoristas.
+    """
+    excepciones: list = []
+    coocurrencia = cfg.get("coocurrencia_grupos")
+    movidos: set = set()
+
+    def _ocupado(unidad, dia):
+        sids = _sids_de_ruta(asign, unidad, dia)
+        return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in sids)
+
+    def _ocupacion_pct(unidad, dia):
+        cap = _num(vehiculos_cap.get(unidad))
+        return (_ocupado(unidad, dia) / cap) if cap else 1.0
+
+    def _kg_candidato(a):
+        return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in a["miembros"])
+
+    orden_rutas = sorted(_rutas_activas(asign), key=lambda k: (_ocupacion_pct(*k), k))
+
+    for (unidad, dia) in orden_rutas:
+        cap = _num(vehiculos_cap.get(unidad))
+        for _ in range(len(asign) + 1):
+            candidatos = []
+            for gid in sorted(asign):
+                a = asign[gid]
+                if a["grupo"] in movidos:
+                    continue
+                if (a["unidad"], a["dia"]) == (unidad, dia):
+                    continue
+                if a.get("unidad_forzada"):
+                    continue
+                if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
+                    continue
+                if dia not in a["dias_admisibles"]:
+                    continue
+                if not _compatible_historico(a["grupo"], unidad, dia, asign, coocurrencia):
+                    continue
+                destino = sorted(_sids_de_ruta(asign, unidad, dia) + list(a["miembros"]))
+                if _restriccion_violada(destino, unidad, pedidos, volumenes, coords,
+                                        vehiculos_cap, vehiculos_vol, cfg, dia=dia,
+                                        kg_mayoristas=kg_may) is not None:
+                    continue
+                candidatos.append(a)
+
+            if not candidatos:
+                break
+
+            en_casa = [a for a in candidatos
+                      if a["unidad_ref"] == unidad and a["dia_preferido"] == dia]
+            pool = en_casa or candidatos
+
+            ocupado_actual = _ocupado(unidad, dia)
+
+            def _pct_resultante(a, _ocupado=ocupado_actual, _cap=cap):
+                return ((_ocupado + _kg_candidato(a)) / _cap) if _cap else 0.0
+
+            pool_ordenado = sorted(pool, key=lambda a: (-_pct_resultante(a), a["grupo"]))
+            elegido = pool_ordenado[0]
+            es_regreso = bool(en_casa)
+
+            excepciones.append({
+                "tipo": "RELLENO_CAPACIDAD_LIBRE", "grupo": elegido["grupo"],
+                "rigidez": elegido["rigidez"], "restriccion": None,
+                "desde_unidad": elegido["unidad"], "desde_dia": elegido["dia"],
+                "a_unidad": unidad, "a_dia": dia,
+                "motivo_regreso_hogar": es_regreso,
+                "motivo": f"{unidad}/{dia} con capacidad libre; se acomodó el "
+                          f"grupo {elegido['grupo']} desde "
+                          f"{elegido['unidad']}/{elegido['dia']}"
+                          + (" (regresa a su unidad/día preferido)" if es_regreso else ""),
+            })
+            elegido["unidad"] = unidad
+            elegido["dia"] = dia
+            movidos.add(elegido["grupo"])
+
+    return excepciones
+
+
 def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dict,
                                      plantilla: list, vehiculos_cap: dict,
                                      vehiculos_vol: dict, cfg: dict = None,
@@ -665,7 +779,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             asign[clave] = dict(
                 grupo=a["grupo"], rigidez=a["rigidez"],
                 unidad=(destino[0] if destino else unidad),
-                unidad_ref=a["unidad_ref"],
+                unidad_ref=a["unidad_ref"], unidad_forzada=a.get("unidad_forzada", False),
                 dia=(destino[1] if destino else dia), dia_preferido=a["dia_preferido"],
                 dias_admisibles=a["dias_admisibles"], miembros=sorted(separadas))
             excepciones.append({
@@ -690,6 +804,13 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
     #      que ya esté al límite de su capacidad (peso Lores + mayoristas). ──
     excepciones += _consolidar_solitarios(asign, pedidos, volumenes, coords,
                                           vehiculos_cap, vehiculos_vol, cfg, kg_may)
+
+    # ── 3c. Palanca 5: rellenar capacidad libre con grupos ya desviados de
+    #      su unidad/dia preferido, priorizando devolverlos a casa. ──
+    if cfg.get("relleno_capacidad", True):
+        excepciones += _rellenar_capacidad_libre(asign, pedidos, volumenes,
+                                                  coords, vehiculos_cap,
+                                                  vehiculos_vol, cfg, kg_may)
 
     # ── 4. Salida en el formato que consume el resto del motor ──
     groups: dict = {}

@@ -848,3 +848,353 @@ def test_dos_solitarias_compatibles_se_consolidan_entre_si():
     assert len(groups) == 1                       # una sola ruta con las dos
     assert sorted(next(iter(groups.values())), key=lambda m: m["sid"])[0]["sid"] == 1
     assert sum(len(v) for v in groups.values()) == 2
+
+
+# ══ 10. Palanca 5: relleno de capacidad libre ═══════════════════════════════
+def test_cfg_por_defecto_incluye_relleno_capacidad_activado():
+    assert cfg_por_defecto()["relleno_capacidad"] is True
+
+
+def test_relleno_capacidad_mueve_grupo_compatible_a_ruta_con_espacio():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado de su hogar V3/MARTES
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V1" and asign[2]["dia"] == "LUNES"
+    assert any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+def test_relleno_capacidad_no_mueve_sin_coocurrencia():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos={}), {})
+    assert asign[2]["unidad"] == "V2" and asign[2]["dia"] == "LUNES"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_grupo_con_unidad_forzada():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"], "unidad_forzada": True},
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_fuera_de_dias_admisibles():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["MARTES"]},          # LUNES no es admisible para él
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_si_no_cabe_por_peso():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, compatible, admisible... pero no cabe
+    }
+    pedidos = {1: 800, 2: 800, 3: 500, 4: 500}       # destino ya lleva 1600; candidato pesa 1000
+    caps = {"V1": 2000, "V2": 5000, "V3": 5000}      # 1600 + 1000 = 2600 > 2000: no cabe
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"               # no se movió: no cabía por peso
+    assert not exc
+
+
+def test_relleno_capacidad_no_mueve_grupo_que_ya_esta_en_su_hogar():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V2", "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # ya está en SU propio hogar
+    }
+    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}
+    caps = {"V1": 1000, "V2": 1000}
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"              # nunca se toca: no está desviado
+    assert not exc
+
+
+def test_relleno_capacidad_prioriza_regreso_a_casa_sobre_maximizar_ocupacion():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MIERCOLES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, NO es hogar de V1/LUNES, kg alto
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]}, # desviado, SÍ es hogar de V1/LUNES, kg bajo
+    }
+    pedidos = {1: 100, 2: 850, 3: 500}
+    caps = {"V1": 1000, "V2": 5000, "V3": 5000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    assert asign[2]["unidad"] == "V2" and asign[2]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert len(relleno) == 1 and relleno[0]["grupo"] == 3
+    assert relleno[0]["motivo_regreso_hogar"] is True
+
+
+def test_relleno_capacidad_sin_candidato_en_casa_maximiza_ocupacion():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, ninguno es hogar de V1/LUNES
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V4", "dia_preferido": "JUEVES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]}, # desviado, kg alto: deja mejor % en V1
+    }
+    pedidos = {1: 100, 2: 200, 3: 850}
+    caps = {"V1": 1000, "V2": 5000, "V3": 5000, "V4": 5000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert relleno[0]["grupo"] == 3
+    assert relleno[0]["motivo_regreso_hogar"] is False
+
+
+def test_relleno_capacidad_puede_rellenar_con_mas_de_un_grupo():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V4", "dia_preferido": "JUEVES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]},
+    }
+    pedidos = {1: 100, 2: 300, 3: 300}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000, "V4": 1000}
+    coocurrencia = {frozenset((1, 2)): 1, frozenset((1, 3)): 1, frozenset((2, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V1" and asign[2]["dia"] == "LUNES"
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert len(relleno) == 2
+
+
+def test_relleno_capacidad_cada_grupo_se_mueve_como_maximo_una_vez():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": "V2", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        3: {"grupo": 3, "unidad": "V3", "dia": "MARTES", "miembros": [3],
+            "unidad_ref": "V4", "dia_preferido": "JUEVES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"]},  # el único candidato posible
+    }
+    pedidos = {1: 100, 2: 100, 3: 300}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000, "V4": 1000}
+    coocurrencia = {frozenset((1, 3)): 1, frozenset((2, 3)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert len(relleno) == 1                          # grupo 3 sólo se mueve una vez
+    assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Integración: la Palanca 5 corre dentro de construir_groups_desde_plantilla.
+# Escenario: grupo 2 (unidad_ref="V1", inválida en esta flota -- no existe)
+# cae por defecto a V2; V3 tiene sitio de sobra. La Palanca 5 debe reubicarlo
+# y V2/LUNES debe desaparecer por completo al quedar vacía.
+# ═══════════════════════════════════════════════════════════════════════════
+def test_relleno_capacidad_integrado_rellena_y_vacia_la_ruta_origen():
+    plantilla = [
+        {"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES", "unidad_ref": "V3",
+         "sucursales": [1, 4], "dias_admisibles": ["LUNES"]},
+        {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "V1",
+         "sucursales": [2, 3], "dias_admisibles": ["LUNES"]},
+    ]
+    # "V1" no existe en la flota: grupo 2 cae por defecto a otra unidad y
+    # queda "desviado" desde el arranque, sin necesidad de simular sobrecupo.
+    pedidos = {1: 50, 4: 50, 2: 150, 3: 150}
+    caps = {"V2": 1000, "V3": 1000}
+    vols = {"V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert ("V2", "LUNES") not in groups            # la ruta origen se vació
+    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [1, 2, 3, 4]
+    assert any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+def test_relleno_capacidad_desactivado_no_cambia_nada():
+    plantilla = [
+        {"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES", "unidad_ref": "V3",
+         "sucursales": [1, 4], "dias_admisibles": ["LUNES"]},
+        {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "V1",
+         "sucursales": [2, 3], "dias_admisibles": ["LUNES"]},
+    ]
+    pedidos = {1: 50, 4: 50, 2: 150, 3: 150}
+    caps = {"V2": 1000, "V3": 1000}
+    vols = {"V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols,
+        _sin_tiempo(relleno_capacidad=False))
+    assert ("V2", "LUNES") in groups                 # ya NO se rellena
+    assert not any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Regresión — inspirada en el caso real que motivó esta palanca: la logística
+# del 24-28 de agosto 2026 mostraba F 350_1/MARTES con sólo 2,318 de 3,900 kg
+# (59 %) mientras el grupo 19 (Amatitlán + Carlos A. Carrillo 2, FLEXIBLE,
+# hogar histórico F 350_1) no aparecía ahí. Este fixture usa pesos pequeños
+# (no los kg reales del reporte) elegidos para que grupo19 -- con
+# `unidad_ref` inválida en esta flota -- se procese ANTES que el grupo ancla
+# en la pasada de reparto (más pesado primero) y caiga en la unidad de
+# respaldo por desempate alfabético; el ancla reclama F 350_1 normalmente.
+# Así queda "desviado" desde el arranque sin necesitar simular sobrecupo, y
+# la Palanca 5 debe traerlo de vuelta a F 350_1/MARTES, vaciando el respaldo.
+# ═══════════════════════════════════════════════════════════════════════════
+def test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo():
+    plantilla = [
+        {"grupo": 30, "rigidez": "RIGIDO", "dia": "MARTES", "unidad_ref": "F350_1",
+         "sucursales": [101, 102], "dias_admisibles": ["MARTES"]},   # ancla
+        {"grupo": 19, "rigidez": "FLEXIBLE", "dia": "MARTES", "unidad_ref": "NO_ASIGNADA",
+         "sucursales": [86, 100], "dias_admisibles": ["MARTES"]},    # Amatitlán + Carrillo 2
+    ]
+    pedidos = {101: 150, 102: 150,      # grupo 30 (ancla) = 300
+               86: 250, 100: 250}       # grupo 19 = 500, procesa primero (más pesado)
+    caps = {"F350_1": 3900, "AUX20": 3900}   # "AUX20" < "F350_1" alfabéticamente
+    vols = {"F350_1": 99, "AUX20": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("F350_1", "MARTES")]) == [86, 100, 101, 102]
+    assert ("AUX20", "MARTES") not in groups
+    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
+    assert relleno and relleno[0]["grupo"] == 19
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Regresión — revisión final halló que el fragmento "pelado" por la Palanca 3
+# (partición por sobrecupo) nunca copiaba `unidad_forzada` al construir su
+# propio registro en `asign` (línea ~779 de `construir_groups_desde_plantilla`).
+# Antes de la Palanca 5 eso era inerte -- ningún consumidor posterior a la
+# Palanca 1 miraba `unidad_forzada`. La Palanca 5 es la primera que sí lo
+# consulta (`if a.get("unidad_forzada"): continue`), así que un fragmento
+# partido de un grupo forzado podía terminar movido a una unidad ajena por la
+# Palanca 5, violando la regla de negocio del incidente 2026-08-12 (ver
+# comentario en `_asignar_unidades`, ~línea 318).
+#
+# Fixture: grupo 1 (RIGIDO, `unidad_forzada=True`, hogar V1) pesa 1200 kg
+# contra un V1 de 1000 kg -- debe partirse. Se pela la sucursal más pesada
+# (1, 600 kg); lo que queda (2 y 3, 600 kg) cabe en V1 y se queda ahí (nunca
+# se le quita la unidad forzada al remanente). El fragmento pelado (sólo la
+# sucursal 1, 600 kg) no cabe de vuelta en V1 (600+600=1200 > 1000), así que
+# la partición lo reubica en V2 (700 kg de cupo, alfabéticamente la primera
+# alternativa con espacio). V3 (grupo 2, 50 kg sobre 5000 de cupo) queda
+# como la ruta MÁS VACÍA del día -- exactamente el tipo de ruta que la
+# Palanca 5 procesa primero buscando qué acomodar. El fragmento en V2 es un
+# candidato que ENCAJA en V3 sin problema y cuyo `unidad_ref` es V1 (no V3,
+# no es "volver a casa" tampoco) -- si `unidad_forzada` se perdiera, sería el
+# único candidato disponible y la Palanca 5 lo movería a V3 sin dudar.
+# `coocurrencia_grupos=None` (default) para que `_compatible_historico` nunca
+# bloquee nada -- así el único freno posible es `unidad_forzada`.
+def test_relleno_capacidad_respeta_unidad_forzada_en_fragmento_partido():
+    plantilla = [
+        _grupo(1, "RIGIDO", "LUNES", [1, 2, 3], unidad_ref="V1",
+              dias_admisibles=["LUNES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [10, 11], unidad_ref="V3",
+              dias_admisibles=["LUNES"]),
+        _grupo(3, "FLEXIBLE", "LUNES", [20, 21], unidad_ref="V2",
+              dias_admisibles=["LUNES"]),
+    ]
+    plantilla[0]["unidad_forzada"] = True
+    pedidos = {1: 600, 2: 500, 3: 100,      # grupo 1: 1200 > cap V1 (1000)
+               10: 25, 11: 25,               # grupo 2: 50, ruta V3 casi vacía
+               20: 25, 21: 25}               # grupo 3: 50, ya ocupa parte de V2
+    caps = {"V1": 1000, "V2": 700, "V3": 5000}
+    vols = {"V1": 99, "V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"]
+    assert part and part[0]["grupo"] == 1
+    assert part[0]["sucursales_separadas"] == [1]
+    assert part[0]["destino_unidad"] == "V2"          # así lo reubicó la partición
+
+    # la sucursal 1 (el fragmento forzado) debe seguir exactamente donde la
+    # partición la dejó -- la Palanca 5 NUNCA debe moverla, aunque V3 esté
+    # casi vacía y el fragmento encajaría ahí sin problema.
+    ubicacion = next((clave for clave, ms in groups.items()
+                      if any(m["sid"] == 1 for m in ms)), None)
+    assert ubicacion == ("V2", "LUNES")
+    assert ("V3", "LUNES") in groups
+    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [10, 11]
+
+    # ninguna excepción de la Palanca 5 debe tocar al grupo 1 (ni su
+    # remanente, que ya está en casa, ni el fragmento, que está forzado)
+    assert not [e for e in exc
+               if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" and e["grupo"] == 1]
