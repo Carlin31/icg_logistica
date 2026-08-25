@@ -930,6 +930,25 @@ def test_relleno_capacidad_no_mueve_fuera_de_dias_admisibles():
     assert not exc
 
 
+def test_relleno_capacidad_no_mueve_si_no_cabe_por_peso():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": "V1", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"]},
+        2: {"grupo": 2, "unidad": "V2", "dia": "LUNES", "miembros": [3, 4],
+            "unidad_ref": "V3", "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"]},           # desviado, compatible, admisible... pero no cabe
+    }
+    pedidos = {1: 800, 2: 800, 3: 500, 4: 500}       # destino ya lleva 1600; candidato pesa 1000
+    caps = {"V1": 2000, "V2": 5000, "V3": 5000}      # 1600 + 1000 = 2600 > 2000: no cabe
+    coocurrencia = {frozenset((1, 2)): 1}
+    exc = _rellenar_capacidad_libre(
+        asign, pedidos, {}, {}, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[2]["unidad"] == "V2"               # no se movió: no cabía por peso
+    assert not exc
+
+
 def test_relleno_capacidad_no_mueve_grupo_que_ya_esta_en_su_hogar():
     from logic.convrp_logic import _rellenar_capacidad_libre
     asign = {
