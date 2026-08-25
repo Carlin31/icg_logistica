@@ -1135,3 +1135,66 @@ def test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo():
     assert ("AUX20", "MARTES") not in groups
     relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
     assert relleno and relleno[0]["grupo"] == 19
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Regresión — revisión final halló que el fragmento "pelado" por la Palanca 3
+# (partición por sobrecupo) nunca copiaba `unidad_forzada` al construir su
+# propio registro en `asign` (línea ~779 de `construir_groups_desde_plantilla`).
+# Antes de la Palanca 5 eso era inerte -- ningún consumidor posterior a la
+# Palanca 1 miraba `unidad_forzada`. La Palanca 5 es la primera que sí lo
+# consulta (`if a.get("unidad_forzada"): continue`), así que un fragmento
+# partido de un grupo forzado podía terminar movido a una unidad ajena por la
+# Palanca 5, violando la regla de negocio del incidente 2026-08-12 (ver
+# comentario en `_asignar_unidades`, ~línea 318).
+#
+# Fixture: grupo 1 (RIGIDO, `unidad_forzada=True`, hogar V1) pesa 1200 kg
+# contra un V1 de 1000 kg -- debe partirse. Se pela la sucursal más pesada
+# (1, 600 kg); lo que queda (2 y 3, 600 kg) cabe en V1 y se queda ahí (nunca
+# se le quita la unidad forzada al remanente). El fragmento pelado (sólo la
+# sucursal 1, 600 kg) no cabe de vuelta en V1 (600+600=1200 > 1000), así que
+# la partición lo reubica en V2 (700 kg de cupo, alfabéticamente la primera
+# alternativa con espacio). V3 (grupo 2, 50 kg sobre 5000 de cupo) queda
+# como la ruta MÁS VACÍA del día -- exactamente el tipo de ruta que la
+# Palanca 5 procesa primero buscando qué acomodar. El fragmento en V2 es un
+# candidato que ENCAJA en V3 sin problema y cuyo `unidad_ref` es V1 (no V3,
+# no es "volver a casa" tampoco) -- si `unidad_forzada` se perdiera, sería el
+# único candidato disponible y la Palanca 5 lo movería a V3 sin dudar.
+# `coocurrencia_grupos=None` (default) para que `_compatible_historico` nunca
+# bloquee nada -- así el único freno posible es `unidad_forzada`.
+def test_relleno_capacidad_respeta_unidad_forzada_en_fragmento_partido():
+    plantilla = [
+        _grupo(1, "RIGIDO", "LUNES", [1, 2, 3], unidad_ref="V1",
+              dias_admisibles=["LUNES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [10, 11], unidad_ref="V3",
+              dias_admisibles=["LUNES"]),
+        _grupo(3, "FLEXIBLE", "LUNES", [20, 21], unidad_ref="V2",
+              dias_admisibles=["LUNES"]),
+    ]
+    plantilla[0]["unidad_forzada"] = True
+    pedidos = {1: 600, 2: 500, 3: 100,      # grupo 1: 1200 > cap V1 (1000)
+               10: 25, 11: 25,               # grupo 2: 50, ruta V3 casi vacía
+               20: 25, 21: 25}               # grupo 3: 50, ya ocupa parte de V2
+    caps = {"V1": 1000, "V2": 700, "V3": 5000}
+    vols = {"V1": 99, "V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"]
+    assert part and part[0]["grupo"] == 1
+    assert part[0]["sucursales_separadas"] == [1]
+    assert part[0]["destino_unidad"] == "V2"          # así lo reubicó la partición
+
+    # la sucursal 1 (el fragmento forzado) debe seguir exactamente donde la
+    # partición la dejó -- la Palanca 5 NUNCA debe moverla, aunque V3 esté
+    # casi vacía y el fragmento encajaría ahí sin problema.
+    ubicacion = next((clave for clave, ms in groups.items()
+                      if any(m["sid"] == 1 for m in ms)), None)
+    assert ubicacion == ("V2", "LUNES")
+    assert ("V3", "LUNES") in groups
+    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [10, 11]
+
+    # ninguna excepción de la Palanca 5 debe tocar al grupo 1 (ni su
+    # remanente, que ya está en casa, ni el fragmento, que está forzado)
+    assert not [e for e in exc
+               if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" and e["grupo"] == 1]

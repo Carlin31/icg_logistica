@@ -779,7 +779,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             asign[clave] = dict(
                 grupo=a["grupo"], rigidez=a["rigidez"],
                 unidad=(destino[0] if destino else unidad),
-                unidad_ref=a["unidad_ref"],
+                unidad_ref=a["unidad_ref"], unidad_forzada=a.get("unidad_forzada", False),
                 dia=(destino[1] if destino else dia), dia_preferido=a["dia_preferido"],
                 dias_admisibles=a["dias_admisibles"], miembros=sorted(separadas))
             excepciones.append({
