@@ -45,8 +45,16 @@ secuenciado que ya comparten.
   mismo criterio de reemplazo no acumulativo que el resto del proyecto.
   `scripts/crear_orden_fijo_paradas.py` crea la tabla si no existe (patrón
   de `crear_plantilla_canonica.py`).
-- **Regla inicial** (`cosamaloapan_carrillo_amatitlan`): sucursales 4, 27,
-  75, 86, 49, 100 → posiciones 1-6, en ese orden.
+- **Reglas iniciales** (dos, ambas en el mismo CSV/tabla):
+  - `cosamaloapan_carrillo_amatitlan` (F 350_1/MARTES): sucursales 4, 27,
+    75, 86, 49, 100 → posiciones 1-6, en ese orden.
+  - `tuxtepec_f350_2` (F 350_2/MARTES): sucursales 2, 31, 74, 55, 7, 54, 15
+    (Tuxtepec 1-Centro, Tuxtepec 4-Hidalgo, San Bartolo, Tuxtepec 7-Hacienda,
+    Tuxtepec 2-Boulevar, Jardines del Arroyo, Tuxtepec 3-Independencia) →
+    posiciones 1-7, en ese orden. Verificado contra `rutas_historicas_visitas`:
+    estas 7 sucursales solo coinciden completas en `F 350_2/MARTES` (ninguna
+    otra combinación vehículo/día las junta a las 7), y el orden pedido es
+    consistente con el patrón histórico agregado.
 - **Aplicación — un único punto, compartido por los dos motores**: en
   `historico_logic.py`, justo antes de llamar a
   `ordenar_paradas_por_historico(miembros, coords_dict)` (dentro del bucle
@@ -111,3 +119,7 @@ secuenciado que ya comparten.
 7. Regresión con los datos reales de la regla `cosamaloapan_carrillo_amatitlan`
    (4, 27, 75, 86, 49, 100 → posiciones 1-6) confirmando el orden exacto
    pedido por el usuario.
+8. Regresión con los datos reales de la regla `tuxtepec_f350_2`
+   (2, 31, 74, 55, 7, 54, 15 → posiciones 1-7) confirmando el orden exacto
+   pedido por el usuario, y que ambas reglas conviven sin interferirse en
+   la misma tabla/carga.
