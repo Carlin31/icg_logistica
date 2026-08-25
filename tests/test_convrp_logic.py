@@ -1062,3 +1062,45 @@ def test_relleno_capacidad_cada_grupo_se_mueve_como_maximo_una_vez():
     relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
     assert len(relleno) == 1                          # grupo 3 sólo se mueve una vez
     assert asign[3]["unidad"] == "V1" and asign[3]["dia"] == "LUNES"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Integración: la Palanca 5 corre dentro de construir_groups_desde_plantilla.
+# Escenario: grupo 2 (unidad_ref="V1", inválida en esta flota -- no existe)
+# cae por defecto a V2; V3 tiene sitio de sobra. La Palanca 5 debe reubicarlo
+# y V2/LUNES debe desaparecer por completo al quedar vacía.
+# ═══════════════════════════════════════════════════════════════════════════
+def test_relleno_capacidad_integrado_rellena_y_vacia_la_ruta_origen():
+    plantilla = [
+        {"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES", "unidad_ref": "V3",
+         "sucursales": [1, 4], "dias_admisibles": ["LUNES"]},
+        {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "V1",
+         "sucursales": [2, 3], "dias_admisibles": ["LUNES"]},
+    ]
+    # "V1" no existe en la flota: grupo 2 cae por defecto a otra unidad y
+    # queda "desviado" desde el arranque, sin necesidad de simular sobrecupo.
+    pedidos = {1: 50, 4: 50, 2: 150, 3: 150}
+    caps = {"V2": 1000, "V3": 1000}
+    vols = {"V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert ("V2", "LUNES") not in groups            # la ruta origen se vació
+    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [1, 2, 3, 4]
+    assert any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+
+
+def test_relleno_capacidad_desactivado_no_cambia_nada():
+    plantilla = [
+        {"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES", "unidad_ref": "V3",
+         "sucursales": [1, 4], "dias_admisibles": ["LUNES"]},
+        {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "V1",
+         "sucursales": [2, 3], "dias_admisibles": ["LUNES"]},
+    ]
+    pedidos = {1: 50, 4: 50, 2: 150, 3: 150}
+    caps = {"V2": 1000, "V3": 1000}
+    vols = {"V2": 99, "V3": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols,
+        _sin_tiempo(relleno_capacidad=False))
+    assert ("V2", "LUNES") in groups                 # ya NO se rellena
+    assert not any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)

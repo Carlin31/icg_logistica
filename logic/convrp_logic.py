@@ -805,6 +805,13 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
     excepciones += _consolidar_solitarios(asign, pedidos, volumenes, coords,
                                           vehiculos_cap, vehiculos_vol, cfg, kg_may)
 
+    # ── 3c. Palanca 5: rellenar capacidad libre con grupos ya desviados de
+    #      su unidad/dia preferido, priorizando devolverlos a casa. ──
+    if cfg.get("relleno_capacidad", True):
+        excepciones += _rellenar_capacidad_libre(asign, pedidos, volumenes,
+                                                  coords, vehiculos_cap,
+                                                  vehiculos_vol, cfg, kg_may)
+
     # ── 4. Salida en el formato que consume el resto del motor ──
     groups: dict = {}
     for gid in sorted(asign):
