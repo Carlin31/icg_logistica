@@ -30,6 +30,17 @@ def cargar(csv_path: str = CSV_DEFAULT):
         print("CSV vacío, nada que cargar.")
         return
 
+    vistos: dict = {}
+    for f in filas:
+        otra_regla = vistos.get(f["num_tienda"])
+        if otra_regla and otra_regla != f["nombre_regla"]:
+            raise ValueError(
+                f"num_tienda {f['num_tienda']} aparece en dos reglas distintas "
+                f"({otra_regla!r} y {f['nombre_regla']!r}) -- una sucursal solo "
+                f"puede pertenecer a una regla de orden fijo a la vez."
+            )
+        vistos[f["num_tienda"]] = f["nombre_regla"]
+
     reglas = sorted({f["nombre_regla"] for f in filas})
     t = get_table("orden_fijo_paradas")
     with transaccion() as conn:

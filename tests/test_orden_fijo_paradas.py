@@ -5,6 +5,8 @@ import os
 import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import pytest
+
 from logic.orden_fijo_paradas import aplicar_orden_fijo
 
 
@@ -41,10 +43,23 @@ def test_no_aplica_con_miembros_vacios():
     assert aplicar_orden_fijo([], {4: ("regla_a", 1)}) is None
 
 
+# ── Validación de colisión de num_tienda entre reglas (scripts/cargar_orden_fijo.py) ──
+from scripts.cargar_orden_fijo import cargar
+
+
+def test_cargar_rechaza_num_tienda_en_dos_reglas_distintas(tmp_path):
+    csv_path = tmp_path / "orden_fijo_paradas_colision.csv"
+    csv_path.write_text(
+        "nombre_regla,num_tienda,posicion\n"
+        "regla_a,4,1\n"
+        "regla_b,4,1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="num_tienda 4"):
+        cargar(str(csv_path))
+
+
 # ── Integración con BD real (se salta si no hay SQL Server) ────────────────
-import pytest
-
-
 @pytest.fixture(scope="module")
 def app_ctx():
     try:

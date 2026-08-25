@@ -18,6 +18,16 @@ def obtener_orden_fijo(db) -> dict:
 
     Se llama UNA sola vez por corrida de generar_rutas_vrp_afinidad (antes
     del bucle de rutas), no por ruta -- es una tabla chica de referencia.
+
+    El dict asume que cada num_tienda pertenece a lo sumo a una regla a la
+    vez. Eso NO lo garantiza el esquema -- la PK de la tabla es compuesta
+    (nombre_regla, num_tienda), así que a nivel de BD una sucursal puede
+    legítimamente aparecer bajo más de una regla. La invariante la garantiza
+    scripts/cargar_orden_fijo.py, que rechaza (ValueError) cualquier CSV
+    donde un mismo num_tienda aparezca bajo dos nombre_regla distintos. Si
+    esa validación se saltara alguna vez y la colisión llegara a la tabla,
+    esta comprensión de dict se quedaría con la fila que el SELECT devuelva
+    al final (sin ORDER BY) de forma silenciosa.
     """
     t = get_table("orden_fijo_paradas")
     filas = db.execute(select(t.c.num_tienda, t.c.nombre_regla, t.c.posicion)).mappings().all()
