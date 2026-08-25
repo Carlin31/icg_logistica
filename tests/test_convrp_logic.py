@@ -848,3 +848,8 @@ def test_dos_solitarias_compatibles_se_consolidan_entre_si():
     assert len(groups) == 1                       # una sola ruta con las dos
     assert sorted(next(iter(groups.values())), key=lambda m: m["sid"])[0]["sid"] == 1
     assert sum(len(v) for v in groups.values()) == 2
+
+
+# ══ 10. Palanca 5: relleno de capacidad libre ═══════════════════════════════
+def test_cfg_por_defecto_incluye_relleno_capacidad_activado():
+    assert cfg_por_defecto()["relleno_capacidad"] is True
