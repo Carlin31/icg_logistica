@@ -103,6 +103,7 @@ pip-delete-this-directory.txt
 # ── Claude Code ───────────────────────────────────────────────
 .claude/
 .agents/
+.worktrees/
 
 # ── Otros ─────────────────────────────────────────────────────
 *.bak
