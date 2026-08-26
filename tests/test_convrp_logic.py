@@ -164,6 +164,46 @@ def test_unidad_forzada_ya_no_bloquea_el_reparto():
         "unidad_forzada ya no debe impedir que el grupo ceda cuando no cabe"
 
 
+def test_exclusion_tambien_aplica_en_el_ultimo_recurso():
+    # El grupo no cabe en NINGUNA unidad no excluida (pesa más que
+    # cualquiera); el último recurso (más espacio libre) debe seguir
+    # respetando la exclusión, y la pieza que la partición separa también
+    # debe reubicarse sin caer en la excluida (vía _unidad_alternativa).
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    plantilla[0]["unidades_excluidas"] = ["GRANDE"]
+    pedidos = {1: 3000, 2: 3000}                    # 6000 kg: no cabe en nadie
+    caps = {"CHICA": 1000, "GRANDE": 9000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert ("GRANDE", "LUNES") not in groups, \
+        "nunca debe asignar la unidad excluida, ni siquiera en el último recurso"
+    assert ("CHICA", "LUNES") in groups            # se parte después, pero arranca aquí
+
+
+def test_unidad_alternativa_nunca_ofrece_una_excluida():
+    from logic.convrp_logic import _unidad_alternativa
+    asign = {1: {"grupo": 1, "unidad": "ORIGEN", "dia": "LUNES", "miembros": [1],
+                "unidades_excluidas": ["PROHIBIDA"]}}
+    a = dict(grupo=2, unidad="ORIGEN", dia="LUNES", miembros=[9],
+             unidades_excluidas=["PROHIBIDA"])
+    pedidos = {9: 100}
+    caps = {"ORIGEN": 1000, "PROHIBIDA": 5000}
+    resultado = _unidad_alternativa(asign, a, pedidos, {}, {}, caps, {}, _sin_tiempo())
+    assert resultado is None, "PROHIBIDA no debió ofrecerse aunque sea la única con cupo"
+
+
+def test_unidad_alternativa_prefiere_la_de_menor_capacidad():
+    from logic.convrp_logic import _unidad_alternativa
+    asign = {}
+    a = dict(grupo=1, unidad="ORIGEN", dia="LUNES", miembros=[9],
+             unidades_excluidas=None)
+    pedidos = {9: 400}
+    caps = {"ORIGEN": 100, "CHICA": 500, "GRANDE": 5000}
+    resultado = _unidad_alternativa(asign, a, pedidos, {}, {}, caps, {}, _sin_tiempo())
+    assert resultado == "CHICA"
+
+
 # ══ 3. Palanca 1: mover de unidad dentro del mismo día ═════════════════════
 def test_sobrecupo_mueve_flexible_a_otra_unidad_del_mismo_dia():
     # V1 no aguanta los dos grupos (1200 kg > 1000); el FLEXIBLE se va a V2.

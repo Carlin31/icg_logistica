@@ -228,6 +228,12 @@ def _kg_grupo(a, pedidos):
     return sum(_num(pedidos.get(s)) for s in a["miembros"])
 
 
+def _excluida(a, unidad) -> bool:
+    """True si `unidad` está en las `unidades_excluidas` del grupo -- nunca
+    es un destino válido para él, ni siquiera en el último recurso."""
+    return unidad in (a.get("unidades_excluidas") or ())
+
+
 def _candidatos_a_mover(asign, unidad, dia, pedidos):
     """Grupos de la ruta, ordenados: FLEXIBLE antes que RIGIDO, luego el de mayor
     peso (alivia más), desempate por id de grupo ascendente."""
@@ -239,8 +245,12 @@ def _candidatos_a_mover(asign, unidad, dia, pedidos):
 
 def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
                         vehiculos_cap, vehiculos_vol, cfg):
-    """Otra unidad, MISMO día, donde el grupo quepa sin saturarla."""
-    for unidad in sorted(vehiculos_cap):
+    """Otra unidad, MISMO día, donde el grupo quepa sin saturarla. Nunca una
+    de `unidades_excluidas` del grupo; entre las que le alcanzan, prueba
+    primero la de menor capacidad."""
+    candidatas = sorted((u for u in vehiculos_cap if not _excluida(a, u)),
+                        key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
+    for unidad in candidatas:
         if unidad == a["unidad"]:
             continue
         destino = _sids_de_ruta(asign, unidad, a["dia"]) + list(a["miembros"])
@@ -293,8 +303,7 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
 
         for gid in gids:
             a = asign[gid]
-            excluidas = set(a.get("unidades_excluidas") or [])
-            candidatas = [u for u in vehiculos_cap if u not in excluidas]
+            candidatas = [u for u in vehiculos_cap if not _excluida(a, u)]
 
             compat = [u for u in candidatas if _compatible_historico(
                 a["grupo"], u, dia, asign, coocurrencia)]
@@ -417,7 +426,7 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
         activas_ese_dia = sorted({u for (u, d) in _rutas_activas(asign)
                                   if d == dia and u != unidad
                                   and u != "SIN_UNIDAD"
-                                  and u not in (a.get("unidades_excluidas") or ())})
+                                  and not _excluida(a, u)})
         candidatas = [u for u in activas_ese_dia
                      if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
         candidatas.sort(key=lambda u: (
@@ -514,7 +523,7 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
                     continue
                 if a.get("unidad_forzada"):
                     continue
-                if unidad in (a.get("unidades_excluidas") or ()):
+                if _excluida(a, unidad):
                     continue
                 if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
                     continue
