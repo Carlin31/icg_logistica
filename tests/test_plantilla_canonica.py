@@ -243,3 +243,19 @@ def test_construir_sub_rutas_agrega_24_zonas():
     grupos_especiales = {r["grupo"] for r in SUB_RUTAS_ESPECIALES}
     assert len(grupos_simples) + len(grupos_especiales) == 27
     assert not (grupos_simples & grupos_especiales)   # sin colision de numero
+
+
+def test_construir_sub_rutas_produce_27_filas_validas(app_ctx):
+    from scripts.reorganizar_zonas_2026 import construir_sub_rutas
+    sub_rutas, revisar = construir_sub_rutas()
+    assert len(sub_rutas) == 27
+    zonas = {r["zona"] for r in sub_rutas}
+    assert zonas == set(range(1, 25))
+    for r in sub_rutas:
+        assert r["rigidez"] in ("RIGIDO", "FLEXIBLE")
+        assert r["sucursales"]                    # ninguna sub-ruta vacia
+    # 101 sucursales cubiertas sin duplicados, igual que en las pruebas
+    # puramente estaticas -- aqui contra el resultado real de la derivacion
+    todas = [s for r in sub_rutas for s in r["sucursales"]]
+    assert len(todas) == 101
+    assert len(set(todas)) == 101
