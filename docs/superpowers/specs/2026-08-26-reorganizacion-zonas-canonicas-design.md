@@ -51,6 +51,52 @@ La lista del negocio usa nombres cortos/coloquiales. Se resolvieron contra
 duplicados y sin huecos — salvo la 11ª sucursal de "Tuxtepec (11)", que no
 existe todavía en el catálogo (ver Fuera de alcance).
 
+## Restricción de negocio: máximo 6 sucursales por ruta/día
+
+El negocio confirmó que **una ruta no entrega más de 6 sucursales en un día**.
+Tres zonas superan ese límite y no pueden ser una sola ruta:
+
+- **Zona 5 (Tuxtepec)**: 10 sucursales.
+- **Zona 11 (Tierra Blanca)**: 8 sucursales.
+- **Zona 22 (Santiago+San Andrés+Catemaco+Covarrubias)**: 8 sucursales — el
+  negocio no la mencionó al dar la lista, pero tiene el mismo problema.
+
+El resto de las zonas tiene ≤6 sucursales y cabe en una sola ruta (Zona 1
+queda justo en el límite, 6).
+
+Para estas tres, en vez de forzar una sola ruta "ganadora" (que violaría el
+límite), **cada zona se compone de 2 o 3 sub-rutas** — el mismo patrón que ya
+usa `plantilla_zona_mayorista` (zona → varios `grupos_lores`). Se analizó el
+histórico real (`rutas_historicas`, 13 semanas) para decidir cómo partir cada
+una:
+
+- **Zona 5 (Tuxtepec)** — patrón estable y consistente semana a semana. Se
+  reutilizan tal cual los 3 grupos viejos que ya la componían:
+  - **5A** (MARTES, FLEXIBLE, F 350_2, forzada): Tuxtepec 1,2,3,4,7 + Jardines
+    del Arroyo (6) — antes grupo 1.
+  - **5B** (JUEVES, RIGIDO, F 350_2): Tuxtepec 5,6,8 (3) — antes grupo 8.
+  - **5C** (San Bartolo solo, FLEXIBLE, sin día fijo — admite MARTES, JUEVES,
+    MIERCOLES — unidad K 16): nunca se estabilizó un día en el histórico
+    (45% jueves, 36% martes, 18% miércoles); queda igual que antes (grupo
+    37), sin forzar un día que el histórico no respalda.
+
+- **Zona 22** — patrón muy estable (11 de 13 semanas idéntico). Se reutilizan
+  los 2 grupos viejos que ya la componían, sin cambios:
+  - **22A** (MARTES, RIGIDO, F 350_3): San Andrés 1,2,3 + Catemaco 1,2 +
+    Covarrubias (6) — antes grupo 2.
+  - **22B** (MARTES, RIGIDO, T 23): Santiago Tuxtla 1,2 (2) — antes grupo 27.
+
+- **Zona 11 (Tierra Blanca)** — **sin patrón estable**: el día siempre es
+  LUNES (12 de 13 semanas), pero qué sucursales viajan juntas y en qué
+  camión cambia casi cada semana (se ha visto en T 17_1, T 17_2, T 23, K 16,
+  T 20, J 19, K 20, T 25, F 350_3 — nueve unidades distintas repartiéndose el
+  hueco disponible cada vez). No hay pareja histórica que heredar. Se parte
+  a la mitad **por número de tienda**, ambas LUNES, sin unidad de referencia
+  fija (el motor la asigna por capacidad cada semana, igual que ya ocurre de
+  facto hoy):
+  - **11A**: Tierra Blanca 1,2,3,4.
+  - **11B**: Tierra Blanca 5,6,7,8.
+
 ## Derivación de rigidez / día / unidad_ref
 
 Varias zonas nuevas fusionan sucursales que antes pertenecían a distintos
@@ -75,13 +121,13 @@ aborta, pero queda documentada para que el negocio la revise después.
 | 2 | Rodriguez 1,2; Isla 1,2,3 | g26:2, g15:3 | g15 | 60% | RIGIDO | MIERCOLES | F 350_3 | No | MIERCOLES, JUEVES |
 | 3 | Loma 1,2; Azueta | g12:3 | g12 | 100% | RIGIDO | MIERCOLES | J 18 | No | MIERCOLES, JUEVES |
 | 4 | Chacaltianguis, Tlacojalpan, Otatitlán, Papaloapan | g13:3, g36:1 | g13 | 75% | RIGIDO | JUEVES | K 16 | No | JUEVES, VIERNES |
-| 5 | Tuxtepec 1-8, Jardines del Arroyo, San Bartolo (falta 1) | g1:6, g8:3, g37:1 | g1 | 60% | FLEXIBLE | MARTES | F 350_2 | **Sí** | MARTES, MIERCOLES |
+| 5 | Tuxtepec 1-8, Jardines del Arroyo, San Bartolo (falta 1) | — | — | — | *(3 sub-rutas, ver sección arriba)* | | | | |
 | 6 | Playa 1,2; Lombardo | g24:2, g34:1 | g24 | 67% | RIGIDO | MIERCOLES | F 350_2 | No | MARTES, MIERCOLES |
 | 7 | Jalapa de Diaz 1,2 | g21:2 | g21 | 100% | RIGIDO | JUEVES | F 350_3 | No | MIERCOLES, JUEVES |
 | 8 | Chiltepec, Valle | g20:2 | g20 | 100% | RIGIDO | JUEVES | T 23 | No | JUEVES, VIERNES |
 | 9 | Tres Valles 1-4, Gabino Barreda | g7:4, g33:1 | g7 | 80% | RIGIDO | MIERCOLES | K 16 | No | MIERCOLES |
 | 10 | Temazcal, Naranjos | g22:2 | g22 | 100% | RIGIDO | JUEVES | J 19 | No | JUEVES, MIERCOLES, VIERNES |
-| **11** | Tierra Blanca 1-8 | g38:1, g29:2, g39:1, g40:1, g30:2, g41:1 | g29 | **25%** | RIGIDO | LUNES | K 16 | No | LUNES | ⚠️ REVISAR |
+| 11 | Tierra Blanca 1-8 | — | — | — | *(2 sub-rutas, ver sección arriba)* | | | | |
 | 12 | Tetela, Vicente, Acatlán | g9:3 | g9 | 100% | FLEXIBLE | MARTES | J 18 | No | MARTES |
 | 13 | Omealca, Tezonapa | g23:2 | g23 | 100% | RIGIDO | MARTES | T 17_1 | No | MARTES, MIERCOLES |
 | 14 | Yanga, Potrero, Paso del Macho | g16:3 | g16 | 100% | RIGIDO | LUNES | T 17_2 | No | LUNES |
@@ -92,20 +138,51 @@ aborta, pero queda documentada para que el negocio la revise después.
 | 19 | Carrisal, Actopan, Rinconada, Cardel | g10:3, g32:1 | g10 | 75% | RIGIDO | JUEVES | J 18 | No | VIERNES, JUEVES |
 | 20 | Úrsulo, Cempoala, Palma Sola, Emilio, Vega | g42:1, g5:4 | g5 | 80% | FLEXIBLE | JUEVES | T 17_2 | No | VIERNES, JUEVES |
 | 21 | Alvarado, Tlacotalpan, Lerdo 1,2, Cabada | g3:5 | g3 | 100% | RIGIDO | JUEVES | F 350_1 | No | JUEVES |
-| 22 | Santiago 1,2; San Andrés 1,2,3; Catemaco 1,2; Covarrubias | g27:2, g2:6 | g2 | 75% | RIGIDO | MARTES | F 350_3 | No | MARTES, JUEVES |
+| 22 | Santiago 1,2; San Andrés 1,2,3; Catemaco 1,2; Covarrubias | — | — | — | *(2 sub-rutas, ver sección arriba)* | | | | |
 | 23 | Piedras Negras, Ignacio, Tlalixcoyan | g14:3 | g14 | 100% | RIGIDO | LUNES | T 17_1 | No | LUNES |
 | 24 | Amatlán | g31:1 | g31 | 100% | FLEXIBLE | LUNES | T 25 | No | MARTES, LUNES |
 
-Zonas 2 y 5 pasan el umbral justo al 60% — no se marcan REVISAR pero quedan
-anotadas como límite.
+Zona 2 pasa el umbral justo al 60% — no se marca REVISAR pero queda anotada
+como límite.
 
 ## Persistencia
 
-Función nueva `cargar_zonas_manual()` en `logic/plantilla_canonica.py`:
+### Esquema: columna `zona` nueva en `plantilla_grupo`
 
-- Recibe la lista de 24 zonas ya resuelta (num_tienda + campos heredados)
-  como estructura Python — no hay Excel ni bridge que parsear, es dato de
-  negocio capturado a mano una sola vez.
+21 de las 24 zonas son 1 zona = 1 `grupo` (misma cardinalidad que antes). Las
+tres zonas que superan 6 sucursales (5, 11, 22) son 1 zona = 2 o 3 `grupo`
+(sub-rutas). Como `plantilla_grupo.grupo` es la PK y sigue siendo un INT
+único por fila, no puede representar "varios grupos = 1 zona" por sí solo:
+se agrega una columna nueva `zona INT NULL` a `plantilla_grupo`, con ALTER
+idempotente (mismo patrón ya usado para `unidades_afines` en
+`scripts/crear_plantilla_canonica.py::ALTERS`) — no destructivo, no obliga a
+recrear la tabla.
+
+Numeración: la sub-ruta más grande de cada zona conserva `grupo = zona`
+(21 zonas 1:1 + las 3 sub-rutas "A" de 5/11/22 = 24 números 1-24); las
+sub-rutas adicionales toman los siguientes números libres (25-28):
+
+| grupo | zona | sucursales | rigidez | día | días admisibles | unidad_ref | forzada |
+|---|---|---|---|---|---|---|---|
+| 5  | 5  | Tuxtepec 1,2,3,4,7 + Jardines del Arroyo (6) | FLEXIBLE | MARTES | MARTES, MIERCOLES | F 350_2 | **Sí** |
+| 25 | 5  | Tuxtepec 5,6,8 (3) | RIGIDO | JUEVES | JUEVES | F 350_2 | No |
+| 26 | 5  | San Bartolo (1) | FLEXIBLE | MARTES | MARTES, JUEVES, MIERCOLES | K 16 | No |
+| 11 | 11 | Tierra Blanca 1,2,3,4 | FLEXIBLE | LUNES | LUNES | *(sin preferencia)* | No |
+| 27 | 11 | Tierra Blanca 5,6,7,8 | FLEXIBLE | LUNES | LUNES | *(sin preferencia)* | No |
+| 22 | 22 | San Andrés 1,2,3 + Catemaco 1,2 + Covarrubias (6) | RIGIDO | MARTES | MARTES, JUEVES | F 350_3 | No |
+| 28 | 22 | Santiago Tuxtla 1,2 | RIGIDO | MARTES | MARTES, JUEVES | T 23 | No |
+
+Total: **28 filas en `plantilla_grupo`, 24 valores distintos de `zona`**,
+ninguna con más de 6 sucursales. Verificado por script: las 28 sub-rutas
+cubren 101/101 sucursales sin duplicados.
+
+### Función `cargar_zonas_manual()`
+
+Nueva función en `logic/plantilla_canonica.py`:
+
+- Recibe la lista de 28 sub-rutas ya resuelta (grupo, zona, num_tienda,
+  campos heredados o construidos) como estructura Python — no hay Excel ni
+  bridge que parsear, es dato de negocio capturado a mano una sola vez.
 - Escribe una **versión nueva** SOLO en `plantilla_grupo`,
   `plantilla_grupo_sucursal` y `plantilla_grupo_dia` (marca vigente=0 la
   versión anterior de esas tres tablas, inserta la nueva con vigente=1).
@@ -118,14 +195,26 @@ Función nueva `cargar_zonas_manual()` en `logic/plantilla_canonica.py`:
 - Inserta una fila nueva en `plantilla_meta` con `nota` describiendo la
   reorganización, para el rastro de auditoría (mismo patrón no-destructivo
   que ya usa `cargar_plantilla_desde_excel`).
-- El campo `grupo` en `plantilla_grupo` pasa a ser el número de zona (1-24).
+
+### Consumidores de `grupo` que deben revisarse por el cambio de cardinalidad
+
+Antes, código que agrupaba por `grupo` asumía implícitamente "1 grupo = 1
+destino de negocio". Con 3 zonas ahora partidas en sub-rutas, cualquier
+lugar que reporte o muestre resultados **por zona de negocio** (no por ruta)
+debe agregar sobre `zona`, no sobre `grupo`. Identificar estos puntos es
+tarea del plan de implementación, no de este spec — pero el ejemplo conocido
+es `plantilla_zona_mayorista.grupos_lores` (el enganche de mayoristas ya
+referencia números de grupo LORES por texto libre) y cualquier reporte/UI
+que hoy muestre "grupo N" al planeador.
 
 ## Fuera de alcance
 
 - **11ª sucursal de Tuxtepec**: no existe en `sucursales` todavía. La Zona 5
-  queda con 10. Cuando el negocio dé de alta la tienda con su `num_tienda`,
-  se agrega a `plantilla_grupo_sucursal` de la Zona 5 sin recargar todo de
-  nuevo.
+  queda con 10 repartidas en sus 3 sub-rutas (grupo 5/25/26). Cuando el
+  negocio dé de alta la tienda con su `num_tienda`, falta además decidir a
+  cuál de las 3 sub-rutas se suma (probablemente la del MARTES, grupo 5, que
+  es la más grande) — se agrega a `plantilla_grupo_sucursal` sin recargar
+  todo de nuevo.
 - **CSVs de calibración desactualizados**: `dias_admisibles_por_grupo.csv`,
   `unidad_ref_por_grupo.csv` y `grupos_unidad_forzada.csv` siguen
   referenciando la numeración vieja de 42 grupos. Son el input por defecto
@@ -134,14 +223,26 @@ Función nueva `cargar_zonas_manual()` en `logic/plantilla_canonica.py`:
   vuelve a correr ese script con un Excel canónico nuevo sin antes migrar
   esos 3 CSV a la numeración de zonas, pisaría esta reorganización. Se deja
   documentado en el docstring del script nuevo; no se resuelve aquí.
-- Zonas 11 y 17 quedan con herencia débil (25% y 50%); se escriben con la
-  regla acordada pero marcadas para revisión del negocio.
+- **Zona 17** queda con herencia débil (grupo ganador solo 50%); se escribe
+  con la regla acordada pero marcada para revisión del negocio. (Zona 11 ya
+  no aplica esta regla: se resolvió con sub-rutas, ver arriba.)
+- **Sub-rutas 11A/11B (Tierra Blanca) sin unidad de referencia**: quedan con
+  `unidad_ref = NULL` a propósito (sin patrón histórico que justifique fijar
+  una). El plan de implementación debe confirmar que el resto del motor
+  (`asignar_unidades` en `convrp_logic.py` y el resolver de
+  `unidad_ref_por_grupo.csv`) tolera un grupo sin `unidad_ref` — el campo ya
+  es `NULL`-able en el esquema, pero el comportamiento en tiempo de reparto
+  no se verificó en este spec.
 
 ## Testing
 
-- Test unitario de la función de derivación (conteo por grupo origen,
-  desempate determinista, umbral 60% → flag REVISAR) con fixtures pequeños,
-  en `tests/test_plantilla_canonica.py`.
-- Script con modo de solo-lectura que imprime la tabla zona → sucursales →
-  rigidez/día/unidad/advertencias sin escribir en BD, para revisar antes de
-  comprometer (el cálculo de este documento ya es ese modo).
+- Test unitario de la función de derivación para las 21 zonas 1:1 (conteo
+  por grupo origen, desempate determinista, umbral 60% → flag REVISAR) con
+  fixtures pequeños, en `tests/test_plantilla_canonica.py`.
+- Test unitario de que ninguna sub-ruta resultante (28 filas) supera 6
+  sucursales, y de que las 3 zonas grandes (5, 11, 22) suman exactamente sus
+  sucursales originales sin huecos ni duplicados.
+- Script con modo de solo-lectura que imprime la tabla zona → grupo →
+  sucursales → rigidez/día/unidad/advertencias sin escribir en BD, para
+  revisar antes de comprometer (el cálculo de este documento ya es ese
+  modo).
