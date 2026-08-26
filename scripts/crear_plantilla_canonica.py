@@ -35,6 +35,7 @@ from db import get_engine
 # idempotente para no obligar a recrear tablas que ya tienen datos.
 ALTERS = [
     ("plantilla_grupo", "unidades_afines", "NVARCHAR(400) NULL"),
+    ("plantilla_grupo", "zona", "INT NULL"),
 ]
 
 DDL = [
