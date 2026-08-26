@@ -83,6 +83,87 @@ def test_dos_grupos_misma_unidad_y_dia_comparten_ruta():
     assert len(groups[("V1", "LUNES")]) == 4
 
 
+# ══ 2b. Selección por peso: la más chica que alcanza, no el abecedario ═════
+def test_sin_preferencia_elige_la_unidad_mas_chica_que_alcanza():
+    # Sin unidad_ref, dos unidades de igual capacidad ordenan por nombre HOY
+    # (comportamiento viejo) -- el nuevo contrato debe elegir por CAPACIDAD
+    # ascendente cuando las capacidades difieren, no caer siempre en la
+    # primera alfabética.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 200, 2: 200}                      # 400 kg
+    caps = {"Z_CHICA": 500, "A_GRANDE": 5000}        # Z ordena después de A
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"Z_CHICA": 99, "A_GRANDE": 99},
+        _sin_tiempo())
+    assert ("Z_CHICA", "LUNES") in groups, \
+        "debió elegir la unidad más chica que alcanza (400<=500), no la más grande"
+
+
+def test_grupo_no_cabe_en_la_mas_chica_escala_a_la_siguiente():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 800, 2: 800}                      # 1600 kg
+    caps = {"CHICA": 1000, "MEDIANA": 2500, "GRANDE": 3900}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps,
+        {"CHICA": 99, "MEDIANA": 99, "GRANDE": 99}, _sin_tiempo())
+    assert ("MEDIANA", "LUNES") in groups, \
+        "no cabe en CHICA (1600>1000); debe escalar a MEDIANA, no saltar a GRANDE"
+
+
+def test_entre_misma_capacidad_gana_la_ya_cargada_ese_dia():
+    # Dos grupos, dos unidades de igual capacidad: el segundo grupo debe
+    # sumarse a la que ya lleva carga (consolidar), no abrir la vacía.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref=None),
+                 _grupo(2, "FLEXIBLE", "LUNES", [2], unidad_ref=None)]
+    pedidos = {1: 1000, 2: 100}
+    caps = {"V1": 5000, "V2": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"V1": 99, "V2": 99}, _sin_tiempo())
+    assert len(groups) == 1, "el segundo grupo debió consolidar, no abrir otra unidad"
+
+
+# ══ 2c. `unidades_excluidas`: prohibición dura, nunca se asigna en silencio ═
+def test_grupo_con_exclusion_nunca_recibe_la_unidad_excluida():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    plantilla[0]["unidades_excluidas"] = ["CHICA"]
+    pedidos = {1: 50, 2: 50}                        # 100 kg: cabría en CHICA
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert ("CHICA", "LUNES") not in groups
+    assert ("GRANDE", "LUNES") in groups
+
+
+def test_sin_unidad_disponible_cuando_la_exclusion_deja_la_flota_vacia():
+    from logic.convrp_logic import _asignar_unidades
+    asign = {1: {"grupo": 1, "unidad": None, "dia": "LUNES", "miembros": [1],
+                "unidad_ref": None, "rigidez": "FLEXIBLE",
+                "dias_admisibles": ["LUNES"], "unidades_excluidas": ["UNICA"]}}
+    pedidos = {1: 100}
+    caps = {"UNICA": 5000}                          # la única unidad de la flota, excluida
+    exc = _asignar_unidades(asign, pedidos, {}, {}, caps, {}, _sin_tiempo())
+    assert asign[1]["unidad"] == "SIN_UNIDAD"
+    assert any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
+    assert asign[1]["unidad"] != "UNICA", \
+        "nunca debe caer en la unidad excluida, ni en este caso degenerado"
+
+
+# ══ 2d. `unidad_forzada` ya no existe como concepto ════════════════════════
+def test_unidad_forzada_ya_no_bloquea_el_reparto():
+    # Antes `unidad_forzada=True` anclaba la unidad sin importar sobrecupo.
+    # Ahora el grupo se re-evalúa por peso como cualquier otro -- si no cabe,
+    # cede (y si de verdad no cabe en nadie, cae al último recurso normal).
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref=None)]
+    plantilla[0]["unidad_forzada"] = True
+    pedidos = {1: 400}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 5000},
+        {"V1": 99, "V2": 99}, _sin_tiempo(), kg_mayoristas={1: 700})  # 1100>1000: no cabe en V1
+    assert ("V2", "LUNES") in groups, \
+        "unidad_forzada ya no debe impedir que el grupo ceda cuando no cabe"
+
+
 # ══ 3. Palanca 1: mover de unidad dentro del mismo día ═════════════════════
 def test_sobrecupo_mueve_flexible_a_otra_unidad_del_mismo_dia():
     # V1 no aguanta los dos grupos (1200 kg > 1000); el FLEXIBLE se va a V2.
