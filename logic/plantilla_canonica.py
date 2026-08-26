@@ -640,7 +640,7 @@ def obtener_grupos(version: int = None) -> list:
     out = []
     for r in db.execute(sg).mappings():
         g = int(r["grupo"])
-        out.append(dict(grupo=g, rigidez=r["rigidez"], dia=r["dia"],
+        out.append(dict(grupo=g, zona=r.get("zona"), rigidez=r["rigidez"], dia=r["dia"],
                         tam=r["tam"], cohesion=r["cohesion"], unidad_ref=r["unidad_ref"],
                         unidades_afines=r.get("unidades_afines"),
                         unidad_forzada=bool(r.get("unidad_forzada")),
