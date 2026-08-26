@@ -53,22 +53,30 @@ existe todavía en el catálogo (ver Fuera de alcance).
 
 ## Restricción de negocio: máximo 6 sucursales por ruta/día
 
-El negocio confirmó que **una ruta no entrega más de 6 sucursales en un día**.
-Tres zonas superan ese límite y no pueden ser una sola ruta:
+El negocio confirmó que, como regla general, **una ruta no entrega más de 6
+sucursales en un día**. Dos zonas superan ese límite y sí necesitan partirse
+en más de una ruta:
 
 - **Zona 5 (Tuxtepec)**: 10 sucursales.
 - **Zona 11 (Tierra Blanca)**: 8 sucursales.
-- **Zona 22 (Santiago+San Andrés+Catemaco+Covarrubias)**: 8 sucursales — el
-  negocio no la mencionó al dar la lista, pero tiene el mismo problema.
+
+**Zona 22 (Santiago+San Andrés+Catemaco+Covarrubias, 8 sucursales) es una
+excepción de negocio confirmada**: estas 8 sí se entregan en una sola ruta
+pese a pasar el límite general — el negocio lo confirmó explícitamente al
+revisar el spec. El histórico ya respalda que es viable: 2 de 13 semanas
+las 8 viajaron juntas en una sola unidad (F 350_3). El resto de las semanas
+se partió en 6+2 (San Andrés/Catemaco/Covarrubias + Santiago), pero eso fue
+por conveniencia operativa de esas semanas, no por un límite duro — así que
+Zona 22 queda como **un solo grupo de 8**, no como sub-rutas.
 
 El resto de las zonas tiene ≤6 sucursales y cabe en una sola ruta (Zona 1
 queda justo en el límite, 6).
 
-Para estas tres, en vez de forzar una sola ruta "ganadora" (que violaría el
-límite), **cada zona se compone de 2 o 3 sub-rutas** — el mismo patrón que ya
-usa `plantilla_zona_mayorista` (zona → varios `grupos_lores`). Se analizó el
-histórico real (`rutas_historicas`, 13 semanas) para decidir cómo partir cada
-una:
+Para Tuxtepec y Tierra Blanca, en vez de forzar una sola ruta "ganadora" (que
+violaría el límite), **cada zona se compone de 2 o 3 sub-rutas** — el mismo
+patrón que ya usa `plantilla_zona_mayorista` (zona → varios `grupos_lores`).
+Se analizó el histórico real (`rutas_historicas`, 13 semanas) para decidir
+cómo partir cada una:
 
 - **Zona 5 (Tuxtepec)** — patrón estable y consistente semana a semana. Se
   reutilizan tal cual los 3 grupos viejos que ya la componían:
@@ -79,12 +87,6 @@ una:
     MIERCOLES — unidad K 16): nunca se estabilizó un día en el histórico
     (45% jueves, 36% martes, 18% miércoles); queda igual que antes (grupo
     37), sin forzar un día que el histórico no respalda.
-
-- **Zona 22** — patrón muy estable (11 de 13 semanas idéntico). Se reutilizan
-  los 2 grupos viejos que ya la componían, sin cambios:
-  - **22A** (MARTES, RIGIDO, F 350_3): San Andrés 1,2,3 + Catemaco 1,2 +
-    Covarrubias (6) — antes grupo 2.
-  - **22B** (MARTES, RIGIDO, T 23): Santiago Tuxtla 1,2 (2) — antes grupo 27.
 
 - **Zona 11 (Tierra Blanca)** — **sin patrón estable**: el día siempre es
   LUNES (12 de 13 semanas), pero qué sucursales viajan juntas y en qué
@@ -138,7 +140,7 @@ aborta, pero queda documentada para que el negocio la revise después.
 | 19 | Carrisal, Actopan, Rinconada, Cardel | g10:3, g32:1 | g10 | 75% | RIGIDO | JUEVES | J 18 | No | VIERNES, JUEVES |
 | 20 | Úrsulo, Cempoala, Palma Sola, Emilio, Vega | g42:1, g5:4 | g5 | 80% | FLEXIBLE | JUEVES | T 17_2 | No | VIERNES, JUEVES |
 | 21 | Alvarado, Tlacotalpan, Lerdo 1,2, Cabada | g3:5 | g3 | 100% | RIGIDO | JUEVES | F 350_1 | No | JUEVES |
-| 22 | Santiago 1,2; San Andrés 1,2,3; Catemaco 1,2; Covarrubias | — | — | — | *(2 sub-rutas, ver sección arriba)* | | | | |
+| 22 | Santiago 1,2; San Andrés 1,2,3; Catemaco 1,2; Covarrubias | g27:2, g2:6 | g2 | 75% | RIGIDO | MARTES | F 350_3 | No | MARTES, JUEVES |
 | 23 | Piedras Negras, Ignacio, Tlalixcoyan | g14:3 | g14 | 100% | RIGIDO | LUNES | T 17_1 | No | LUNES |
 | 24 | Amatlán | g31:1 | g31 | 100% | FLEXIBLE | LUNES | T 25 | No | MARTES, LUNES |
 
@@ -149,18 +151,20 @@ como límite.
 
 ### Esquema: columna `zona` nueva en `plantilla_grupo`
 
-21 de las 24 zonas son 1 zona = 1 `grupo` (misma cardinalidad que antes). Las
-tres zonas que superan 6 sucursales (5, 11, 22) son 1 zona = 2 o 3 `grupo`
-(sub-rutas). Como `plantilla_grupo.grupo` es la PK y sigue siendo un INT
-único por fila, no puede representar "varios grupos = 1 zona" por sí solo:
-se agrega una columna nueva `zona INT NULL` a `plantilla_grupo`, con ALTER
-idempotente (mismo patrón ya usado para `unidades_afines` en
+22 de las 24 zonas son 1 zona = 1 `grupo` (misma cardinalidad que antes,
+incluida la Zona 22, que queda como grupo único de 8 pese al límite general
+— ver excepción de negocio arriba). Las dos zonas que sí se parten por el
+límite de 6 (5 y 11) son 1 zona = 2 o 3 `grupo` (sub-rutas). Como
+`plantilla_grupo.grupo` es la PK y sigue siendo un INT único por fila, no
+puede representar "varios grupos = 1 zona" por sí solo: se agrega una
+columna nueva `zona INT NULL` a `plantilla_grupo`, con ALTER idempotente
+(mismo patrón ya usado para `unidades_afines` en
 `scripts/crear_plantilla_canonica.py::ALTERS`) — no destructivo, no obliga a
 recrear la tabla.
 
 Numeración: la sub-ruta más grande de cada zona conserva `grupo = zona`
-(21 zonas 1:1 + las 3 sub-rutas "A" de 5/11/22 = 24 números 1-24); las
-sub-rutas adicionales toman los siguientes números libres (25-28):
+(24 números 1-24, uno por zona); las sub-rutas adicionales de 5 y 11 toman
+los siguientes números libres (25-27):
 
 | grupo | zona | sucursales | rigidez | día | días admisibles | unidad_ref | forzada |
 |---|---|---|---|---|---|---|---|
@@ -169,18 +173,18 @@ sub-rutas adicionales toman los siguientes números libres (25-28):
 | 26 | 5  | San Bartolo (1) | FLEXIBLE | MARTES | MARTES, JUEVES, MIERCOLES | K 16 | No |
 | 11 | 11 | Tierra Blanca 1,2,3,4 | FLEXIBLE | LUNES | LUNES | *(sin preferencia)* | No |
 | 27 | 11 | Tierra Blanca 5,6,7,8 | FLEXIBLE | LUNES | LUNES | *(sin preferencia)* | No |
-| 22 | 22 | San Andrés 1,2,3 + Catemaco 1,2 + Covarrubias (6) | RIGIDO | MARTES | MARTES, JUEVES | F 350_3 | No |
-| 28 | 22 | Santiago Tuxtla 1,2 | RIGIDO | MARTES | MARTES, JUEVES | T 23 | No |
+| 22 | 22 | Santiago 1,2 + San Andrés 1,2,3 + Catemaco 1,2 + Covarrubias (8, excepción — no se parte) | RIGIDO | MARTES | MARTES, JUEVES | F 350_3 | No |
 
-Total: **28 filas en `plantilla_grupo`, 24 valores distintos de `zona`**,
-ninguna con más de 6 sucursales. Verificado por script: las 28 sub-rutas
-cubren 101/101 sucursales sin duplicados.
+Total: **27 filas en `plantilla_grupo`, 24 valores distintos de `zona`** —
+todas ≤6 sucursales salvo la Zona 22 (8, excepción de negocio confirmada).
+Verificado por script: las 27 sub-rutas cubren 101/101 sucursales sin
+duplicados.
 
 ### Función `cargar_zonas_manual()`
 
 Nueva función en `logic/plantilla_canonica.py`:
 
-- Recibe la lista de 28 sub-rutas ya resuelta (grupo, zona, num_tienda,
+- Recibe la lista de 27 sub-rutas ya resuelta (grupo, zona, num_tienda,
   campos heredados o construidos) como estructura Python — no hay Excel ni
   bridge que parsear, es dato de negocio capturado a mano una sola vez.
 - Escribe una **versión nueva** SOLO en `plantilla_grupo`,
@@ -239,9 +243,10 @@ que hoy muestre "grupo N" al planeador.
 - Test unitario de la función de derivación para las 21 zonas 1:1 (conteo
   por grupo origen, desempate determinista, umbral 60% → flag REVISAR) con
   fixtures pequeños, en `tests/test_plantilla_canonica.py`.
-- Test unitario de que ninguna sub-ruta resultante (28 filas) supera 6
-  sucursales, y de que las 3 zonas grandes (5, 11, 22) suman exactamente sus
-  sucursales originales sin huecos ni duplicados.
+- Test unitario de que ninguna sub-ruta resultante (27 filas) supera 6
+  sucursales salvo la Zona 22 (8, excepción de negocio confirmada), y de que
+  las 3 zonas grandes (5, 11, 22) suman exactamente sus sucursales
+  originales sin huecos ni duplicados.
 - Script con modo de solo-lectura que imprime la tabla zona → grupo →
   sucursales → rigidez/día/unidad/advertencias sin escribir en BD, para
   revisar antes de comprometer (el cálculo de este documento ya es ese
