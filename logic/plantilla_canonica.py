@@ -490,6 +490,44 @@ def cargar_plantilla_desde_excel(xlsx_path: str, bridge_csv: str = None,
     }
 
 
+def derivar_grupo_zona(sucursales: list, grupo_de_sucursal: dict,
+                       grupos_por_id: dict, umbral: float = 0.60) -> dict:
+    """
+    Deriva rigidez/día/unidad_ref de una zona nueva que fusiona sucursales de
+    varios `grupo` LORES viejos: hereda TODOS los valores calibrados del
+    grupo que más sucursales le aportó a la zona. Empate -> gana el grupo de
+    número más bajo (determinista).
+
+    Si el grupo ganador cubre menos del `umbral` (60% por defecto, mismo
+    criterio que `confianza_zona()` usa para "confianza BAJA" en
+    enganche_zona.py) de las sucursales de la zona, `revisar=True`: se
+    devuelve igual, no se aborta, pero queda marcada para que el negocio la
+    revise.
+
+    sucursales        : [num_tienda,...] de la zona nueva.
+    grupo_de_sucursal : {num_tienda: grupo_id} del catálogo VIEJO vigente.
+    grupos_por_id     : {grupo_id: {rigidez, dia, dia_preferido, unidad_ref,
+                         unidades_afines, unidad_forzada, dias_admisibles}}
+                        -- p. ej. {g["grupo"]: g for g in obtener_grupos()}.
+    """
+    from collections import Counter
+    cnt = Counter(grupo_de_sucursal.get(s) for s in sucursales)
+    total = len(sucursales) or 1
+    ganador, veces = sorted(
+        cnt.items(), key=lambda kv: (-kv[1], kv[0] if kv[0] is not None else 10**9)
+    )[0]
+    pct = veces / total
+    info = grupos_por_id.get(ganador, {})
+    return dict(
+        grupo_origen=ganador, pct=pct, revisar=pct < umbral,
+        rigidez=info.get("rigidez"), dia=info.get("dia"),
+        dia_preferido=info.get("dia_preferido"), unidad_ref=info.get("unidad_ref"),
+        unidades_afines=info.get("unidades_afines"),
+        unidad_forzada=bool(info.get("unidad_forzada")),
+        dias_admisibles=info.get("dias_admisibles") or [],
+    )
+
+
 def _hash_archivo(path: str) -> str:
     try:
         with open(path, "rb") as fh:

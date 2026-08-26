@@ -159,3 +159,53 @@ def test_roundtrip_lectura_bd(app_ctx):
     for g in grupos:
         assert g["dias_admisibles"], f"grupo {g['grupo']} sin días admisibles"
         assert g["dia_preferido"] in g["dias_admisibles"]
+
+
+# ── derivación de rigidez/día/unidad para zonas que fusionan grupos viejos ──
+def _grupo_info(rigidez, dia, unidad_ref, dias_admisibles, forzada=False):
+    return dict(rigidez=rigidez, dia=dia, dia_preferido=dia,
+                unidad_ref=unidad_ref, unidades_afines=None,
+                unidad_forzada=forzada, dias_admisibles=dias_admisibles)
+
+
+def test_derivar_grupo_zona_gana_mayoria_clara():
+    from logic.plantilla_canonica import derivar_grupo_zona
+    grupo_de_sucursal = {1: 10, 2: 10, 3: 10, 4: 10, 5: 20, 6: 20}
+    grupos_por_id = {
+        10: _grupo_info("RIGIDO", "MARTES", "F 350_1", ["MARTES"], forzada=True),
+        20: _grupo_info("FLEXIBLE", "JUEVES", "F 350_2", ["JUEVES"]),
+    }
+    d = derivar_grupo_zona([1, 2, 3, 4, 5, 6], grupo_de_sucursal, grupos_por_id)
+    assert d["grupo_origen"] == 10
+    assert d["pct"] == pytest.approx(4 / 6)
+    assert d["revisar"] is False
+    assert d["rigidez"] == "RIGIDO"
+    assert d["unidad_ref"] == "F 350_1"
+    assert d["unidad_forzada"] is True
+
+
+def test_derivar_grupo_zona_empate_gana_menor_numero():
+    from logic.plantilla_canonica import derivar_grupo_zona
+    grupo_de_sucursal = {1: 20, 2: 20, 3: 20, 4: 10, 5: 10, 6: 10}
+    grupos_por_id = {
+        10: _grupo_info("RIGIDO", "LUNES", "K 16", ["LUNES"]),
+        20: _grupo_info("FLEXIBLE", "MARTES", "T 20", ["MARTES"]),
+    }
+    d = derivar_grupo_zona([1, 2, 3, 4, 5, 6], grupo_de_sucursal, grupos_por_id)
+    assert d["grupo_origen"] == 10          # empate 3-3, gana el numero mas bajo
+    assert d["pct"] == pytest.approx(0.5)
+
+
+def test_derivar_grupo_zona_bajo_umbral_marca_revisar():
+    from logic.plantilla_canonica import derivar_grupo_zona
+    grupo_de_sucursal = {1: 10, 2: 20, 3: 30, 4: 40}
+    grupos_por_id = {
+        10: _grupo_info("RIGIDO", "LUNES", "K 16", ["LUNES"]),
+        20: _grupo_info("RIGIDO", "LUNES", "T 20", ["LUNES"]),
+        30: _grupo_info("FLEXIBLE", "LUNES", "T 23", ["LUNES"]),
+        40: _grupo_info("FLEXIBLE", "LUNES", "T 25", ["LUNES"]),
+    }
+    d = derivar_grupo_zona([1, 2, 3, 4], grupo_de_sucursal, grupos_por_id)
+    assert d["grupo_origen"] == 10
+    assert d["pct"] == 0.25
+    assert d["revisar"] is True
