@@ -1279,3 +1279,59 @@ def test_relleno_capacidad_respeta_unidad_forzada_en_fragmento_partido():
     # remanente, que ya está en casa, ni el fragmento, que está forzado)
     assert not [e for e in exc
                if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" and e["grupo"] == 1]
+
+
+def test_consolidar_solitarios_nunca_mueve_a_unidad_excluida():
+    from logic.convrp_logic import _consolidar_solitarios
+    asign = {
+        1: {"grupo": 1, "unidad": "CHICA", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": None, "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"], "unidades_excluidas": ["GRANDE"]},
+        2: {"grupo": 2, "unidad": "GRANDE", "dia": "LUNES", "miembros": [2, 3],
+            "unidad_ref": None, "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"], "unidades_excluidas": []},
+    }
+    pedidos = {1: 100, 2: 200, 3: 200}
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    coocurrencia = {frozenset((1, 2)): 1}      # compatibles: aisla SOLO la exclusion
+    exc = _consolidar_solitarios(asign, pedidos, {}, {}, caps, {},
+                                 _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[1]["unidad"] == "CHICA", \
+        "nunca debe consolidar en GRANDE (excluida para el grupo 1)"
+    assert not any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
+
+
+def test_relleno_capacidad_nunca_mueve_a_unidad_excluida():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "CHICA", "dia": "LUNES", "miembros": [1, 2],
+            "unidad_ref": None, "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"], "unidades_excluidas": ["GRANDE"]},
+        2: {"grupo": 2, "unidad": "GRANDE", "dia": "LUNES", "miembros": [3],
+            "unidad_ref": "GRANDE", "dia_preferido": "LUNES", "rigidez": "RIGIDO",
+            "dias_admisibles": ["LUNES"], "unidades_excluidas": []},
+    }
+    pedidos = {1: 100, 2: 100, 3: 100}
+    caps = {"CHICA": 1000, "GRANDE": 5000}      # GRANDE con mucho espacio libre
+    coocurrencia = {frozenset((1, 2)): 3}       # compatibles: aisla SOLO la exclusion
+    exc = _rellenar_capacidad_libre(asign, pedidos, {}, {}, caps, {},
+                                    _sin_tiempo(coocurrencia_grupos=coocurrencia), {})
+    assert asign[1]["unidad"] == "CHICA", \
+        "nunca debe rellenar GRANDE con el grupo 1 (excluida para ese grupo)"
+
+
+def test_relleno_capacidad_nunca_ofrece_sin_unidad_como_destino():
+    from logic.convrp_logic import _rellenar_capacidad_libre
+    asign = {
+        1: {"grupo": 1, "unidad": "SIN_UNIDAD", "dia": "LUNES", "miembros": [1],
+            "unidad_ref": None, "dia_preferido": "LUNES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES"], "unidades_excluidas": []},
+        2: {"grupo": 2, "unidad": "CHICA", "dia": "LUNES", "miembros": [2],
+            "unidad_ref": None, "dia_preferido": "MARTES", "rigidez": "FLEXIBLE",
+            "dias_admisibles": ["LUNES", "MARTES"], "unidades_excluidas": []},
+    }
+    pedidos = {1: 100, 2: 100}
+    caps = {"CHICA": 1000}                      # "SIN_UNIDAD" no está en caps a propósito
+    exc = _rellenar_capacidad_libre(asign, pedidos, {}, {}, caps, {}, _sin_tiempo(), {})
+    assert asign[2]["unidad"] != "SIN_UNIDAD", \
+        "SIN_UNIDAD nunca debe tratarse como una ruta real con espacio libre"

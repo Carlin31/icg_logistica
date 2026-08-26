@@ -415,7 +415,9 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
         # para esto), compatibles por historial, ordenadas por carga
         # descendente (consolidar en la más llena que todavía quepa).
         activas_ese_dia = sorted({u for (u, d) in _rutas_activas(asign)
-                                  if d == dia and u != unidad})
+                                  if d == dia and u != unidad
+                                  and u != "SIN_UNIDAD"
+                                  and u not in (a.get("unidades_excluidas") or ())})
         candidatas = [u for u in activas_ese_dia
                      if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
         candidatas.sort(key=lambda u: (
@@ -497,7 +499,8 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
     def _kg_candidato(a):
         return sum(_num(pedidos.get(s)) + _num(kg_may.get(s)) for s in a["miembros"])
 
-    orden_rutas = sorted(_rutas_activas(asign), key=lambda k: (_ocupacion_pct(*k), k))
+    orden_rutas = sorted((k for k in _rutas_activas(asign) if k[0] != "SIN_UNIDAD"),
+                        key=lambda k: (_ocupacion_pct(*k), k))
 
     for (unidad, dia) in orden_rutas:
         cap = _num(vehiculos_cap.get(unidad))
@@ -510,6 +513,8 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
                 if (a["unidad"], a["dia"]) == (unidad, dia):
                     continue
                 if a.get("unidad_forzada"):
+                    continue
+                if unidad in (a.get("unidades_excluidas") or ()):
                     continue
                 if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]):
                     continue
