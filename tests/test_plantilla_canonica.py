@@ -209,3 +209,37 @@ def test_derivar_grupo_zona_bajo_umbral_marca_revisar():
     assert d["grupo_origen"] == 10
     assert d["pct"] == 0.25
     assert d["revisar"] is True
+
+
+# ── datos estaticos de la reorganizacion de zonas 2026-08 (sin BD) ─────────
+def test_zonas_cubren_101_sucursales_sin_duplicados():
+    from scripts.reorganizar_zonas_2026 import ZONAS_SIMPLES, SUB_RUTAS_ESPECIALES
+    todos = [s for sucs in ZONAS_SIMPLES.values() for s in sucs]
+    todos += [s for r in SUB_RUTAS_ESPECIALES for s in r["sucursales"]]
+    assert len(todos) == 101
+    assert len(set(todos)) == 101
+
+
+def test_solo_zona_22_supera_6_sucursales():
+    from scripts.reorganizar_zonas_2026 import ZONAS_SIMPLES, SUB_RUTAS_ESPECIALES
+    for zona, sucs in ZONAS_SIMPLES.items():
+        limite = 8 if zona == 22 else 6
+        assert len(sucs) <= limite, f"zona {zona} tiene {len(sucs)} sucursales"
+    for r in SUB_RUTAS_ESPECIALES:
+        assert len(r["sucursales"]) <= 6, r
+
+
+def test_sub_rutas_especiales_grupo_y_zona():
+    from scripts.reorganizar_zonas_2026 import SUB_RUTAS_ESPECIALES
+    por_grupo = {r["grupo"]: r["zona"] for r in SUB_RUTAS_ESPECIALES}
+    assert por_grupo == {5: 5, 25: 5, 26: 5, 11: 11, 27: 11}
+
+
+def test_construir_sub_rutas_agrega_24_zonas():
+    from scripts.reorganizar_zonas_2026 import ZONAS_SIMPLES, SUB_RUTAS_ESPECIALES
+    zonas = set(ZONAS_SIMPLES) | {r["zona"] for r in SUB_RUTAS_ESPECIALES}
+    assert zonas == set(range(1, 25))
+    grupos_simples = set(ZONAS_SIMPLES)          # grupo == zona para las simples
+    grupos_especiales = {r["grupo"] for r in SUB_RUTAS_ESPECIALES}
+    assert len(grupos_simples) + len(grupos_especiales) == 27
+    assert not (grupos_simples & grupos_especiales)   # sin colision de numero
