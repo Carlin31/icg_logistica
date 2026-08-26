@@ -283,3 +283,9 @@ def test_construir_sub_rutas_produce_27_filas_validas(app_ctx):
     todas = [s for r in sub_rutas for s in r["sucursales"]]
     assert len(todas) == 101
     assert len(set(todas)) == 101
+    # zona 17 es un merge de baja confianza documentado en el spec (50%):
+    # si esto deja de aparecer, la funcion dejo de leer el baseline viejo
+    # (version=17) y esta derivando contra su propia salida (auto-match).
+    revisar_por_zona = {z: pct for z, _grupo_origen, pct in revisar}
+    assert 17 in revisar_por_zona
+    assert revisar_por_zona[17] == pytest.approx(0.5)

@@ -85,7 +85,13 @@ SUB_RUTAS_ESPECIALES = [
 def construir_sub_rutas():
     """Arma las 27 sub-rutas: 22 derivadas del grupo viejo con mas peso +
     5 especiales (Zona 5 y 11). Devuelve (sub_rutas, alertas_revisar)."""
-    grupos_viejos = obtener_grupos()
+    # version=17 es el baseline VIEJO (42 grupos, calibracion de 9 semanas de
+    # historico) del que se deriva. Sin fijarlo, una vez que la migracion ya
+    # corrio y version 18 (24 zonas) quedo vigente, obtener_grupos() leeria
+    # la propia salida de esta reorganizacion -- un auto-match del 100% que
+    # tapa el umbral de confianza (p. ej. zona 17 dejaria de verse como
+    # REVISAR).
+    grupos_viejos = obtener_grupos(version=17)
     grupos_por_id = {g["grupo"]: g for g in grupos_viejos}
     grupo_de_sucursal = {s: g["grupo"] for g in grupos_viejos for s in g["sucursales"]}
 
