@@ -528,6 +528,74 @@ def derivar_grupo_zona(sucursales: list, grupo_de_sucursal: dict,
     )
 
 
+def cargar_zonas_manual(sub_rutas: list, nota: str = None) -> dict:
+    """
+    Escribe una VERSIÓN NUEVA de `plantilla_grupo`/`plantilla_grupo_sucursal`/
+    `plantilla_grupo_dia` a partir de una lista de sub-rutas ya resuelta (no
+    hay Excel que parsear: es la reorganización manual de zonas 2026-08, ver
+    docs/superpowers/specs/2026-08-26-reorganizacion-zonas-canonicas-design.md).
+
+    NO toca `plantilla_bridge_sucursal`, `plantilla_zona_mayorista` ni
+    `plantilla_poblacion_zona` -- cada tabla filtra su propio `vigente=1`
+    independiente del número de versión, así que pueden quedar en versiones
+    distintas sin romper los lectores (`obtener_bridge`, `obtener_zona`,
+    `zona_de_poblacion`). Nunca borra: mismo patrón no-destructivo que
+    `cargar_plantilla_desde_excel`.
+
+    sub_rutas: [{grupo, zona, rigidez, dia, dia_preferido (opcional),
+                 unidad_ref (opcional, None = sin preferencia),
+                 unidades_afines (opcional), unidad_forzada (opcional, bool),
+                 dias_admisibles: [dia,...], sucursales: [num_tienda,...]}]
+    """
+    ahora = datetime.now().isoformat()
+    with transaccion() as conn:
+        t_meta = get_table("plantilla_meta")
+        ver = (conn.execute(select(func.max(t_meta.c.version))).scalar() or 0) + 1
+
+        for tn in ["plantilla_grupo", "plantilla_grupo_sucursal", "plantilla_grupo_dia"]:
+            t = get_table(tn)
+            conn.execute(update(t).where(t.c.vigente == 1).values(vigente=0))
+        conn.execute(update(t_meta).where(t_meta.c.vigente == 1).values(vigente=0))
+
+        tg = get_table("plantilla_grupo")
+        conn.execute(insert(tg), [dict(
+            version=ver, grupo=int(r["grupo"]), zona=int(r["zona"]),
+            rigidez=r["rigidez"], dia=r.get("dia"),
+            tam=len(r.get("sucursales", [])), cohesion=None,
+            unidad_ref=r.get("unidad_ref"), que_hace_vrp=r.get("que_hace_vrp"),
+            unidades_afines=r.get("unidades_afines"),
+            unidad_forzada=bool(r.get("unidad_forzada")),
+            vigente_desde=ahora, vigente=1) for r in sub_rutas])
+
+        tgs = get_table("plantilla_grupo_sucursal")
+        conn.execute(insert(tgs), [dict(
+            version=ver, grupo=int(r["grupo"]), num_tienda=nt,
+            vigente_desde=ahora, vigente=1)
+            for r in sub_rutas for nt in r.get("sucursales", [])])
+
+        filas_dia = []
+        for r in sub_rutas:
+            adm = r.get("dias_admisibles") or ([r["dia"]] if r.get("dia") else [])
+            preferido = r.get("dia_preferido") or r.get("dia")
+            for i, d in enumerate(adm):
+                filas_dia.append(dict(
+                    version=ver, grupo=int(r["grupo"]), dia=d,
+                    es_canonico=1 if d == preferido else 0, orden=i,
+                    vigente_desde=ahora, vigente=1))
+        if filas_dia:
+            conn.execute(insert(get_table("plantilla_grupo_dia")), filas_dia)
+
+        conn.execute(insert(t_meta).values(
+            version=ver, cargado_en=ahora, excel_archivo=None, excel_hash=None,
+            semanas_analisis=None, n_grupos=len(sub_rutas), n_zonas=None,
+            n_poblaciones=None, n_flags=None, vigente=1, nota=nota))
+
+    return dict(
+        status="ok", version=ver, grupos=len(sub_rutas),
+        zonas=len({r["zona"] for r in sub_rutas}),
+        sucursales=sum(len(r.get("sucursales", [])) for r in sub_rutas))
+
+
 def _hash_archivo(path: str) -> str:
     try:
         with open(path, "rb") as fh:
