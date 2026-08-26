@@ -147,8 +147,32 @@ def test_roundtrip_lectura_bd(app_ctx):
     )
     assert version_vigente() is not None
     grupos = obtener_grupos()
-    assert len(grupos) == 42
-    assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 23
+    assert len(grupos) == 27
+    assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 18
+    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 9
+    # zona: 24 zonas de negocio distintas, todo grupo tiene una asignada
+    assert len({g["zona"] for g in grupos}) == 24
+    assert all(g["zona"] is not None for g in grupos)
+    # limite de 6 sucursales por RUTA (grupo), salvo el grupo 22 (excepcion
+    # de negocio confirmada: 8 sucursales en una sola ruta). Zonas 5 y 11 SI
+    # suman mas de 6 en total, pero repartidas en varios grupos/sub-rutas
+    # (eso es justamente el punto del diseño), asi que el limite se checa
+    # por grupo, no por zona.
+    for g in grupos:
+        limite = 8 if g["grupo"] == 22 else 6
+        assert len(g["sucursales"]) <= limite, \
+            f"grupo {g['grupo']} (zona {g['zona']}) tiene {len(g['sucursales'])} sucursales"
+    # zona 5 (Tuxtepec) y zona 11 (Tierra Blanca): confirmar que quedaron
+    # partidas en varios grupos y que sus totales son los esperados (10 y 8)
+    por_zona = {}
+    for g in grupos:
+        por_zona.setdefault(g["zona"], []).append(g["grupo"])
+    assert len(por_zona[5]) == 3
+    assert len(por_zona[11]) == 2
+    total_zona5 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 5)
+    total_zona11 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 11)
+    assert total_zona5 == 10
+    assert total_zona11 == 8
     # grupo_de_sucursal round-trip sobre un miembro real
     algun = next(g for g in grupos if g["sucursales"])
     nt = algun["sucursales"][0]
