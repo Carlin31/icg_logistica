@@ -19,6 +19,15 @@ fuente normalizada (id_sucursal=num_tienda, vehiculo, dia_semana,
 secuencia_visita, kg_entrega) desde la que se reconstruyen los grupos de
 co-viaje y es la BASE de la validación por origen móvil de Fase 2/4. No
 limpiar.
+
+NOTA IMPORTANTE 2026-08 — reorganización de zonas: `cargar_plantilla_desde_excel`
+sigue usando la numeración VIEJA de 42 `grupo` (datos/dias_admisibles_por_grupo.csv,
+datos/unidad_ref_por_grupo.csv, datos/grupos_unidad_forzada.csv). Los 27
+`grupo` vigentes desde la reorganización manual (scripts/reorganizar_zonas_2026.py,
+ver docs/superpowers/specs/2026-08-26-reorganizacion-zonas-canonicas-design.md)
+usan una numeración nueva de 24 zonas. Si se vuelve a cargar un Excel canónico
+con `cargar_plantilla_desde_excel` sin migrar antes esos 3 CSV a la numeración
+de zonas, se pisa esta reorganización sin aviso.
 """
 import os
 import re

@@ -5,6 +5,13 @@ Carga (o RECARGA) la plantilla canónica en SQL Server desde el Excel canónico,
 el bridge revisado (datos/mapeo_no_a_numtienda.csv) y, si se pasa, el
 diccionario población→zona. Cada corrida crea una VERSIÓN NUEVA (no borra).
 
+ADVERTENCIA 2026-08: los CSV por defecto (datos/dias_admisibles_por_grupo.csv,
+datos/unidad_ref_por_grupo.csv, datos/grupos_unidad_forzada.csv) usan la
+numeración VIEJA de 42 grupos. Desde la reorganización de zonas
+(scripts/reorganizar_zonas_2026.py) la plantilla vigente usa 27 grupos bajo
+una numeración de 24 zonas. Correr este script sin migrar antes esos 3 CSV
+pisaría la reorganización sin aviso.
+
 Uso:
     python scripts/cargar_plantilla.py "<ruta xlsx>" [--poblacion <csv>] [--nota "texto"]
 
