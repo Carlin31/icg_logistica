@@ -36,6 +36,7 @@ from db import get_engine
 ALTERS = [
     ("plantilla_grupo", "unidades_afines", "NVARCHAR(400) NULL"),
     ("plantilla_grupo", "zona", "INT NULL"),
+    ("plantilla_grupo", "unidades_excluidas", "NVARCHAR(200) NULL"),
 ]
 
 DDL = [

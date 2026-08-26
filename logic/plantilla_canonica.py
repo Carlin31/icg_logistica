@@ -574,6 +574,7 @@ def cargar_zonas_manual(sub_rutas: list, nota: str = None) -> dict:
             unidad_ref=r.get("unidad_ref"), que_hace_vrp=r.get("que_hace_vrp"),
             unidades_afines=r.get("unidades_afines"),
             unidad_forzada=bool(r.get("unidad_forzada")),
+            unidades_excluidas=("|".join(r.get("unidades_excluidas") or []) or None),
             vigente_desde=ahora, vigente=1) for r in sub_rutas])
 
         tgs = get_table("plantilla_grupo_sucursal")
@@ -652,6 +653,9 @@ def obtener_grupos(version: int = None) -> list:
         out.append(dict(grupo=g, zona=r.get("zona"), rigidez=r["rigidez"], dia=r["dia"],
                         tam=r["tam"], cohesion=r["cohesion"], unidad_ref=r["unidad_ref"],
                         unidades_afines=r.get("unidades_afines"),
+                        unidades_excluidas=[u.strip() for u in
+                            str(r.get("unidades_excluidas") or "").split("|")
+                            if u.strip()],
                         unidad_forzada=bool(r.get("unidad_forzada")),
                         que_hace_vrp=r["que_hace_vrp"],
                         sucursales=sorted(miembros.get(g, [])),

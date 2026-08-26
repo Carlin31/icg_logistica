@@ -141,6 +141,31 @@ def app_ctx():
     ctx.pop()
 
 
+@pytest.fixture
+def _vigente_restaurada():
+    """cargar_zonas_manual() reemplaza la plantilla vigente ENTERA (no es
+    aislado): un test que la llama directamente contra la BD real dejaria
+    su propia plantilla de prueba como la vigente para toda la app si no se
+    restaura. Este fixture guarda que version esta vigente en las 4 tablas
+    antes del test y la restaura despues, pase o falle el test."""
+    from db import get_db, get_table, transaccion
+    from sqlalchemy import update, select
+    tablas = ["plantilla_meta", "plantilla_grupo", "plantilla_grupo_sucursal", "plantilla_grupo_dia"]
+    vigente_antes = {}
+    for nombre in tablas:
+        t = get_table(nombre)
+        fila = get_db().execute(select(t.c.version).where(t.c.vigente == True)).first()
+        vigente_antes[nombre] = fila[0] if fila else None
+    yield
+    with transaccion() as conn:
+        for nombre in tablas:
+            t = get_table(nombre)
+            conn.execute(update(t).values(vigente=False))
+            v = vigente_antes[nombre]
+            if v is not None:
+                conn.execute(update(t).where(t.c.version == v).values(vigente=True))
+
+
 def test_roundtrip_lectura_bd(app_ctx):
     from logic.plantilla_canonica import (
         version_vigente, obtener_grupos, grupo_de_sucursal, zona_de_poblacion,
@@ -183,6 +208,29 @@ def test_roundtrip_lectura_bd(app_ctx):
     for g in grupos:
         assert g["dias_admisibles"], f"grupo {g['grupo']} sin días admisibles"
         assert g["dia_preferido"] in g["dias_admisibles"]
+
+
+def test_unidades_excluidas_roundtrip(app_ctx, _vigente_restaurada):
+    from logic.plantilla_canonica import cargar_zonas_manual, obtener_grupos
+    sub_rutas = [dict(
+        grupo=9001, zona=9001, rigidez="FLEXIBLE", dia="LUNES",
+        dias_admisibles=["LUNES"], unidad_ref=None, unidades_afines=None,
+        unidad_forzada=False, unidades_excluidas=["F 350_1", "F 350_2", "F 350_3"],
+        sucursales=[1])]
+    cargar_zonas_manual(sub_rutas, nota="test unidades_excluidas")
+    grupos = {g["grupo"]: g for g in obtener_grupos()}
+    assert grupos[9001]["unidades_excluidas"] == ["F 350_1", "F 350_2", "F 350_3"]
+
+
+def test_unidades_excluidas_vacio_es_lista_vacia(app_ctx, _vigente_restaurada):
+    from logic.plantilla_canonica import cargar_zonas_manual, obtener_grupos
+    sub_rutas = [dict(
+        grupo=9002, zona=9002, rigidez="FLEXIBLE", dia="LUNES",
+        dias_admisibles=["LUNES"], unidad_ref=None, unidades_afines=None,
+        unidad_forzada=False, sucursales=[2])]        # sin unidades_excluidas
+    cargar_zonas_manual(sub_rutas, nota="test unidades_excluidas vacio")
+    grupos = {g["grupo"]: g for g in obtener_grupos()}
+    assert grupos[9002]["unidades_excluidas"] == []
 
 
 # ── derivación de rigidez/día/unidad para zonas que fusionan grupos viejos ──
