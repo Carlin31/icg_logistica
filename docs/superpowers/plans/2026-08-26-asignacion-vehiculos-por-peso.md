@@ -2115,7 +2115,8 @@ reserva de afinidad, ninguno crítico:
 python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
 ```
 
-Confirma en el PDF resultante: Cosamaloapan/Carrillo/Amatitlán en F 350_1;
+Confirma en el PDF resultante (ya se hizo, ver Task 9 -- este step queda
+como referencia): Cosamaloapan/Carrillo/Amatitlán en F 350_1;
 San Andrés/Catemaco/Santiago Tuxtla/Covarrubias en F 350_3, las 8
 sucursales de grupo 22 juntas en la medida de lo posible (o, si la
 partición por TIEMPO sigue siendo necesaria, que la pieza partida quede en
@@ -2125,3 +2126,183 @@ sigue sin tocar ningún F350.
 Resume en la conversación (no hace falta un documento nuevo): qué tests
 quedaron, cuántos se borraron y por qué, y confirma que el PDF regenerado ya
 no muestra Tierra Blanca en ningún F350.
+
+---
+
+## Task 10: TIEMPO ya no fuerza partir un grupo RIGIDO (decisión explícita del usuario)
+
+**Pedido por el usuario tras revisar el resultado final**: Santiago Tuxtla 1
+(sucursal 8 de grupo 22, RIGIDO) se sigue partiendo a J 18 porque el modelo
+de TIEMPO calcula que las 8 paradas juntas no caben en la ventana horaria de
+un solo día en un F350 -- confirmado con `_restriccion_violada` directo
+contra los datos reales: peso (3402 kg) y volumen sobran de holgura, sólo
+TIEMPO ata. El propio docstring del módulo ya documenta que este modelo
+"sobrestima en rutas de muchas paradas chicas" -- exactamente este caso.
+
+**Decisión del usuario (confirmada explícitamente, alcance sistema
+completo)**: de aquí en adelante, una violación de **sólo TIEMPO** (sin PESO
+ni VOLUMEN de por medio) **ya no fuerza partir un grupo RIGIDO** en ningún
+lugar del sistema -- sólo PESO/VOLUMEN pueden. Cuando esto pasa, la ruta
+queda con la composición intacta y se registra una excepción visible nueva
+(`AVISO_TIEMPO_RIGIDO_NO_PARTIDO`) para que el despachador lo revise a
+mano, en vez de fragmentar la ruta en silencio. Los grupos FLEXIBLE no
+cambian: TIEMPO sigue pudiendo partirlos como hasta ahora (ceden más fácil,
+no rompen una composición que el negocio espera junta).
+
+**Alcance**: esto toca el bloque "Último recurso: partir" (Palanca 3) en
+`construir_groups_desde_plantilla`, que NINGUNA task anterior de este plan
+había tocado (siempre se documentó como "problema pre-existente, fuera de
+alcance" -- hasta ahora, por pedido explícito del usuario).
+
+**Files:**
+- Modify: `logic/convrp_logic.py` (`construir_groups_desde_plantilla`,
+  bloque "Último recurso: partir", línea ~732-762)
+- Test: `tests/test_convrp_logic.py`
+
+- [ ] **Step 1: Escribir los tests nuevos**
+
+```python
+def test_tiempo_solo_no_parte_un_rigido():
+    # RIGIDO con 8 paradas chicas: peso y volumen sobran de holgura: la
+    # ventana horaria es tan corta que SOLO el modelo de tiempo ata. No
+    # debe partirse -- composición intacta, aviso registrado en vez de
+    # PARTIDO_CAPACIDAD.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", list(range(1, 9)),
+                        unidad_ref="V1", dias_admisibles=["LUNES"])]
+    pedidos = {i: 10 for i in range(1, 9)}          # peso irrelevante
+    cfg = _cfg(chequear_tiempo=True, hora_salida_min=420, hora_cierre_min=430)
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 99999}, {"V1": 9999}, cfg)
+    assert not any(e["tipo"] == "PARTIDO_CAPACIDAD" for e in exc), \
+        "TIEMPO solo no debe partir un RIGIDO"
+    assert len(groups[("V1", "LUNES")]) == 8, \
+        "la composición del RIGIDO debe seguir completa"
+    assert any(e["tipo"] == "AVISO_TIEMPO_RIGIDO_NO_PARTIDO" for e in exc)
+```
+
+- [ ] **Step 2: Correr y confirmar que falla**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k tiempo_solo_no_parte_un_rigido -v
+```
+
+Esperado: FAIL (hoy el grupo SÍ se parte por TIEMPO sin importar rigidez).
+
+- [ ] **Step 3: Implementar el cambio**
+
+En `logic/convrp_logic.py`, dentro del bloque "Último recurso: partir"
+(línea ~732-762), justo después de `a = candidatos[0]` y antes de calcular
+`metrica`/`orden`, agrega:
+
+```python
+            a = candidatos[0]
+            if restr == "TIEMPO" and a["rigidez"] == "RIGIDO":
+                # El modelo de tiempo sobrestima en rutas de muchas paradas
+                # chicas (ver docstring del módulo) -- decisión de negocio
+                # 2026-08-27: TIEMPO solo (sin PESO/VOLUMEN) ya no fuerza
+                # partir un RIGIDO. Queda como aviso visible, composición
+                # intacta, para que el despachador lo revise a mano.
+                excepciones.append({
+                    "tipo": "AVISO_TIEMPO_RIGIDO_NO_PARTIDO", "grupo": a["grupo"],
+                    "rigidez": a["rigidez"], "restriccion": "TIEMPO",
+                    "unidad": unidad, "dia": dia,
+                    "motivo": f"{unidad}/{dia} excede el tiempo estimado pero "
+                              f"es RIGIDO; no se parte (el modelo de tiempo "
+                              f"sobrestima en rutas de muchas paradas chicas) "
+                              f"-- revisar a mano si hace falta.",
+                })
+                break
+            metrica = volumenes if restr == "VOLUMEN" else pedidos
+```
+
+(El resto del bloque, desde `orden = sorted(...)` en adelante, no cambia.)
+
+- [ ] **Step 4: Correr y confirmar que pasa**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k tiempo_solo_no_parte_un_rigido -v
+```
+
+- [ ] **Step 5: Confirmar que las particiones existentes (PESO/VOLUMEN, y TIEMPO sobre FLEXIBLE) siguen intactas**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k "parte_rigido or particion or partido_capacidad or pedazo_partido" -v
+```
+
+Esperado: todos PASS sin cambios -- `test_parte_rigido_solo_si_ninguna_palanca_alcanza` y
+`test_particion_de_rigido_es_determinista_pela_el_mayor` son PESO, no
+TIEMPO, así que no deben verse afectados; confírmalo leyendo cada uno antes
+de asumirlo. Si alguno usa TIEMPO sobre un RIGIDO como parte de su
+escenario, ese SÍ necesita actualizarse (esperado, no un bug) -- ajusta su
+aserción al nuevo comportamiento, no adivines.
+
+- [ ] **Step 6: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+Esperado: 100% PASS.
+
+- [ ] **Step 7: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`
+si sigue corrupto sin commitear.)
+
+Confirma en el resultado real:
+- Las 8 sucursales de grupo 22 (Catemaco, Catemaco 2, Juan Díaz Covarrubias,
+  San Andrés 1/2/3, Santiago Tuxtla 1/2) quedan TODAS juntas en F 350_3 el
+  martes -- ninguna se va a J 18.
+- Aparece una excepción `AVISO_TIEMPO_RIGIDO_NO_PARTIDO` para ese grupo
+  (revisar, no silencioso).
+- Cosamaloapan/Carrillo/Amatitlán sigue en F 350_1; Tierra Blanca sigue sin
+  tocar ningún F350 (esto NO debería cambiar con este fix, pero verifícalo
+  de todos modos -- mismo patrón de esta task: no te conformes con el test
+  unitario).
+
+Si el resultado real no coincide, no commitees -- reporta BLOCKED con el
+detalle exacto.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add logic/convrp_logic.py tests/test_convrp_logic.py
+git commit -m "$(cat <<'EOF'
+TIEMPO solo ya no fuerza partir un grupo RIGIDO (decision de negocio)
+
+Pedido explicito del usuario: el modelo de tiempo sobrestima en rutas de
+muchas paradas chicas (ya documentado en el modulo), y forzaba partir
+grupo 22 (Santiago Tuxtla/San Andres/Catemaco, RIGIDO, 8 sucursales,
+3402 kg -- peso y volumen sobran de holgura) separando Santiago Tuxtla 1
+del resto. De aqui en adelante solo PESO/VOLUMEN pueden partir un RIGIDO;
+TIEMPO solo queda como aviso visible (AVISO_TIEMPO_RIGIDO_NO_PARTIDO),
+composicion intacta. FLEXIBLE no cambia. Verificado contra el PDF real:
+las 8 sucursales de grupo 22 quedan juntas en F 350_3.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+- [x] **Step 9: Verificación end-to-end con Fase B (ya hecha)**
+
+El revisor de calidad de la Task 10 marcó como riesgo no probado la
+interacción con Fase B (`logic/tiempo_reubicacion.py`, `resolver_fuera_de_horario`)
+-- corre en el flujo real (no en `pdf_convrp_preview.py`, que la salta) y
+tiene su propia lógica de reubicación por tiempo, nunca antes tocada por
+este plan.
+
+Se verificó corriendo el flujo real completo (`generar_rutas_vrp_afinidad`
++ `generar_pdf` sin `rutas_inyectadas`) contra la logística real "24 al 28
+de agosto". El primer intento pareció mostrar que Fase B separaba Santiago
+Tuxtla 1 de nuevo -- investigado a fondo: era una fila vieja en
+`modificaciones_rutas` (guardada antes de los fixes de las Tasks 9/10, sin
+autorizar) que `generar_pdf` prefiere leer por encima de `asignaciones`
+fresco. Se borró esa fila (con confirmación explícita del usuario) y se
+volvió a generar: **grupo 22 queda con sus 8 sucursales juntas en F 350_3,
+Cosamaloapan en F 350_1, Tierra Blanca sin tocar ningún F350** -- Fase B
+NO deshace el fix. Sin cambios de código adicionales necesarios.
