@@ -2657,3 +2657,268 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Task 13: La reserva de afinidad cede ante el tope máximo de la flota (grupo Tuxtepec / F 350_1 sin necesidad)
+
+**Encontrado por el usuario revisando el PDF real regenerado:** F 350_1/JUEVES
+con solo 1109 kg (28.5 % de uso) -- grupo 25 (Tuxtepec 5/6/8 + 1 mayorista).
+Investigado con un script de diagnóstico que llama `construir_rutas_con_mayoristas`
+directo contra la semana real "24 al 28 de agosto" (logistica_id
+`6a907f31b5f344e37e18633c`), con `_restriccion_violada` instrumentado
+temporalmente (agregado, confirmado, revertido -- `logic/convrp_logic.py`
+quedó sin diff antes de continuar):
+
+El jueves hay 10 grupos y solo 9 camiones reales no-F350 (T 25, T 23, T 20,
+J 18, J 19, K 16, K 20, T 17_1, T 17_2). Grupo 25 es el ÚNICO de los 10 sin
+`unidades_afines` propio. Con un print temporal en el punto exacto donde se
+calcula `reservadas` (revertido después de confirmar, sin dejar rastro en el
+código), se confirmó que para grupo 25: `reservadas={'T 20', 'J 19', 'T 23'}`
+y `compat` (ya filtrado) quedaba en `['F 350_1', 'F 350_2', 'F 350_3',
+'KANGOO', 'T 25']` -- T 20 y T 23 estaban **vacíos en ese momento** (sus
+propios grupos, más livianos, se procesan después) y **1109 kg cabrían sin
+problema** en cualquiera de los dos -- pero quedaron reservados para proteger
+a esos grupos más livianos, que **casi siempre tenían también otra opción**
+(confirmado: para los otros 6 grupos más pesados del jueves, T 20/T 23/J 19
+también aparecían reservados, y ninguno de esos 6 los necesitaba de verdad).
+
+Como KANGOO (600 kg, inactiva) y T 25 (1300 kg antes de la Task 12, ya lleno
+con otro grupo) no alcanzaban, el primer candidato de `compat` que sí cabía
+completo era F 350_1 (3900 kg) -- el motor lo elige ahí mismo, en el bucle
+NORMAL de `ordenadas` (nunca llega al bloque de "último recurso": F 350_1
+cabe de sobra, `_restriccion_violada` no marca ninguna violación). Es un
+hallazgo distinto de lo que se planteó originalmente al usuario (no es una
+fusión con una ruta ya cargada -- es una unidad vacía y apropiada que la
+reserva le quita sin necesidad real).
+
+**Decisión del usuario (confirmada explícitamente)**: la reserva de afinidad
+debe ceder -- pero SOLO para unidades que NO sean del tope máximo de la
+flota (nunca F350) -- cuando sin ceder el grupo caería en una unidad de ese
+tope máximo. Nunca le "roba" la unidad reservada a nadie si la única
+alternativa (ignorando la reserva) es TAMBIÉN del tope máximo -- así queda
+intacto el caso F350-vs-F350 que la reserva original protege (Cosamaloapan /
+San Andrés-Catemaco-Santiago Tuxtla-Covarrubias, Task 9).
+
+**Diseño exacto:** en vez de "reintentar sólo si `elegido is None`" (que NO
+hubiera arreglado este caso -- F 350_1 SÍ es un `elegido` válido, el bucle
+nunca falla), se compara el resultado de la búsqueda normal
+(reserva respetada) contra el de una segunda búsqueda idéntica que ignora la
+reserva -- y sólo se usa la segunda si (a) la primera aterrizó en el tope
+máximo de la flota, y (b) la segunda ofrece algo por DEBAJO de ese tope.
+`tope_maximo` se calcula una sola vez, genéricamente, como
+`max(vehiculos_cap.values())` -- no se hardcodea "F 350" en ningún lado, así
+sigue funcionando si la flota cambia.
+
+**Files:**
+- Modify: `logic/convrp_logic.py` (`_asignar_unidades`, líneas ~294-427: docstring + lógica)
+- Test: `tests/test_convrp_logic.py`
+
+- [ ] **Step 1: Escribir los tests**
+
+Agrega a `tests/test_convrp_logic.py` (junto a los tests de reserva de
+afinidad existentes, alrededor de la línea 1335):
+
+```python
+def test_reserva_de_afinidad_cede_a_unidad_chica_para_evitar_sobretalla():
+    # grupo1 (sin afinidad, mas pesado, se procesa primero) cabria en CHICA,
+    # pero CHICA queda reservada para grupo2 (afinidad fuerte, procesa
+    # despues) -- sin el fix, grupo1 termina en GRANDE (equivalente a F350,
+    # muy sobrado) solo por reservarsele CHICA, aunque GRANDE le alcance de
+    # sobra tambien (nunca falla el ajuste normal, por eso "elegido is None"
+    # no basta como condicion). Con el fix, como GRANDE es el tope maximo de
+    # la flota, se reintenta ignorando la reserva y grupo1 aterriza en CHICA.
+    # Hallazgo real: grupo Tuxtepec (1109 kg, sin afinidad) en F 350_1 con
+    # T 20/T 23 vacios y reservados para otros grupos del mismo dia.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 700, 2: 700, 3: 300, 4: 300}   # g1=1400 (mas pesado), g2=600
+    caps = {"CHICA": 1500, "GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"CHICA": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("CHICA", "LUNES")]) == [1, 2], \
+        "grupo 1 (sin afinidad, forzado antes a GRANDE por la reserva) debe recuperar CHICA -- le alcanza y evita el sobretalla"
+
+
+def test_reserva_de_afinidad_no_cede_si_la_alternativa_tambien_es_tope_maximo():
+    # Mismo patron de A_GRANDE/Z_GRANDE que test_grupo_pesado_sin_afinidad_no_ocupa_la_reservada_de_uno_pendiente,
+    # pero confirmando explicitamente que el nuevo "cede ante el tope maximo"
+    # NO le permite a grupo1 recuperar A_GRANDE (reservada): la unica
+    # alternativa ignorando la reserva (Z_GRANDE) TAMBIEN es del tope maximo,
+    # asi que no hay override -- se sigue respetando la reserva. Protege el
+    # caso F350-vs-F350 (Cosamaloapan / San Andres-Catemaco-Santiago Tuxtla,
+    # Task 9) de que este fix lo rompa.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}   # g1=3200, g2=2000
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"A_GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [3, 4], \
+        "grupo 2 (afinidad fuerte, aun no tenia turno) debe seguir quedandose con A_GRANDE"
+    assert sorted(m["sid"] for m in groups[("Z_GRANDE", "LUNES")]) == [1, 2], \
+        "grupo 1 (sin afinidad) debe seguir cediendo A_GRANDE -- Z_GRANDE tambien es tope maximo, no hay override"
+```
+
+- [ ] **Step 2: Correr y confirmar que fallan**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k reserva_de_afinidad -v
+```
+
+Esperado: `test_reserva_de_afinidad_cede_a_unidad_chica_para_evitar_sobretalla`
+FALLA (hoy grupo 1 termina en GRANDE, no en CHICA); el segundo test ya PASA
+sin tocar nada (documenta el comportamiento actual, que no debe cambiar).
+
+- [ ] **Step 3: Implementar el fix**
+
+En `logic/convrp_logic.py`, agrega al docstring de `_asignar_unidades`
+(después del párrafo "RESERVA DE AFINIDAD", ~línea 324):
+
+```python
+    TOPE MÁXIMO DE LA FLOTA: si respetar la reserva de afinidad empuja a un
+    grupo SIN afinidad propia hacia la unidad más grande de la flota (p. ej.
+    F350) -- aunque una unidad chica/mediana reservada para otro grupo siga
+    vacía y le alcance de sobra --, se cede la reserva para esa elección
+    puntual, siempre que ignorarla ofrezca algo por DEBAJO del tope máximo
+    (nunca se "roba" una reservada que también es del tope máximo -- eso
+    rompería el caso F350-vs-F350 de la reserva de arriba). Hallazgo real:
+    grupo Tuxtepec (1109 kg, sin afinidad) caía en F 350_1/JUEVES con T 20 y
+    T 23 vacíos al lado, sólo por estar reservados para otros grupos del
+    mismo día que, en la práctica, casi siempre tenían también otra opción.
+```
+
+Justo antes del loop de días (después de `coocurrencia =
+cfg.get("coocurrencia_grupos")`, ~línea 341):
+
+```python
+    coocurrencia = cfg.get("coocurrencia_grupos")
+    tope_maximo = max(vehiculos_cap.values(), default=0)
+```
+
+Reemplaza el bloque `compat_sin_reservar = ...` / `compat = compat_sin_reservar or compat`
+(~línea 379-380) para no perder la lista pre-reserva:
+
+```python
+            compat_sin_reservar = [u for u in compat if u not in reservadas]
+            compat_final = compat_sin_reservar or compat
+```
+
+Reemplaza el bloque `af = ...` hasta `elegido = None` / bucle (~línea
+382-397) por:
+
+```python
+            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
+
+            def _ordenar(candidatos, af=af):
+                return sorted(
+                    candidatos,
+                    key=lambda u: (_num(vehiculos_cap.get(u)),
+                                   -sum(_num(pedidos.get(s))
+                                        for s in _sids_de_ruta(asign, u, dia)),
+                                   -_num(af.get(u)), str(u)))
+
+            def _primer_ajuste(candidatos):
+                for unidad in _ordenar(candidatos):
+                    destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
+                    if _restriccion_violada(
+                            sorted(destino), unidad, pedidos, volumenes, coords,
+                            vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
+                        return unidad
+                return None
+
+            elegido = _primer_ajuste(compat_final)
+
+            # Ver docstring "TOPE MAXIMO DE LA FLOTA": se cede la reserva
+            # SOLO cuando respetarla forzo el tope maximo Y ignorarla ofrece
+            # algo por debajo de ese tope -- nunca se "roba" una reservada
+            # que tambien es del tope maximo.
+            if elegido is not None and _num(vehiculos_cap.get(elegido)) >= tope_maximo:
+                alterno = _primer_ajuste(compat)
+                if alterno is not None and _num(vehiculos_cap.get(alterno)) < tope_maximo:
+                    elegido = alterno
+```
+
+(El resto de la función -- el bloque `if elegido is None and candidatas:` de
+último recurso -- no cambia. Usa `candidatas` y `reservadas` directamente,
+no `compat`/`compat_final`, así que no se ve afectado por el renombre.)
+
+- [ ] **Step 4: Correr y confirmar que pasan**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k reserva_de_afinidad -v
+```
+
+- [ ] **Step 5: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_vrp_logic.py tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+Esperado: 100 % PASS. Presta atención particular a
+`test_grupo_pesado_sin_afinidad_no_ocupa_la_reservada_de_uno_pendiente`,
+`test_reserva_de_afinidad_cede_si_es_la_unica_opcion` y
+`test_reserva_de_afinidad_ignora_reclamo_a_unidad_excluida_para_el_propio_grupo`
+(los 3 tests de la Task 9) -- deben seguir pasando exactamente igual, sin
+tocarlos.
+
+- [ ] **Step 6: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`.)
+
+Confirma en el resultado real:
+- Grupo 25 (Tuxtepec 5/6/8 + mayorista, JUEVES) ya NO debe caer en F 350_1 --
+  debe aterrizar en T 20 o T 23 (o el que le corresponda por capacidad en
+  ese momento del reparto), con un % de uso razonable para su tamaño.
+- Cosamaloapan sigue en F 350_1, y las 8 sucursales de San Andrés/Catemaco/
+  Santiago Tuxtla/Covarrubias siguen juntas en F 350_3 (no deben cambiar --
+  confirmación explícita del usuario de que esta ruta ya está bien).
+- Santiago Tuxtla 1 sigue junto al otro Santiago Tuxtla en la ruta de
+  F 350_3 (Task 10 -- no debe romperse).
+- Repite el chequeo de KANGOO (obligatorio, no lo saltes).
+- Revisa el jueves completo: ¿algún otro grupo quedó con un % de uso
+  anormalmente bajo (parecido al de grupo 25 antes del fix)? Si aparece
+  alguno, repórtalo con detalle exacto -- podría ser el mismo patrón en otro
+  día, o algo nuevo; no lo arregles sin reportarlo primero.
+
+Si el resultado real no coincide con lo esperado, no commitees -- reporta
+BLOCKED con el detalle exacto.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add logic/convrp_logic.py tests/test_convrp_logic.py
+git commit -m "$(cat <<'EOF'
+La reserva de afinidad cede ante el tope maximo de la flota (nunca ante F350)
+
+Encontrado por el usuario en el PDF real: F 350_1/JUEVES con solo 1109 kg
+(28.5% de uso, grupo Tuxtepec). Investigado con _restriccion_violada
+instrumentado temporalmente (revertido tras confirmar): T 20 y T 23 estaban
+VACIOS en el momento exacto en que se proceso este grupo, y 1109 kg cabrian
+sin problema -- pero quedaron reservados (Task 9) para proteger a otros 2
+grupos mas livianos que, en la practica, casi siempre tenian tambien otra
+opcion. Como el grupo no tiene afinidad propia, el primer candidato que si
+cabia completo en el bucle NORMAL (no en el ultimo recurso -- el ajuste
+nunca fallo) era F 350_1. Se agrega una segunda busqueda que ignora la
+reserva SOLO cuando la primera aterrizo en el tope maximo de la flota Y la
+segunda ofrece algo por debajo de ese tope -- nunca le "roba" una unidad
+reservada a otro grupo si la unica alternativa tambien es del tope maximo,
+protegiendo intacto el caso F350-vs-F350 de la Task 9. Verificado contra el
+PDF real de la semana 24-28 agosto.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
