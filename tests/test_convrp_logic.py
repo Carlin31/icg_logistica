@@ -1332,3 +1332,51 @@ def test_reserva_de_afinidad_ignora_reclamo_a_unidad_excluida_para_el_propio_gru
     # GRANDE en la primera pasada: cero excepciones.
     assert exc == [], \
         f"debio asignarse directo sin partir/relocar; huellas de la reserva mal aplicada: {exc}"
+
+
+def test_reserva_de_afinidad_cede_a_unidad_chica_para_evitar_sobretalla():
+    # grupo1 (sin afinidad, mas pesado, se procesa primero) cabria en CHICA,
+    # pero CHICA queda reservada para grupo2 (afinidad fuerte, procesa
+    # despues) -- sin el fix, grupo1 termina en GRANDE (equivalente a F350,
+    # muy sobrado) solo por reservarsele CHICA, aunque GRANDE le alcance de
+    # sobra tambien (nunca falla el ajuste normal, por eso "elegido is None"
+    # no basta como condicion). Con el fix, como GRANDE es el tope maximo de
+    # la flota, se reintenta ignorando la reserva y grupo1 aterriza en CHICA.
+    # Hallazgo real: grupo Tuxtepec (1109 kg, sin afinidad) en F 350_1 con
+    # T 20/T 23 vacios y reservados para otros grupos del mismo dia.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 700, 2: 700, 3: 300, 4: 300}   # g1=1400 (mas pesado), g2=600
+    caps = {"CHICA": 1500, "GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"CHICA": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("CHICA", "LUNES")]) == [1, 2], \
+        "grupo 1 (sin afinidad, forzado antes a GRANDE por la reserva) debe recuperar CHICA -- le alcanza y evita el sobretalla"
+
+
+def test_reserva_de_afinidad_no_cede_si_la_alternativa_tambien_es_tope_maximo():
+    # Mismo patron de A_GRANDE/Z_GRANDE que test_grupo_pesado_sin_afinidad_no_ocupa_la_reservada_de_uno_pendiente,
+    # pero confirmando explicitamente que el nuevo "cede ante el tope maximo"
+    # NO le permite a grupo1 recuperar A_GRANDE (reservada): la unica
+    # alternativa ignorando la reserva (Z_GRANDE) TAMBIEN es del tope maximo,
+    # asi que no hay override -- se sigue respetando la reserva. Protege el
+    # caso F350-vs-F350 (Cosamaloapan / San Andres-Catemaco-Santiago Tuxtla,
+    # Task 9) de que este fix lo rompa.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}   # g1=3200, g2=2000
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"A_GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [3, 4], \
+        "grupo 2 (afinidad fuerte, aun no tenia turno) debe seguir quedandose con A_GRANDE"
+    assert sorted(m["sid"] for m in groups[("Z_GRANDE", "LUNES")]) == [1, 2], \
+        "grupo 1 (sin afinidad) debe seguir cediendo A_GRANDE -- Z_GRANDE tambien es tope maximo, no hay override"

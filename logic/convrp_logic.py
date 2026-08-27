@@ -323,6 +323,17 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     que todavía no le tocaba su turno (mismo tipo de bug que el incidente de
     `unidad_ref` del 2026-08-12, ahora aplicado a afinidad).
 
+    TOPE MÁXIMO DE LA FLOTA: si respetar la reserva de afinidad empuja a un
+    grupo SIN afinidad propia hacia la unidad más grande de la flota (p. ej.
+    F350) -- aunque una unidad chica/mediana reservada para otro grupo siga
+    vacía y le alcance de sobra --, se cede la reserva para esa elección
+    puntual, siempre que ignorarla ofrezca algo por DEBAJO del tope máximo
+    (nunca se "roba" una reservada que también es del tope máximo -- eso
+    rompería el caso F350-vs-F350 de la reserva de arriba). Hallazgo real:
+    grupo Tuxtepec (1109 kg, sin afinidad) caía en F 350_1/JUEVES con T 20 y
+    T 23 vacíos al lado, sólo por estar reservados para otros grupos del
+    mismo día que, en la práctica, casi siempre tenían también otra opción.
+
     Si `unidades_excluidas` deja la flota entera afuera para un grupo (no
     debería pasar en operación normal -- ver spec), se registra una
     excepción SIN_UNIDAD_DISPONIBLE y el grupo queda con el sentinel
@@ -339,6 +350,7 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
 
     excepciones: list = []
     coocurrencia = cfg.get("coocurrencia_grupos")
+    tope_maximo = max(vehiculos_cap.values(), default=0)
     for dia in sorted(por_dia, key=_orden_dia):
         # los grupos más pesados primero (first-fit decreasing), desempate por id
         gids = sorted(por_dia[dia],
@@ -377,24 +389,37 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 if af2_usable:
                     reservadas.add(max(af2_usable, key=lambda u: af2_usable[u]))
             compat_sin_reservar = [u for u in compat if u not in reservadas]
-            compat = compat_sin_reservar or compat
+            compat_final = compat_sin_reservar or compat
 
             af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
-            ordenadas = sorted(
-                compat,
-                key=lambda u: (_num(vehiculos_cap.get(u)),
-                               -sum(_num(pedidos.get(s))
-                                    for s in _sids_de_ruta(asign, u, dia)),
-                               -_num(af.get(u)), str(u)))
 
-            elegido = None
-            for unidad in ordenadas:
-                destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
-                if _restriccion_violada(
-                        sorted(destino), unidad, pedidos, volumenes, coords,
-                        vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
-                    elegido = unidad
-                    break
+            def _ordenar(candidatos, af=af):
+                return sorted(
+                    candidatos,
+                    key=lambda u: (_num(vehiculos_cap.get(u)),
+                                   -sum(_num(pedidos.get(s))
+                                        for s in _sids_de_ruta(asign, u, dia)),
+                                   -_num(af.get(u)), str(u)))
+
+            def _primer_ajuste(candidatos):
+                for unidad in _ordenar(candidatos):
+                    destino = _sids_de_ruta(asign, unidad, dia) + list(a["miembros"])
+                    if _restriccion_violada(
+                            sorted(destino), unidad, pedidos, volumenes, coords,
+                            vehiculos_cap, vehiculos_vol, cfg, dia=dia) is None:
+                        return unidad
+                return None
+
+            elegido = _primer_ajuste(compat_final)
+
+            # Ver docstring "TOPE MAXIMO DE LA FLOTA": se cede la reserva
+            # SOLO cuando respetarla forzo el tope maximo Y ignorarla ofrece
+            # algo por debajo de ese tope -- nunca se "roba" una reservada
+            # que tambien es del tope maximo.
+            if elegido is not None and _num(vehiculos_cap.get(elegido)) >= tope_maximo:
+                alterno = _primer_ajuste(compat)
+                if alterno is not None and _num(vehiculos_cap.get(alterno)) < tope_maximo:
+                    elegido = alterno
 
             if elegido is None and candidatas:
                 # Ningún destino no excluido admite el grupo completo (p. ej.
