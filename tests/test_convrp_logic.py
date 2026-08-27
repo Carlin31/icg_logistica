@@ -448,6 +448,23 @@ def test_tiempo_solo_no_parte_un_rigido():
     assert any(e["tipo"] == "AVISO_TIEMPO_RIGIDO_NO_PARTIDO" for e in exc)
 
 
+def test_rigido_con_peso_y_tiempo_violados_se_parte_igual():
+    # RIGIDO que viola PESO ademas de TIEMPO: _restriccion_violada revisa
+    # PESO -> VOLUMEN -> TIEMPO y devuelve la primera que satura, asi que
+    # esto sigue partiendose como siempre -- el carve-out nuevo es solo
+    # para TIEMPO SOLO, nunca cuando PESO tambien ata.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", list(range(1, 9)),
+                        unidad_ref="V1", dias_admisibles=["LUNES"])]
+    pedidos = {i: 200 for i in range(1, 9)}         # 1600 kg > 1000 cap: viola PESO
+    cfg = _cfg(chequear_tiempo=True, hora_salida_min=420, hora_cierre_min=430)
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000}, {"V1": 9999}, cfg)
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"]
+    assert part, "PESO debe seguir partiendo el RIGIDO, aunque tambien viole TIEMPO"
+    assert part[0]["restriccion"] == "PESO"
+    assert not any(e["tipo"] == "AVISO_TIEMPO_RIGIDO_NO_PARTIDO" for e in exc)
+
+
 # ══ 6. Determinismo ════════════════════════════════════════════════════════
 def _escenario_grande():
     plantilla = [

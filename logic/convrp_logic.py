@@ -26,7 +26,12 @@ Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
        que mover: cada grupo elige directo la unidad no excluida que le
        alcanza, ver arriba)
     2) mover de DÍA dentro de los admisibles
-    3) PARTIR el grupo — último recurso, determinista y siempre registrado
+    3) PARTIR el grupo — último recurso, determinista y siempre registrado.
+       Excepción: un RIGIDO que sólo viola TIEMPO (nunca si también viola
+       PESO/VOLUMEN) ya no se parte -- el modelo de tiempo sobrestima en
+       rutas de muchas paradas chicas (decisión de negocio 2026-08-27);
+       queda con la composición intacta y un aviso visible
+       (AVISO_TIEMPO_RIGIDO_NO_PARTIDO) en vez de fragmentarse en silencio.
     4) CONSOLIDAR solitarias — ninguna ruta se queda con una sola sucursal
        pudiendo sumarse a una activa compatible con cupo
     5) RELLENAR capacidad libre — grupos ya desviados regresan a su unidad/día
@@ -651,9 +656,10 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
       excepciones : [{tipo, grupo, restriccion, ...}] — MOVIDO_DIA,
                     PARTIDO_CAPACIDAD, AVISO_RUTA_LARGA, SIN_UNIDAD_DISPONIBLE,
                     CONSOLIDADO_SOLITARIA, AVISO_RUTA_SOLITARIA,
-                    RELLENO_CAPACIDAD_LIBRE. `unidades_excluidas` es la
-                    restricción dura que ninguna de estas palancas puede
-                    violar.
+                    RELLENO_CAPACIDAD_LIBRE, AVISO_TIEMPO_RIGIDO_NO_PARTIDO
+                    (RIGIDO que sólo viola TIEMPO: no se parte, queda como
+                    aviso). `unidades_excluidas` es la restricción dura que
+                    ninguna de estas palancas puede violar.
     """
     cfg = dict(cfg_por_defecto(), **(cfg or {}))
     if kg_mayoristas is not None:
