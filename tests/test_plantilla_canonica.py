@@ -172,9 +172,9 @@ def test_roundtrip_lectura_bd(app_ctx):
     )
     assert version_vigente() is not None
     grupos = obtener_grupos()
-    assert len(grupos) == 27
+    assert len(grupos) == 28
     assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 18
-    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 9
+    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 10
     # zona: 24 zonas de negocio distintas, todo grupo tiene una asignada
     assert len({g["zona"] for g in grupos}) == 24
     assert all(g["zona"] is not None for g in grupos)
@@ -193,7 +193,7 @@ def test_roundtrip_lectura_bd(app_ctx):
     for g in grupos:
         por_zona.setdefault(g["zona"], []).append(g["grupo"])
     assert len(por_zona[5]) == 3
-    assert len(por_zona[11]) == 2
+    assert len(por_zona[11]) == 3
     total_zona5 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 5)
     total_zona11 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 11)
     assert total_zona5 == 10
@@ -304,7 +304,7 @@ def test_solo_zona_22_supera_6_sucursales():
 def test_sub_rutas_especiales_grupo_y_zona():
     from scripts.reorganizar_zonas_2026 import SUB_RUTAS_ESPECIALES
     por_grupo = {r["grupo"]: r["zona"] for r in SUB_RUTAS_ESPECIALES}
-    assert por_grupo == {5: 5, 25: 5, 26: 5, 11: 11, 27: 11}
+    assert por_grupo == {5: 5, 25: 5, 26: 5, 11: 11, 27: 11, 28: 11}
 
 
 def test_construir_sub_rutas_agrega_24_zonas():
@@ -313,14 +313,14 @@ def test_construir_sub_rutas_agrega_24_zonas():
     assert zonas == set(range(1, 25))
     grupos_simples = set(ZONAS_SIMPLES)          # grupo == zona para las simples
     grupos_especiales = {r["grupo"] for r in SUB_RUTAS_ESPECIALES}
-    assert len(grupos_simples) + len(grupos_especiales) == 27
+    assert len(grupos_simples) + len(grupos_especiales) == 28
     assert not (grupos_simples & grupos_especiales)   # sin colision de numero
 
 
-def test_construir_sub_rutas_produce_27_filas_validas(app_ctx):
+def test_construir_sub_rutas_produce_28_filas_validas(app_ctx):
     from scripts.reorganizar_zonas_2026 import construir_sub_rutas
     sub_rutas, revisar = construir_sub_rutas()
-    assert len(sub_rutas) == 27
+    assert len(sub_rutas) == 28
     zonas = {r["zona"] for r in sub_rutas}
     assert zonas == set(range(1, 25))
     for r in sub_rutas:
@@ -337,3 +337,23 @@ def test_construir_sub_rutas_produce_27_filas_validas(app_ctx):
     revisar_por_zona = {z: pct for z, _grupo_origen, pct in revisar}
     assert 17 in revisar_por_zona
     assert revisar_por_zona[17] == pytest.approx(0.5)
+
+
+def test_tierra_blanca_queda_en_3_grupos_3_3_2_sin_f350(app_ctx):
+    from scripts.reorganizar_zonas_2026 import construir_sub_rutas
+    sub_rutas, _ = construir_sub_rutas()
+    tb = [r for r in sub_rutas if r["zona"] == 11]
+    assert len(tb) == 3
+    assert sorted(len(r["sucursales"]) for r in tb) == [2, 3, 3]
+    todas = sorted(s for r in tb for s in r["sucursales"])
+    assert todas == [1, 24, 25, 36, 63, 76, 77, 101]
+    for r in tb:
+        assert r["unidad_ref"] is None
+        assert set(r["unidades_excluidas"]) == {"F 350_1", "F 350_2", "F 350_3"}
+
+
+def test_tuxtepec_ya_no_tiene_unidad_forzada(app_ctx):
+    from scripts.reorganizar_zonas_2026 import construir_sub_rutas
+    sub_rutas, _ = construir_sub_rutas()
+    g5 = next(r for r in sub_rutas if r["grupo"] == 5)
+    assert g5["unidad_forzada"] is False

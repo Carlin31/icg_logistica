@@ -11,6 +11,14 @@ Ver docs/superpowers/specs/2026-08-26-reorganizacion-zonas-canonicas-design.md
 para la resolución de nombres, la evidencia histórica y la excepción de la
 Zona 22 (8 sucursales en un solo grupo, pese al límite general de 6).
 
+ACTUALIZACIÓN 2026-08 (ver
+docs/superpowers/specs/2026-08-26-asignacion-vehiculos-por-peso-design.md):
+Tierra Blanca (Zona 11) pasó de 2 grupos (11, 27; 4+4 sucursales) a 3 (11,
+27, 28; 3+3+2) para que cada uno quede dentro del rango medio de peso y
+nunca necesite F350 (prohibido para Tierra Blanca vía `unidades_excluidas`).
+Tuxtepec (grupo 5) perdió `unidad_forzada=True`: se re-evalúa por peso como
+cualquier otro grupo.
+
 PENDIENTE (no lo resuelve este script): los CSV
 datos/dias_admisibles_por_grupo.csv, datos/unidad_ref_por_grupo.csv y
 datos/grupos_unidad_forzada.csv siguen referenciando la numeración VIEJA de
@@ -66,7 +74,7 @@ ZONAS_SIMPLES = {
 SUB_RUTAS_ESPECIALES = [
     dict(grupo=5, zona=5, rigidez="FLEXIBLE", dia="MARTES",
          dias_admisibles=["MARTES", "MIERCOLES"], unidad_ref="F 350_2",
-         unidad_forzada=True, sucursales=[2, 7, 15, 31, 54, 55]),
+         unidad_forzada=False, sucursales=[2, 7, 15, 31, 54, 55]),
     dict(grupo=25, zona=5, rigidez="RIGIDO", dia="JUEVES",
          dias_admisibles=["JUEVES"], unidad_ref="F 350_2",
          unidad_forzada=False, sucursales=[38, 46, 57]),
@@ -74,17 +82,24 @@ SUB_RUTAS_ESPECIALES = [
          dias_admisibles=["MARTES", "JUEVES", "MIERCOLES"], unidad_ref="K 16",
          unidad_forzada=False, sucursales=[74]),
     dict(grupo=11, zona=11, rigidez="FLEXIBLE", dia="LUNES",
-         dias_admisibles=["LUNES"], unidad_ref=None,
-         unidad_forzada=False, sucursales=[1, 24, 25, 36]),
+         dias_admisibles=["LUNES"], unidad_ref=None, unidad_forzada=False,
+         unidades_excluidas=["F 350_1", "F 350_2", "F 350_3"],
+         sucursales=[24, 25, 77]),          # Tierra Blanca Norte
     dict(grupo=27, zona=11, rigidez="FLEXIBLE", dia="LUNES",
-         dias_admisibles=["LUNES"], unidad_ref=None,
-         unidad_forzada=False, sucursales=[63, 76, 77, 101]),
+         dias_admisibles=["LUNES"], unidad_ref=None, unidad_forzada=False,
+         unidades_excluidas=["F 350_1", "F 350_2", "F 350_3"],
+         sucursales=[1, 36, 101]),          # Tierra Blanca Centro
+    dict(grupo=28, zona=11, rigidez="FLEXIBLE", dia="LUNES",
+         dias_admisibles=["LUNES"], unidad_ref=None, unidad_forzada=False,
+         unidades_excluidas=["F 350_1", "F 350_2", "F 350_3"],
+         sucursales=[63, 76]),              # Tierra Blanca Sur
 ]
 
 
 def construir_sub_rutas():
-    """Arma las 27 sub-rutas: 22 derivadas del grupo viejo con mas peso +
-    5 especiales (Zona 5 y 11). Devuelve (sub_rutas, alertas_revisar)."""
+    """Arma las 28 sub-rutas: 22 derivadas del grupo viejo con mas peso +
+    6 especiales (Zona 5 y 11, esta ultima partida en 3 desde 2026-08).
+    Devuelve (sub_rutas, alertas_revisar)."""
     # version=17 es el baseline VIEJO (42 grupos, calibracion de 9 semanas de
     # historico) del que se deriva. Sin fijarlo, una vez que la migracion ya
     # corrio y version 18 (24 zonas) quedo vigente, obtener_grupos() leeria
