@@ -389,7 +389,7 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 if af2_usable:
                     reservadas.add(max(af2_usable, key=lambda u: af2_usable[u]))
             compat_sin_reservar = [u for u in compat if u not in reservadas]
-            compat_final = compat_sin_reservar or compat
+            compat_con_reserva = compat_sin_reservar or compat
 
             af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
 
@@ -410,7 +410,7 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                         return unidad
                 return None
 
-            elegido = _primer_ajuste(compat_final)
+            elegido = _primer_ajuste(compat_con_reserva)
 
             # Ver docstring "TOPE MAXIMO DE LA FLOTA": se cede la reserva
             # SOLO cuando respetarla forzo el tope maximo Y ignorarla ofrece
