@@ -395,7 +395,12 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 af2 = (cfg.get("afinidad_unidad") or {}).get(a2["grupo"]) or {}
                 af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
                 if af2_usable:
-                    claim = max(af2_usable, key=lambda u: af2_usable[u])
+                    kg2 = _kg_grupo(a2, pedidos)
+                    le_alcanzan = {u: v for u, v in af2_usable.items()
+                                   if _num(vehiculos_cap.get(u)) >= kg2}
+                    pool = le_alcanzan or af2_usable
+                    claim = min(pool, key=lambda u: (
+                        _num(vehiculos_cap.get(u)), -af2_usable[u], u))
                     # Estrictamente mayor a proposito: un empate NO reserva
                     # (ver docstring "RESERVA DE AFINIDAD" -- si el grupo
                     # actual tiene el mismo reclamo, no hay razon para que

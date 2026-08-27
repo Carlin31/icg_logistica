@@ -1401,3 +1401,44 @@ def test_reserva_de_afinidad_no_bloquea_si_el_reclamo_propio_es_mas_fuerte():
         pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
     assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [1, 2], \
         "grupo 1 tiene el reclamo mas fuerte (4 > 2) -- no debe cederle A_GRANDE a grupo 2"
+
+
+def test_reserva_predice_la_unidad_que_grupo2_elegiria_de_verdad_no_solo_valor_maximo():
+    # grupo2 (pendiente) tiene una afinidad EMPATADA (2.0) repartida entre
+    # tres unidades de capacidad DISTINTA: CHICA_A (1500), CHICA_B (1500) y
+    # MEDIA (2500) -- en ese orden de inserccion en el dict. La reserva
+    # ANTES de este fix tomaba el PRIMERO que aparecia en el diccionario
+    # (MEDIA, sin ningun criterio real) -- pero grupo2, al decidir de
+    # verdad, SIEMPRE prueba capacidad ascendente primero: entre CHICA_A y
+    # CHICA_B (empatadas, mas chicas que MEDIA) desempata por nombre
+    # (CHICA_A gana), y nunca llega a MEDIA. Reservar MEDIA sin necesidad
+    # deja a grupo1 (mas pesado, sin afinidad, no cabe en CHICA_A/B) forzado
+    # a una unidad de mas, cuando MEDIA si le alcanzaba.
+    #
+    # Hallazgo real: grupo con afinidad empatada (2.0) en T 25/K 16/T 20 --
+    # la reserva tomaba T 25 (primero en la cadena historica), pero el
+    # grupo terminaba de verdad en T 20 (empatada en capacidad con T 25,
+    # gana por nombre) -- dejando T 25 vacia sin necesidad todo el dia,
+    # mientras otro grupo sin afinidad ahi se iba a una unidad de mas.
+    # Se excluye ENORME de ambos grupos para que quede fuera del alcance
+    # del tope-maximo-de-la-flota (Task 13): asi se prueba ESTE fix aislado.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    plantilla[0]["unidades_excluidas"] = ["ENORME"]
+    plantilla[1]["unidades_excluidas"] = ["ENORME"]
+    pedidos = {1: 900, 2: 900, 3: 300, 4: 300}   # g1=1800 (mas pesado), g2=600
+    caps = {"CHICA_A": 1500, "CHICA_B": 1500, "MEDIA": 2500, "GRANDE": 3900,
+            "ENORME": 9999}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"MEDIA": 2, "CHICA_B": 2, "CHICA_A": 2}})
+    vols = {u: 99 for u in caps}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, cfg)
+    assert sorted(m["sid"] for m in groups[("MEDIA", "LUNES")]) == [1, 2], \
+        "grupo 1 (1800 kg, no cabe en CHICA_A/B) debe recuperar MEDIA -- " \
+        "reservarla para grupo2 (que en realidad termina en CHICA_A) era innecesario"
+    assert sorted(m["sid"] for m in groups[("CHICA_A", "LUNES")]) == [3, 4], \
+        "grupo 2 debe terminar en CHICA_A: empatada en capacidad con CHICA_B " \
+        "(ambas mas chicas que MEDIA), desempata por nombre"
