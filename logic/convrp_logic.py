@@ -359,7 +359,7 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                                   for s in sids_u)
                     return _num(vehiculos_cap.get(u)) - ocupado
 
-                elegido = min(candidatas, key=lambda u: (-_libre(u), str(u)))
+                elegido = min(candidatas, key=lambda u: (-_libre(u), -_num(af.get(u)), str(u)))
             elif elegido is None:
                 # unidades_excluidas dejó la flota entera afuera: no hay
                 # ninguna unidad válida. Nunca se asigna una excluida.

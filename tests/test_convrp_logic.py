@@ -1213,3 +1213,20 @@ def test_sin_afinidad_el_desempate_sigue_siendo_alfabetico():
         pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99},
         _sin_tiempo())
     assert ("A_GRANDE", "LUNES") in groups
+
+
+def test_ultimo_recurso_tambien_desempata_por_afinidad():
+    # Ningun candidato "cabe" (fuerza el bloque de ultimo recurso, no el
+    # sort normal) -- entre F350_1/2/3, todas vacias y de igual capacidad,
+    # debe ganar la afinidad, no el abecedario.
+    from logic.convrp_logic import _asignar_unidades
+    asign = {1: {"grupo": 1, "unidad": None, "dia": "LUNES", "miembros": [1],
+                "unidad_ref": None, "rigidez": "RIGIDO",
+                "dias_admisibles": ["LUNES"], "unidades_excluidas": []}}
+    pedidos = {1: 5000}      # mas pesado que cualquier unidad: fuerza ultimo recurso
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={1: {"Z_GRANDE": 9}})
+    _asignar_unidades(asign, pedidos, {}, {}, caps, {}, cfg)
+    assert asign[1]["unidad"] == "Z_GRANDE", \
+        "el ultimo recurso tambien debe desempatar por afinidad, no solo por espacio libre/abecedario"
