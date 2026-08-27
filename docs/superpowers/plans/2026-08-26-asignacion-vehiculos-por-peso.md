@@ -3194,3 +3194,252 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Task 15: La reserva de afinidad predice la MISMA unidad que el grupo elegiría de verdad
+
+**Contexto -- por qué esta task existe:** el usuario pidió mover grupo 7
+(T 17_1/JUEVES, 1392 kg) y grupo 17 (K 20/JUEVES, 793 kg) a un día con más
+espacio en camión chico ("lo más probable es que sean en días distintos").
+Al investigar el día alternativo de grupo 7 (MIÉRCOLES, su único otro día
+admisible), se topó con el caso EXACTO que la memoria de proyecto
+`project_wasted_affinity_reservation_risk.md` (Task 14) dejó documentado
+como diferido: T 25 quedaba vacía el miércoles y reservada sin necesidad.
+Investigando a fondo (instrumentación temporal, agregada/confirmada/
+revertida cada vez -- `logic/convrp_logic.py` quedó sin diff entre pasos)
+se encontró que **NO hace falta ningún mecanismo de "mirar hacia adelante"
+nuevo** -- es un bug puntual y corregible en el cálculo mismo de la
+reserva.
+
+**Root cause confirmado:** grupo 3 (T 20/MIÉRCOLES real, 1200 kg) tiene
+afinidad **empatada** (2.0) en tres unidades de capacidad DISTINTA: T 25
+(1549), K 16 (2500) y T 20 (1549). El cálculo de la reserva
+(`reservadas.add(max(af2_usable, key=lambda u: af2_usable[u]))`,
+`logic/convrp_logic.py:397` antes de este fix) toma el PRIMERO que
+aparece en el diccionario cuando hay empate -- que refleja el orden en que
+vino el texto histórico (`unidades_afines`), un orden sin ningún
+significado real. En este caso resultó ser T 25. Pero grupo 3, al decidir
+de verdad en `_asignar_unidades`, SIEMPRE prueba capacidad ascendente
+primero (T 25 y T 20, empatadas en 1549, antes que K 16 a 2500) y ahí
+desempata por nombre: "T 20" < "T 25" -- termina en **T 20**, no T 25. La
+reserva protegía la unidad equivocada: T 25 quedaba vacía todo el día
+mientras grupo 7 (sin ninguna afinidad a T 25 -- su reclamo más fuerte es
+T 17_1, mediano) no podía usarla y caía en T 17_1 de más.
+
+**Confirmado que el fix no rompe el caso original de la Task 9**: grupo 22
+(San Andrés/Catemaco/Santiago Tuxtla/Covarrubias) tiene una ÚNICA entrada de
+afinidad (`{'F 350_3': 9.0}`, sin empate) -- este fix sólo cambia el
+desempate CUANDO hay empate en el valor máximo de afinidad entre unidades
+de capacidad distinta; los 5 tests previos de reserva de afinidad (Tasks 9,
+13, 14) tampoco tienen ningún empate en sus datos -- se confirmó a mano y
+verificando que los 5 siguen pasando sin tocarlos.
+
+**Efecto colateral positivo, verificado**: este mismo bug era la causa real
+del caso documentado en la memoria de proyecto (grupo 28, J 19/LUNES, 744
+kg) -- con este fix, grupo 28 se corrige SOLO, sin tocar ningún dato de
+plantilla. Se debe actualizar/retirar esa entrada de memoria tras confirmar.
+
+**Hallazgo importante, fuera de alcance de esta task (documentar, no
+resolver aquí):** al simular mover grupo 7 a MIÉRCOLES con este fix activo,
+se encontró que el resultado es **inconsistente entre pasadas** del punto
+fijo de mayoristas (`construir_rutas_con_mayoristas`, hasta 4 pasadas): en
+una pasada grupo 7 aterriza correctamente en T 23 (T 25 y T 20 llenas para
+ese momento), en otra pasada aterriza en T 17_1 (mediano) -- porque el
+peso ancla de mayoristas puede cambiar, entre una pasada y otra, el ORDEN
+relativo (first-fit-decreasing) en que dos grupos de peso similar se
+procesan, lo que decide quién llega primero a una unidad chica. Es un
+problema DISTINTO y más profundo (inestabilidad de orden entre pasadas de
+mayoristas), no algo que este fix pueda resolver -- **no se toca en esta
+task**. Por eso el día de grupo 7 NO se cambia en la plantilla todavía.
+
+**Files:**
+- Modify: `logic/convrp_logic.py` (`_asignar_unidades`, líneas ~392-409: cálculo de `claim`)
+- Test: `tests/test_convrp_logic.py`
+- Memoria de proyecto: actualizar `project_wasted_affinity_reservation_risk.md`
+
+- [ ] **Step 1: Escribir el test** (ya escrito y verificado en este plan --
+el implementador debe agregarlo tal cual, confirmar que FALLA sin el fix y
+PASA con él, no reescribirlo desde cero)
+
+Agrega a `tests/test_convrp_logic.py` (después de
+`test_reserva_de_afinidad_no_bloquea_si_el_reclamo_propio_es_mas_fuerte`):
+
+```python
+def test_reserva_predice_la_unidad_que_grupo2_elegiria_de_verdad_no_solo_valor_maximo():
+    # grupo2 (pendiente) tiene una afinidad EMPATADA (2.0) repartida entre
+    # tres unidades de capacidad DISTINTA: CHICA_A (1500), CHICA_B (1500) y
+    # MEDIA (2500) -- en ese orden de inserccion en el dict. La reserva
+    # ANTES de este fix tomaba el PRIMERO que aparecia en el diccionario
+    # (MEDIA, sin ningun criterio real) -- pero grupo2, al decidir de
+    # verdad, SIEMPRE prueba capacidad ascendente primero: entre CHICA_A y
+    # CHICA_B (empatadas, mas chicas que MEDIA) desempata por nombre
+    # (CHICA_A gana), y nunca llega a MEDIA. Reservar MEDIA sin necesidad
+    # deja a grupo1 (mas pesado, sin afinidad, no cabe en CHICA_A/B) forzado
+    # a una unidad de mas, cuando MEDIA si le alcanzaba.
+    #
+    # Hallazgo real: grupo con afinidad empatada (2.0) en T 25/K 16/T 20 --
+    # la reserva tomaba T 25 (primero en la cadena historica), pero el
+    # grupo terminaba de verdad en T 20 (empatada en capacidad con T 25,
+    # gana por nombre) -- dejando T 25 vacia sin necesidad todo el dia,
+    # mientras otro grupo sin afinidad ahi se iba a una unidad de mas.
+    # Se excluye ENORME de ambos grupos para que quede fuera del alcance
+    # del tope-maximo-de-la-flota (Task 13): asi se prueba ESTE fix aislado.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    plantilla[0]["unidades_excluidas"] = ["ENORME"]
+    plantilla[1]["unidades_excluidas"] = ["ENORME"]
+    pedidos = {1: 900, 2: 900, 3: 300, 4: 300}   # g1=1800 (mas pesado), g2=600
+    caps = {"CHICA_A": 1500, "CHICA_B": 1500, "MEDIA": 2500, "GRANDE": 3900,
+            "ENORME": 9999}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"MEDIA": 2, "CHICA_B": 2, "CHICA_A": 2}})
+    vols = {u: 99 for u in caps}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, cfg)
+    assert sorted(m["sid"] for m in groups[("MEDIA", "LUNES")]) == [1, 2], \
+        "grupo 1 (1800 kg, no cabe en CHICA_A/B) debe recuperar MEDIA -- " \
+        "reservarla para grupo2 (que en realidad termina en CHICA_A) era innecesario"
+    assert sorted(m["sid"] for m in groups[("CHICA_A", "LUNES")]) == [3, 4], \
+        "grupo 2 debe terminar en CHICA_A: empatada en capacidad con CHICA_B " \
+        "(ambas mas chicas que MEDIA), desempata por nombre"
+```
+
+- [ ] **Step 2: Correr y confirmar que falla, y que los 5 tests previos de reserva de afinidad siguen pasando**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k "reserva_predice or reserva_de_afinidad" -v
+```
+
+Esperado: el nuevo test FALLA (`KeyError: ('MEDIA', 'LUNES')` -- grupo1 no
+llega ahí sin el fix); los 5 tests previos (Tasks 9, 13, 14) PASAN sin
+tocarlos.
+
+- [ ] **Step 3: Implementar el fix**
+
+En `logic/convrp_logic.py`, dentro del bucle de `reservadas` (~línea
+392-403), reemplaza:
+
+```python
+                if af2_usable:
+                    claim = max(af2_usable, key=lambda u: af2_usable[u])
+```
+
+por:
+
+```python
+                if af2_usable:
+                    # Predice la MISMA unidad que g2 elegiria de verdad en
+                    # su turno -- no solo "el valor de afinidad mas alto"
+                    # (ver docstring "RESERVA DE AFINIDAD"): _asignar_unidades
+                    # prueba SIEMPRE capacidad ascendente primero y sólo
+                    # desempata por afinidad DENTRO de un mismo nivel de
+                    # capacidad. Sin esto, un reclamo empatado en varias
+                    # unidades de capacidad distinta (p. ej. 2.0 en T 25,
+                    # K 16 Y T 20) reservaba la que aparecía primero en el
+                    # dato histórico (orden arbitrario de texto), aunque g2
+                    # -- al decidir de verdad -- terminara en otra (la de
+                    # MENOR capacidad entre las empatadas, por nombre) --
+                    # dejando la reservada vacía sin necesidad (hallazgo
+                    # real: T 25 reservada y vacía todo el día, mientras el
+                    # grupo "protegido" terminaba en T 20 igual de chica).
+                    kg2 = _kg_grupo(a2, pedidos)
+                    le_alcanzan = {u: v for u, v in af2_usable.items()
+                                   if _num(vehiculos_cap.get(u)) >= kg2}
+                    pool = le_alcanzan or af2_usable
+                    claim = min(pool, key=lambda u: (
+                        _num(vehiculos_cap.get(u)), -af2_usable[u], u))
+```
+
+(El resto del bloque -- la comparación `if af2_usable[claim] > _num(af.get(claim)):`
+de la Task 14 -- no cambia, sigue usando `claim` tal cual lo calcule esto.)
+
+- [ ] **Step 4: Correr y confirmar que pasa, y que los 5 tests previos siguen igual**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k "reserva_predice or reserva_de_afinidad" -v
+```
+
+- [ ] **Step 5: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_vrp_logic.py tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+Esperado: 100% PASS (110 tests).
+
+- [ ] **Step 6: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`.
+El logistica_id puede haber cambiado de nuevo -- búscalo por nombre en la
+tabla `logisticas` antes de asumir un id viejo.)
+
+Confirma en el resultado real:
+- **Grupo 28 (J 19/LUNES, 744 kg) debe corregirse SOLO** -- sin que hayas
+  tocado ningún dato de plantilla, debe aparecer ahora en T 25/LUNES (o el
+  camión chico que le corresponda), no en J 19. Esta es la verificación
+  más importante de esta task.
+- Cosamaloapan sigue en F 350_1, las 8 sucursales de San Andrés/Catemaco/
+  Santiago Tuxtla/Covarrubias siguen juntas en F 350_3, Santiago Tuxtla 1
+  sigue con el otro Santiago Tuxtla (Tasks 9 y 10 -- no deben romperse).
+- Grupo 20 (T 17_2 antes de la Task 14) sigue en T 23/JUEVES (Task 14 -- no
+  debe romperse).
+- Grupo 10 (Temascal/Los Naranjos) y grupo 8 (Valle Nacional/Chiltepec)
+  siguen en camión chico en sus días ya movidos (post-Task-14, MIÉRCOLES y
+  VIERNES respectivamente) -- no deben romperse.
+- Repite el chequeo de KANGOO (obligatorio, no lo saltes).
+- Grupo 7 (T 17_1/JUEVES) y grupo 17 (K 20/JUEVES) -- documenta su estado
+  (deberían seguir igual que antes de esta task, sin cambios de día), no
+  los "arregles" de paso -- son fuera de alcance (ver hallazgo de
+  inestabilidad entre pasadas, arriba).
+
+Si el resultado real no coincide con lo esperado, no commitees -- reporta
+BLOCKED con el detalle exacto.
+
+- [ ] **Step 7: Actualizar la memoria de proyecto**
+
+Lee `C:\Users\carli\.claude\projects\c--Users-carli-Documents-ICG\memory\project_wasted_affinity_reservation_risk.md`
+y su entrada en `MEMORY.md` de esa misma carpeta. Si el Step 6 confirmó que
+grupo 28 ya no tiene el problema, actualiza esa memoria: no la borres sin
+más -- reescríbela para reflejar que ESTA variante específica del problema
+(reserva con empate de afinidad entre capacidades distintas, resuelta por
+orden arbitrario de texto en vez de por el mismo criterio que la decisión
+real) quedó **corregida** en esta task (Task 15), pero que el riesgo más
+general de "reserva que protege una unidad que el grupo protegido nunca usa,
+por razones que no son un empate de afinidad" (p. ej. cambios de orden entre
+pasadas de mayoristas, como el hallazgo de grupo 7 de esta misma task) sigue
+sin resolver. Esto NO es un commit de git.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add logic/convrp_logic.py tests/test_convrp_logic.py
+git commit -m "$(cat <<'EOF'
+La reserva de afinidad predice la misma unidad que el grupo elegiria de verdad
+
+Encontrado al investigar el pedido del usuario de mover grupo 7 (T17_1,
+JUEVES) a otro dia: el mismo tipo de "reserva desperdiciada" documentado y
+diferido en la Task 14 (grupo 28, J19/LUNES). Root cause real: cuando un
+grupo pendiente tiene su afinidad EMPATADA entre unidades de capacidad
+DISTINTA (p. ej. 2.0 en T25/K16/T20), la reserva tomaba la primera que
+aparecia en el dato historico (orden de texto sin significado), no la que
+el grupo elegiria de verdad (_asignar_unidades siempre prueba capacidad
+ascendente primero, afinidad solo desempata DENTRO de un mismo nivel). Se
+corrige el calculo de "claim" para usar el mismo criterio. Efecto
+colateral verificado: corrige solo, sin tocar plantilla, el caso de grupo
+28 documentado en memoria de proyecto. Verificado contra el PDF real de la
+semana 24-28 agosto -- los 5 tests previos de reserva de afinidad (Tasks 9,
+13, 14) siguen intactos. Hallazgo nuevo y distinto, fuera de alcance:
+grupo 7 sigue afectado por inestabilidad de orden ENTRE pasadas del punto
+fijo de mayoristas -- documentado, no resuelto aqui.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
