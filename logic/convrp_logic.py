@@ -358,19 +358,22 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
 def _dia_alternativo(asign, a, pedidos, volumenes, coords,
                      vehiculos_cap, vehiculos_vol, cfg):
     """Otro día ADMISIBLE (en orden de preferencia) donde el grupo quepa.
-    El grupo se mueve completo — el día es atributo del bloque.
+    El grupo se mueve completo -- el día es atributo del bloque.
+
+    Nunca prueba una unidad de `unidades_excluidas` del grupo; entre las que
+    le alcanzan, prueba primero la de menor capacidad.
 
     Dos pasadas: primero sólo destinos compatibles por historial (mismo
     criterio que `_asignar_unidades`), y sólo si ninguno sirve se repite sin
-    ese filtro — mejor un destino sin precedente que un grupo sin día."""
+    ese filtro -- mejor un destino sin precedente que un grupo sin día."""
     coocurrencia = cfg.get("coocurrencia_grupos")
+    candidatas = sorted((u for u in vehiculos_cap if not _excluida(a, u)),
+                        key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
     for exigir_compat in (True, False):
         for dia in a["dias_admisibles"]:
             if dia == a["dia"]:
                 continue
-            for unidad in [a["unidad_ref"]] + sorted(vehiculos_cap):
-                if unidad not in vehiculos_cap:
-                    continue
+            for unidad in candidatas:
                 if exigir_compat and not _compatible_historico(
                         a["grupo"], unidad, dia, asign, coocurrencia):
                     continue

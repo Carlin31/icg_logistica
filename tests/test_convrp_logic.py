@@ -860,6 +860,18 @@ def test_dia_alternativo_coocurrencia_cede_si_es_la_unica_opcion():
     assert resultado == ("MARTES", "V1")          # única unidad: se acepta sin precedente
 
 
+def test_dia_alternativo_nunca_ofrece_una_excluida():
+    from logic.convrp_logic import _dia_alternativo
+    asign = {}
+    a = {"grupo": 1, "unidad": "ORIGEN", "dia": "LUNES", "miembros": [1],
+         "unidad_ref": "PROHIBIDA", "rigidez": "FLEXIBLE",
+         "dias_admisibles": ["LUNES", "MARTES"], "unidades_excluidas": ["PROHIBIDA"]}
+    pedidos = {1: 100}
+    caps = {"ORIGEN": 1000, "PROHIBIDA": 5000}
+    resultado = _dia_alternativo(asign, a, pedidos, {}, {}, caps, {}, _sin_tiempo())
+    assert resultado is None or resultado[1] != "PROHIBIDA"
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Reserva de unidad_ref pendiente — encontrado en producción 2026-08-12:
 # grupo 19 (Amatitlán/Carlos A. Carrillo 2, ref F 350_1) no cabía por TIEMPO
