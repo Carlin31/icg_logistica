@@ -3443,3 +3443,56 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Post-Task 15: grupo 17 (K 20/JUEVES) también se mueve a VIERNES (no es una task de código)
+
+**Encontrado por el usuario revisando el PDF real regenerado:** K 20 ·
+XT-2507-A/JUEVES con 793 kg (Sotavento, Veracruz 3, Veracruz 4, Tejería) --
+"la ruta asignada para el jueves en el camión K20 no cumple con el peso".
+Es exactamente grupo 17, identificado desde la Task 14 como el único de
+los 4 grupos "chicos atrapados en jueves" sin otro día admisible en la
+plantilla (`FLEXIBLE`, `dias_admisibles=['JUEVES']` únicamente).
+
+**Respaldo histórico confirmado (13 semanas en `rutas_historicas`):** los
+sids de grupo 17 (67, 71, 72, 99) operaron en VIERNES al menos 2 veces
+(semanas del 9-13 y 23-27 de febrero de 2026), además de LUNES y MARTES una
+vez cada uno -- JUEVES es el día más común pero no el único históricamente.
+VIERNES, además, tenía muy poca demanda ya asignada esa semana.
+
+**Cambio realizado:** `scripts/mover_dia_preferido_grupo_17.py` -- agrega
+VIERNES como día admisible NUEVO de grupo 17 en `plantilla_grupo_dia`
+(no existía ningún renglón salvo JUEVES) y lo vuelve su día preferido;
+JUEVES se mantiene como día admisible de respaldo, sólo deja de ser el
+preferido. Misma versión 43 vigente, sin crear versión nueva -- mismo
+criterio que el ajuste de grupo 10/grupo 8.
+
+**Verificado contra el PDF real** ("24 al 28 de agosto"): grupo 17 ahora en
+T 20/VIERNES (793/1549 kg, 51.2%). Resto de la semana sin cambios:
+Cosamaloapan, San Andrés/Catemaco/Santiago Tuxtla/Covarrubias, Santiago
+Tuxtla 1+2, KANGOO (sin uso), y grupo 7/T 17_1/JUEVES (1392 kg, seguimiento
+del hallazgo de la Task 15 -- sigue igual, no se toca). De los 4 grupos
+"chicos atrapados en jueves" originales, sólo grupo 7 queda pendiente,
+bloqueado por la inestabilidad de orden entre pasadas de mayoristas
+documentada en la Task 15.
+
+```bash
+git add scripts/mover_dia_preferido_grupo_17.py
+git commit -m "$(cat <<'EOF'
+Mueve el dia preferido de grupo 17 (K20/JUEVES) a VIERNES
+
+Encontrado por el usuario en el PDF real: K20/JUEVES con 793 kg (Sotavento,
+Veracruz 3/4, Tejeria) -- el ultimo de los 4 grupos "chicos atrapados en
+jueves" (identificados en la Task 14) sin otro dia admisible en la
+plantilla. Confirmado respaldo historico: opero en VIERNES al menos 2 de
+13 semanas. Se agrega VIERNES como dia admisible nuevo (no existia) y se
+vuelve el preferido; JUEVES queda de respaldo. Verificado contra el PDF
+real: ahora en T20/VIERNES (51.2%), resto de la semana sin cambios. Solo
+grupo 7 (T17_1/JUEVES) queda pendiente, bloqueado por la inestabilidad de
+orden entre pasadas de mayoristas documentada en la Task 15.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
