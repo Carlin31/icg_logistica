@@ -1230,3 +1230,42 @@ def test_ultimo_recurso_tambien_desempata_por_afinidad():
     _asignar_unidades(asign, pedidos, {}, {}, caps, {}, cfg)
     assert asign[1]["unidad"] == "Z_GRANDE", \
         "el ultimo recurso tambien debe desempatar por afinidad, no solo por espacio libre/abecedario"
+
+
+def test_grupo_pesado_sin_afinidad_no_ocupa_la_reservada_de_uno_pendiente():
+    # grupo 1 (mas pesado, SIN afinidad) se procesa primero; grupo 2 (mas
+    # liviano, CON afinidad fuerte a Z_GRANDE) todavia no tuvo su turno.
+    # grupo 1 no debe tomar Z_GRANDE si A_GRANDE (misma capacidad) tambien
+    # le sirve -- debe dejarla reservada para grupo 2.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}   # g1=3200 (mas pesado), g2=2000
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"Z_GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("Z_GRANDE", "LUNES")]) == [3, 4], \
+        "grupo 2 (afinidad fuerte, aun no tenia turno) debe quedarse con Z_GRANDE"
+    assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [1, 2], \
+        "grupo 1 (sin afinidad, mas pesado) debe ceder Z_GRANDE y usar A_GRANDE"
+
+
+def test_reserva_de_afinidad_cede_si_es_la_unica_opcion():
+    # Solo existe una unidad -- reservarla para el grupo pendiente dejaria
+    # a grupo 1 sin ningun destino, asi que la reserva cede.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 500, 4: 500}
+    caps = {"Z_GRANDE": 5000}          # unica unidad de toda la flota
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"Z_GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"Z_GRANDE": 99}, cfg)
+    assert len(groups) == 1 and ("Z_GRANDE", "LUNES") in groups
+    sids = sorted(m["sid"] for ms in groups.values() for m in ms)
+    assert sids == [1, 2, 3, 4]

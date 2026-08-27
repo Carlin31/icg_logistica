@@ -298,6 +298,16 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     grupo completo): ahí se elige la no excluida con más espacio libre, para
     que la partición posterior pele lo mínimo, pero jamás una excluida.
 
+    RESERVA DE AFINIDAD: antes de elegir, cada grupo excluye de sus
+    candidatos al camión que es el reclamo de afinidad MÁS FUERTE de
+    cualquier grupo que todavía no tuvo su turno esta pasada (mismo día, más
+    liviano, se procesa después) -- salvo que sea la única opción viable
+    (mismo patrón "cede si es la única opción" que ya usa la coocurrencia
+    arriba). Sin esto, un grupo pesado sin afinidad real puede ocupar de
+    buena fe el camión que es el hogar histórico de otro grupo más liviano
+    que todavía no le tocaba su turno (mismo tipo de bug que el incidente de
+    `unidad_ref` del 2026-08-12, ahora aplicado a afinidad).
+
     Si `unidades_excluidas` deja la flota entera afuera para un grupo (no
     debería pasar en operación normal -- ver spec), se registra una
     excepción SIN_UNIDAD_DISPONIBLE y el grupo queda con el sentinel
@@ -319,13 +329,31 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
         gids = sorted(por_dia[dia],
                       key=lambda g: (-_kg_grupo(asign[g], pedidos), g))
 
-        for gid in gids:
+        for idx, gid in enumerate(gids):
             a = asign[gid]
             candidatas = [u for u in vehiculos_cap if not _excluida(a, u)]
 
             compat = [u for u in candidatas if _compatible_historico(
                 a["grupo"], u, dia, asign, coocurrencia)]
             compat = compat or candidatas
+
+            # Reserva de afinidad: el camión que es el reclamo MÁS FUERTE de
+            # un grupo que aún no tuvo su turno esta pasada (más liviano, se
+            # procesa después) no es destino válido para éste -- salvo que
+            # sea la única opción viable. Mismo patrón que la reserva de
+            # unidad_ref que existió antes de la Task 2 (incidente
+            # 2026-08-12): sin esto, un grupo pesado sin afinidad real puede
+            # ocupar de buena fe el camión que sí es el hogar histórico de
+            # otro grupo más liviano que todavía no le tocaba su turno
+            # (hallazgo real: Tuxtepec ocupaba F 350_1 antes que Cosamaloapan,
+            # que tiene afinidad 9/9 semanas ahí).
+            reservadas = set()
+            for g2 in gids[idx + 1:]:
+                af2 = (cfg.get("afinidad_unidad") or {}).get(asign[g2]["grupo"]) or {}
+                if af2:
+                    reservadas.add(max(af2, key=lambda u: af2[u]))
+            compat_sin_reservar = [u for u in compat if u not in reservadas]
+            compat = compat_sin_reservar or compat
 
             af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
             ordenadas = sorted(
@@ -359,7 +387,8 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                                   for s in sids_u)
                     return _num(vehiculos_cap.get(u)) - ocupado
 
-                elegido = min(candidatas, key=lambda u: (-_libre(u), -_num(af.get(u)), str(u)))
+                candidatas_ur = [u for u in candidatas if u not in reservadas] or candidatas
+                elegido = min(candidatas_ur, key=lambda u: (-_libre(u), -_num(af.get(u)), str(u)))
             elif elegido is None:
                 # unidades_excluidas dejó la flota entera afuera: no hay
                 # ninguna unidad válida. Nunca se asigna una excluida.
