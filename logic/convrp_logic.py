@@ -35,7 +35,11 @@ Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
     4) CONSOLIDAR solitarias — ninguna ruta se queda con una sola sucursal
        pudiendo sumarse a una activa compatible con cupo
     5) RELLENAR capacidad libre — grupos ya desviados regresan a su unidad/día
-       preferido si hay una ruta con espacio y precedente histórico
+       preferido si hay una ruta con espacio y precedente histórico.
+       DESACTIVADA por defecto desde 2026-08-27 (ver `CONVRP_RELLENO_CAPACIDAD`):
+       su premisa de "hogar preferido" ya no aplica sin preferencia, y
+       terminaba arrastrando grupos bien puestos a camiones sobredimensionados
+       sólo por tener espacio libre.
 
 Determinismo: todo recorrido es sobre claves ordenadas; sin aleatoriedad ni
 dependencia del orden de los diccionarios de entrada. Cada grupo se mueve a lo
@@ -844,7 +848,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
 
     # ── 3c. Palanca 5: rellenar capacidad libre con grupos ya desviados de
     #      su unidad/dia preferido, priorizando devolverlos a casa. ──
-    if cfg.get("relleno_capacidad", True):
+    if cfg.get("relleno_capacidad", False):
         excepciones += _rellenar_capacidad_libre(asign, pedidos, volumenes,
                                                   coords, vehiculos_cap,
                                                   vehiculos_vol, cfg, kg_may)
