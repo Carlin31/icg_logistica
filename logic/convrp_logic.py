@@ -323,6 +323,12 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     que todavía no le tocaba su turno (mismo tipo de bug que el incidente de
     `unidad_ref` del 2026-08-12, ahora aplicado a afinidad).
 
+    La reserva sólo aplica si el reclamo ajeno es ESTRICTAMENTE más fuerte
+    que el reclamo propio del grupo actual a esa misma unidad -- un empate o
+    un reclamo más débil no le quita nada (hallazgo real: grupo con afinidad
+    4.0 a T 23 perdía esa unidad ante un reclamo ajeno de sólo 2.0, porque
+    la reserva no comparaba fuerza, sólo existencia).
+
     TOPE MÁXIMO DE LA FLOTA: si respetar la reserva de afinidad empuja a un
     grupo SIN afinidad propia hacia la unidad más grande de la flota (p. ej.
     F350) -- aunque una unidad chica/mediana reservada para otro grupo siga
@@ -381,17 +387,19 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
             # riesgo documentado que KANGOO), reservarla no protege nada
             # real, sólo le quita una opción de más al grupo que sí puede
             # usarla.
+            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
+
             reservadas = set()
             for g2 in gids[idx + 1:]:
                 a2 = asign[g2]
                 af2 = (cfg.get("afinidad_unidad") or {}).get(a2["grupo"]) or {}
                 af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
                 if af2_usable:
-                    reservadas.add(max(af2_usable, key=lambda u: af2_usable[u]))
+                    claim = max(af2_usable, key=lambda u: af2_usable[u])
+                    if af2_usable[claim] > _num(af.get(claim)):
+                        reservadas.add(claim)
             compat_sin_reservar = [u for u in compat if u not in reservadas]
             compat_con_reserva = compat_sin_reservar or compat
-
-            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
 
             def _ordenar(candidatos, af=af):
                 return sorted(

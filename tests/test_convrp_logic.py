@@ -1380,3 +1380,24 @@ def test_reserva_de_afinidad_no_cede_si_la_alternativa_tambien_es_tope_maximo():
         "grupo 2 (afinidad fuerte, aun no tenia turno) debe seguir quedandose con A_GRANDE"
     assert sorted(m["sid"] for m in groups[("Z_GRANDE", "LUNES")]) == [1, 2], \
         "grupo 1 (sin afinidad) debe seguir cediendo A_GRANDE -- Z_GRANDE tambien es tope maximo, no hay override"
+
+
+def test_reserva_de_afinidad_no_bloquea_si_el_reclamo_propio_es_mas_fuerte():
+    # grupo1 (mas pesado, se procesa primero) tiene afinidad FUERTE a
+    # A_GRANDE (4.0); grupo2 (mas liviano, pendiente) tiene una afinidad mas
+    # DEBIL a la MISMA unidad (2.0). La reserva NO debe aplicar -- un
+    # reclamo mas debil no le puede quitar la unidad a un reclamo mas
+    # fuerte. Hallazgo real: grupo 20 (T 23:4.0, T 25:4.0) perdia T 23 ante
+    # un reclamo ajeno de solo 2.0.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}   # g1=3200 (mas pesado), g2=2000
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={1: {"A_GRANDE": 4}, 2: {"A_GRANDE": 2}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [1, 2], \
+        "grupo 1 tiene el reclamo mas fuerte (4 > 2) -- no debe cederle A_GRANDE a grupo 2"
