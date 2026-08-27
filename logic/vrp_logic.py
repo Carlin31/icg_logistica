@@ -24,6 +24,13 @@ UMBRAL_PEQUEÑO   = 1300   # kg ≤ este valor → excepción (no restricción d
 # carga 3.5 t, sin superar nunca las 4 t). CAP-1.5 (abajo) es la única otra
 # excepción -- cualquier otro vehículo tiene como límite máximo exactamente
 # el 100 % de su capacidad nominal, sin tolerancia adicional.
+#
+# NOTA: a diferencia de CAP-4, CAP-1.5 NO está espejada en
+# asignacion_logic.py:_capacidad_efectiva_ton() -- deliberado, ese flujo
+# (utilización de creacion_rutas/dia_sugerido) no es el que arma el PDF real
+# (ver Task 12 del plan de asignación por peso). Si algún día se necesita
+# consistencia ahí también, hace falta agregarla a propósito, no asumir que
+# ya está.
 CAP_EXCEPCION_MIN_KG  = 3500
 CAP_EXCEPCION_MAX_KG  = 4000
 CAP_EXCEPCION_TOPE_KG = 3900

@@ -11,6 +11,13 @@ def test_cap1500_da_tolerancia_hasta_1549_kg():
     assert capacidad_efectiva_kg(1500) == 1549
 
 
+def test_cap1500_no_se_ensancha_a_kg_vecinos():
+    # El rango es exactamente 1500 -- ni 1499 ni 1501 deben heredar la
+    # tolerancia por error (a diferencia de CAP-4, que sí es un rango real).
+    assert capacidad_efectiva_kg(1499) == 1499
+    assert capacidad_efectiva_kg(1501) == 1501
+
+
 def test_cap1500_no_afecta_capacidades_fuera_de_1500_kg():
     # 1300 kg (T 25 antes de corregir el dato) sigue siendo 100% nominal
     assert capacidad_efectiva_kg(1300) == 1300

@@ -159,6 +159,12 @@ def _capacidad_efectiva_ton(cap) -> float:
     sin superar nunca las 4 t). Cualquier otro vehículo tiene como límite
     máximo exactamente el 100 % de su capacidad nominal, sin tolerancia
     adicional, bajo ninguna circunstancia.
+
+    NOTA: logic/vrp_logic.py:capacidad_efectiva_kg() (el motor que arma el
+    PDF real) tiene además una excepción CAP-1.5 (1.5 t -> tope de 1.549 t)
+    que esta función NO replica -- deliberado, este flujo (utilización de
+    creacion_rutas/dia_sugerido) es distinto del que genera el PDF (ver Task
+    12 del plan de asignación por peso). No asumas que están sincronizadas.
     """
     try:
         c = float(cap or 0)
