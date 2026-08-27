@@ -204,6 +204,34 @@ def test_unidad_alternativa_prefiere_la_de_menor_capacidad():
     assert resultado == "CHICA"
 
 
+def test_pedazo_partido_hereda_unidades_excluidas():
+    # El grupo (excluido de GRANDE) pesa más que CHICA y se parte. El pedazo
+    # separado, tras partir, debe seguir sin poder consolidarse ni rellenar
+    # en GRANDE aunque GRANDE tenga cupo y sea compatible -- si no heredó
+    # unidades_excluidas, Palancas 4/5 lo mandarían ahí de todos modos.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None,
+               dias_admisibles=["LUNES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [3], unidad_ref=None,
+               dias_admisibles=["LUNES"]),
+    ]
+    plantilla[0]["unidades_excluidas"] = ["GRANDE"]
+    pedidos = {1: 900, 2: 900, 3: 100}          # g1 = 1800 > CHICA(1000): se parte
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    coocurrencia = {frozenset((1, 2)): 1}       # compatibles: aisla SOLO la exclusion
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    assert not any(e["tipo"] == "CONSOLIDADO_SOLITARIA" and e["a_unidad"] == "GRANDE"
+                  for e in exc), \
+        "el pedazo partido nunca debe consolidarse en GRANDE (excluida para el grupo 1)"
+    for (unidad, dia), miembros in groups.items():
+        if unidad == "GRANDE":
+            sids = {m["sid"] for m in miembros}
+            assert not (sids & {1, 2}), \
+                "ninguna sucursal del grupo 1 (excluido de GRANDE) debe terminar ahí"
+
+
 # ══ 3. Palanca 1: mover de unidad dentro del mismo día ═════════════════════
 def test_sobrecupo_mueve_flexible_a_otra_unidad_del_mismo_dia():
     # V1 no aguanta los dos grupos (1200 kg > 1000); el FLEXIBLE se va a V2.
