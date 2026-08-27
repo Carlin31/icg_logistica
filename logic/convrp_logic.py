@@ -22,7 +22,9 @@ Modelo (decisiones fijas del negocio):
     un rígido puede cambiar de día si su conjunto admisible lo permite.
 
 Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
-    1) mover de UNIDAD dentro del mismo día
+    1) asignación de UNIDAD por peso dentro del mismo día (sin preferencia
+       que mover: cada grupo elige directo la unidad no excluida que le
+       alcanza, ver arriba)
     2) mover de DÍA dentro de los admisibles
     3) PARTIR el grupo — último recurso, determinista y siempre registrado
     4) CONSOLIDAR solitarias — ninguna ruta se queda con una sola sucursal
