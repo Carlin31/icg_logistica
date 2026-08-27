@@ -31,10 +31,13 @@ def _afinidad_de_plantilla(plantilla: list) -> dict:
     {grupo: {unidad: semanas}} desde la columna `unidades_afines`
     ('T 17_1:4 | F 350_3:2').
 
-    VESTIGIAL desde la selección por peso (ver `logic/convrp_logic.py`): el
-    motor ya NO lee `afinidad_unidad` para decidir unidad -- el desempate es
-    capacidad ascendente + consolidación, no afinidad histórica. Se sigue
-    calculando y pasando en `cfg` sin que nada la consuma.
+    Desde la selección por peso (ver `logic/convrp_logic.py`), el peso
+    decide el NIVEL de camión (capacidad ascendente + consolidación); la
+    afinidad histórica ya no es preferencia, pero sí vuelve a ser el
+    desempate final cuando dos o más unidades quedan empatadas en capacidad
+    (p. ej. los 3 F350, todos de 3900 kg) -- de otro modo el desempate caería
+    en puro orden alfabético, mezclando qué camión específico atiende cada
+    zona.
 
     Los nombres de unidad llevan espacios ('F 350_1'), así que el corte es por
     el ÚLTIMO ':' de cada término, no por el primero.
@@ -109,9 +112,9 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
                          "Corre scripts/cargar_plantilla.py primero.")
     cfg = dict(cfg_por_defecto(), depot=depot,
                horarios_por_dia=horarios_por_dia(),
-               # vestigial: el motor ya no lee afinidad_unidad para decidir
-               # unidad (selección por peso desde Task 2) -- se calcula y pasa
-               # igual para no romper la firma de cfg, pero no influye en nada.
+               # el peso decide el nivel de camion; afinidad_unidad sólo
+               # desempata entre unidades ya empatadas en capacidad (ver
+               # _afinidad_de_plantilla arriba).
                afinidad_unidad=_afinidad_de_plantilla(plantilla),
                coocurrencia_grupos=_coocurrencia_de_bd(plantilla))
     groups, excepciones = construir_groups_desde_plantilla(
