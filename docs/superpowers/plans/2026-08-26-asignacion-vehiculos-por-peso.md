@@ -2306,3 +2306,354 @@ fresco. Se borró esa fila (con confirmación explícita del usuario) y se
 volvió a generar: **grupo 22 queda con sus 8 sucursales juntas en F 350_3,
 Cosamaloapan en F 350_1, Tierra Blanca sin tocar ningún F350** -- Fase B
 NO deshace el fix. Sin cambios de código adicionales necesarios.
+
+---
+
+## Task 11: Desactivar la Palanca 5 (relleno de capacidad libre) -- incompatible con el sistema por peso
+
+**Encontrado por el usuario revisando el PDF real regenerado, root-cause
+confirmado empiricamente (no adivinado):** grupo 3 (Loma Bonita 1/2 +
+Villa Azueta, RIGIDO, 1200 kg) quedaba correctamente asignado a T 25/MIERCOLES
+(1300 kg de capacidad, 92% de uso) por `_asignar_unidades` -- pero
+`_rellenar_capacidad_libre` (Palanca 5, `logic/convrp_logic.py:533-641`,
+NUNCA tocada por ninguna task anterior de este plan) lo movia despues a
+F 350_1/JUEVES solo porque ahi "habia espacio libre". Verificado llamando
+`construir_groups_convrp` directo contra la semana real "24 al 28 de
+agosto": la excepcion `RELLENO_CAPACIDAD_LIBRE` lo confirma exactamente
+("F 350_1/JUEVES con capacidad libre; se acomodo el grupo 3 desde T 25/MIERCOLES").
+Es, con altisima probabilidad, la misma causa de la queja *original* del
+usuario que motivo todo este proyecto (el PDF viejo con ~2410 kg en un
+F350 los jueves) -- nunca se arreglo de fondo.
+
+**Por que es un choque de diseno, no un bug puntual:** la Palanca 5 entera
+se basa en el concepto "grupo YA DESVIADO de su `unidad_ref`/`dia_preferido`
+puede rellenar espacio libre en otra ruta" (linea 597:
+`if (a["unidad"], a["dia"]) == (a["unidad_ref"], a["dia_preferido"]): continue`
+-- si NO coincide, el grupo se considera "desviado" y elegible para mover).
+Desde la Task 2, `unidad_ref` es vestigial: casi ningun grupo bien asignado
+por peso coincide con su viejo `unidad_ref`, asi que la Palanca 5 trata a
+CASI TODOS los grupos como "desviados" y los arrastra a rellenar
+cualquier camion grande vacio ese dia -- exactamente lo opuesto al
+objetivo de este proyecto (el peso decide el camion mas chico que
+alcanza). No hay forma de "arreglar" la Palanca 5 sin contradecir el
+diseno nuevo: su premisa (regresar a un "hogar" preferido) ya no existe.
+
+**Hallazgo adicional confirmado en la misma corrida (documentar, no
+arreglar aqui -- ver memoria de proyecto "KANGOO inactive-vehicle-risk"):**
+grupo 26 (San Bartolo) fue asignado inicialmente a `KANGOO` (unidad
+inactiva) por `_asignar_unidades`, y solo se salvo porque
+`_consolidar_solitarios` lo movio despues. El riesgo documentado ya se
+materializo una vez; sigue sin arreglarse (decision explicita anterior del
+usuario de diferirlo).
+
+**Decision del usuario (confirmada explicitamente)**: desactivar la
+Palanca 5 por completo. Ya existe un interruptor dedicado
+(`CONVRP_RELLENO_CAPACIDAD`, con exactamente este proposito documentado:
+"Permite apagarla sin tocar CONVRP_ACTIVO si algo sale mal en
+produccion") -- no hace falta tocar `_rellenar_capacidad_libre` en si,
+solo el default.
+
+**Files:**
+- Modify: `logic/convrp_logic.py:56` (constante `CONVRP_RELLENO_CAPACIDAD`)
+- Test: `tests/test_convrp_logic.py`
+
+- [ ] **Step 1: Escribir el test que confirma el default nuevo**
+
+Actualiza el test existente (no lo dupliques, ya prueba exactamente esto):
+
+```python
+def test_cfg_por_defecto_incluye_relleno_capacidad_activado():
+    assert cfg_por_defecto()["relleno_capacidad"] is False
+```
+
+(Renombralo a `test_cfg_por_defecto_tiene_relleno_capacidad_desactivado`
+para que el nombre no mienta.)
+
+- [ ] **Step 2: Correr y confirmar que falla**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k relleno_capacidad_desactivado -v
+```
+
+- [ ] **Step 3: Cambiar la constante**
+
+En `logic/convrp_logic.py`, linea ~56:
+
+```python
+# Interruptor dedicado de la Palanca 5 (relleno de capacidad libre).
+# DESACTIVADO desde 2026-08-27: su premisa (grupo "desviado" de su
+# unidad_ref/dia_preferido regresa a rellenar espacio libre) ya no aplica
+# sin preferencia -- desde la Task 2, casi todo grupo bien asignado por
+# peso "parece desviado" ante este chequeo, asi que la palanca terminaba
+# arrastrando grupos bien puestos (p. ej. T 25, 92% de uso) a camiones
+# mucho mas grandes con espacio libre (F350, ~38% de uso), exactamente lo
+# opuesto al objetivo de este proyecto. Se deja el codigo y el interruptor
+# (no se borra `_rellenar_capacidad_libre`) por si hace falta revertir.
+CONVRP_RELLENO_CAPACIDAD = False
+```
+
+- [ ] **Step 4: Correr y confirmar que pasa**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k relleno_capacidad_desactivado -v
+```
+
+- [ ] **Step 5: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+Esperado: 100% PASS sin mas cambios -- los tests que llaman
+`_rellenar_capacidad_libre` DIRECTO no dependen del default de `cfg`, y los
+2 tests de integracion (`test_relleno_capacidad_integrado_rellena_y_vacia_la_ruta_origen`,
+`test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo`) ya
+documentan en su propio comentario que "la Palanca 5 ni siquiera necesita
+correr" para el escenario que protegen -- confirmalo leyendo cada uno
+antes de asumirlo; si alguno SI dependia de que la palanca corriera de
+verdad, eso seria un hallazgo real, reportalo como BLOCKED en vez de
+adivinar un ajuste.
+
+- [ ] **Step 6: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`
+si sigue corrupto sin commitear.)
+
+Confirma en el resultado real:
+- Grupo 3 (Loma Bonita 1/2, Villa Azueta) queda en una unidad de tamano
+  apropiado (T 25 o similar, NO en un F350) el dia que le corresponda por
+  peso -- ya no debe aparecer ninguna excepcion `RELLENO_CAPACIDAD_LIBRE`
+  en toda la corrida (la palanca esta apagada).
+- Repite el chequeo de KANGOO del Step 3 de la Task 8 (obligatorio de
+  nuevo, no lo saltes): ¿algun grupo quedo asignado a KANGOO en esta
+  corrida? Si si, es el riesgo ya documentado materializandose otra vez --
+  reportalo con detalle exacto (que grupo, que peso) pero NO lo arregles
+  en esta task (esta fuera de alcance, ya esta en la memoria de proyecto
+  como diferido); si tu corrida especifica no lo dispara, dilo tambien.
+- Grupo 22 sigue junto en F 350_3, Cosamaloapan en F 350_1, Tierra Blanca
+  sin tocar ningun F350 (no deberian cambiar con este fix, pero
+  verificalo).
+
+Si el resultado real no coincide, no commitees -- reporta BLOCKED con el
+detalle exacto.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add logic/convrp_logic.py tests/test_convrp_logic.py
+git commit -m "$(cat <<'EOF'
+Desactiva la Palanca 5 (relleno de capacidad libre): incompatible con seleccion por peso
+
+Encontrado por el usuario en el PDF real: un grupo bien asignado por peso
+(T 25, 92% de uso) fue arrastrado por la Palanca 5 a un F350 (~38% de uso)
+solo porque "no estaba en su unidad_ref/dia_preferido" -- premisa que ya
+no aplica desde la Task 2 (sin preferencia, casi todo grupo bien asignado
+"parece desviado"). Es probablemente la causa de fondo de la queja
+original de todo este proyecto. Se apaga con el interruptor ya existente
+(CONVRP_RELLENO_CAPACIDAD), sin borrar el codigo por si hace falta
+revertir. Verificado contra el PDF real de la semana 24-28 agosto.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
+
+---
+
+## Task 12: Tolerancia CAP-1.5 (1500 kg → 1549 kg) para T25/T23/T20 + corrección de dato de T25
+
+**Encontrado por el usuario revisando el PDF real regenerado:** el grupo de
+T 17_2/JUEVES (1546 kg) le pareció mal asignado -- según su tabla de rangos
+operativos ("Hasta 1549: T25 T23 T20"), 1546 kg debería caber en una unidad
+de 1.5 t. Investigado: 1546 kg NO cabe en T 23 ni T 20 según
+`capacidad_efectiva_kg()` (`logic/vrp_logic.py:32-36`), que hoy devuelve
+exactamente el 100% del nominal (1500 kg) para esas dos unidades -- el motor
+eligió correctamente T 17_2 (2500 kg) porque, con el dato actual, 1546 kg no
+alcanza en ninguna de 1.5 t.
+
+**Aclaración del usuario:** la empresa SÍ permite operar una unidad de 1.5 t
+hasta 1549 kg (49 kg de tolerancia sobre el nominal) -- no está reflejado en
+el código. Es el mismo tipo de regla que CAP-4 (`CAP_EXCEPCION_MIN_KG/MAX_KG/TOPE_KG`,
+`logic/vrp_logic.py:27-29`), pero en sentido inverso (CAP-4 limita hacia
+ABAJO un nominal que ya venía inflado hasta 4t; CAP-1.5 da margen hacia
+ARRIBA de un nominal de 1.5t).
+
+**Hallazgo adicional durante la misma investigación:** en la BD, T 25 tiene
+`capacidad_toneladas = 1.3` (1300 kg), NO 1.5 t como T 23/T 20 -- confirmado
+con el usuario que es un dato desactualizado (T 25 es físicamente igual a
+T 23/T 20, 1.5 t), no una unidad distinta. Se corrige el dato junto con el
+código en esta misma task para que las 3 queden consistentes.
+
+**Fuera de alcance (documentar, no tocar):** `logic/asignacion_logic.py`
+tiene su propia copia de la regla CAP-4 (`_capacidad_efectiva_ton`, línea
+~153-169, en toneladas en vez de kg) para un flujo distinto (utilización de
+`creacion_rutas`/`dia_sugerido`, no el motor ConVRP que arma el PDF real).
+No se toca en esta task por no ser parte del camino que genera el PDF que
+el usuario está revisando -- si algún día se quiere consistencia CAP-1.5 ahí
+también, sería una task aparte.
+
+**Files:**
+- Modify: `logic/vrp_logic.py:16-36` (constantes CAP-1.5 + `capacidad_efectiva_kg`)
+- Modify: `logic/vrp_logic.py:161-181` (docstring de `obtener_capacidades_vehiculos`)
+- Corrección de dato: tabla `vehiculos`, fila de T 25 (`capacidad_toneladas` 1.3 → 1.5)
+- Test: `tests/test_vrp_logic.py` (nuevo archivo -- no existe ninguno hoy para este módulo)
+
+- [ ] **Step 1: Escribir los tests que confirman la regla CAP-1.5**
+
+Crea `tests/test_vrp_logic.py`:
+
+```python
+from logic.vrp_logic import capacidad_efectiva_kg
+
+
+def test_cap4_sigue_igual_3500_a_4000_kg():
+    assert capacidad_efectiva_kg(3500) == 3900
+    assert capacidad_efectiva_kg(3900) == 3900
+    assert capacidad_efectiva_kg(4000) == 3900
+
+
+def test_cap1500_da_tolerancia_hasta_1549_kg():
+    assert capacidad_efectiva_kg(1500) == 1549
+
+
+def test_cap1500_no_afecta_capacidades_fuera_de_1500_kg():
+    # 1300 kg (T 25 antes de corregir el dato) sigue siendo 100% nominal
+    assert capacidad_efectiva_kg(1300) == 1300
+    # Camiones medianos y KANGOO tampoco cambian
+    assert capacidad_efectiva_kg(2500) == 2500
+    assert capacidad_efectiva_kg(600) == 600
+    # F350 (CAP-4) no se confunde con CAP-1.5
+    assert capacidad_efectiva_kg(3900) == 3900
+```
+
+- [ ] **Step 2: Correr y confirmar que falla**
+
+```bash
+python -m pytest tests/test_vrp_logic.py -v
+```
+
+Esperado: `test_cap1500_da_tolerancia_hasta_1549_kg` FALLA (hoy devuelve 1500,
+no 1549); las otras dos PASAN ya (comportamiento actual sin tocar nada).
+
+- [ ] **Step 3: Agregar la regla CAP-1.5**
+
+En `logic/vrp_logic.py`, junto a las constantes CAP-4 (línea ~21-29):
+
+```python
+# CAP-4: regla de capacidad máxima permitida (igual que en asignacion_logic.py).
+# Los únicos vehículos que pueden superar el 100 % de su capacidad nominal son
+# los de 3.5 a 4.0 t (3500-4000 kg), con un tope fijo de 3900 kg (promedio de
+# carga 3.5 t, sin superar nunca las 4 t). CAP-1.5 (abajo) es la única otra
+# excepción -- cualquier otro vehículo tiene como límite máximo exactamente
+# el 100 % de su capacidad nominal, sin tolerancia adicional.
+CAP_EXCEPCION_MIN_KG  = 3500
+CAP_EXCEPCION_MAX_KG  = 4000
+CAP_EXCEPCION_TOPE_KG = 3900
+
+# CAP-1.5: los vehículos de 1.5 t (1500 kg nominal) tienen tolerancia
+# operativa hasta 1549 kg -- confirmado por el usuario, así lo admite la
+# empresa. A diferencia de CAP-4 (que LIMITA un nominal ya inflado hacia
+# abajo), ésta da margen hacia ARRIBA de un nominal real de 1.5 t.
+CAP_1500_MIN_KG  = 1500
+CAP_1500_MAX_KG  = 1500
+CAP_1500_TOPE_KG = 1549
+
+
+def capacidad_efectiva_kg(cap_kg: float) -> float:
+    """Aplica las reglas CAP-4 y CAP-1.5 a una capacidad nominal en kg."""
+    if CAP_EXCEPCION_MIN_KG <= cap_kg <= CAP_EXCEPCION_MAX_KG:
+        return float(CAP_EXCEPCION_TOPE_KG)
+    if CAP_1500_MIN_KG <= cap_kg <= CAP_1500_MAX_KG:
+        return float(CAP_1500_TOPE_KG)
+    return float(cap_kg)
+```
+
+Actualiza también el docstring de `obtener_capacidades_vehiculos()` (línea
+~167-168), que dice "ya con la regla CAP-4 aplicada", para mencionar CAP-1.5.
+
+- [ ] **Step 4: Correr y confirmar que pasa**
+
+```bash
+python -m pytest tests/test_vrp_logic.py -v
+```
+
+- [ ] **Step 5: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_vrp_logic.py tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+- [ ] **Step 6: Corregir el dato de T 25 en la BD**
+
+Confirma el valor actual, corrige, y confirma el resultado -- en una
+transacción real, con el mismo cuidado que las correcciones de datos
+anteriores de este plan (Task 1's restauración, borrado de la fila vieja de
+`modificaciones_rutas` en la Task 10):
+
+```python
+from sqlalchemy import select, update
+from db import get_db, get_table
+# (dentro de un app_context real, igual que los diagnósticos anteriores)
+
+t = get_table("vehiculos")
+antes = db.execute(select(t).where(t.c.abreviatura == "T 25")).mappings().first()
+print("ANTES:", dict(antes))
+assert float(antes["capacidad_toneladas"]) == 1.3, "el dato ya no es el esperado -- no lo toques a ciegas"
+
+db.execute(update(t).where(t.c.abreviatura == "T 25").values(capacidad_toneladas=1.5))
+db.commit()
+
+despues = db.execute(select(t).where(t.c.abreviatura == "T 25")).mappings().first()
+print("DESPUES:", dict(despues))
+assert float(despues["capacidad_toneladas"]) == 1.5
+```
+
+- [ ] **Step 7: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`
+si sigue corrupto sin commitear.)
+
+Confirma en el resultado real:
+- T 17_2/JUEVES (1546 kg) -- verifica si con el nuevo tope de T 23/T 20
+  (1549 kg) el motor ahora lo asigna a una de esas dos en vez de T 17_2 (con
+  1546 ≤ 1549, debería caber). Si sigue en T 17_2 por otra razón
+  (coocurrencia, afinidad, reserva), repórtalo -- puede ser terreno de la
+  Task 13, no asumas que es un bug de esta task.
+- Ningún grupo que antes cabía correctamente debe romperse por el cambio de
+  tope (T 25 ahora admite hasta 1549 kg en vez de 1300 -- verifica que
+  ningún grupo quedó MAL asignado a T 25 por exceso, ya que su capacidad
+  real subió).
+- Repite el chequeo de KANGOO (obligatorio, no lo saltes).
+
+Si el resultado real no coincide con lo esperado, no commitees -- reporta
+BLOCKED con el detalle exacto.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add logic/vrp_logic.py tests/test_vrp_logic.py
+git commit -m "$(cat <<'EOF'
+Agrega tolerancia CAP-1.5 (1500 -> 1549 kg) para T25/T23/T20
+
+Encontrado por el usuario en el PDF real: T 17_2/JUEVES con 1546 kg le
+parecio mal asignado segun su tabla de rangos ("hasta 1549: T25/T23/T20").
+Investigado: la empresa SI permite operar una unidad de 1.5 t hasta 1549 kg
+(49 kg de tolerancia), regla no reflejada en capacidad_efectiva_kg() -- que
+hoy solo tiene CAP-4 (3.5-4t -> 3900kg). Se agrega CAP-1.5 como excepcion
+analoga. Ademas se corrigio el dato de T 25 en la BD (capacidad_toneladas
+1.3 -> 1.5): confirmado por el usuario que es la misma unidad fisica que
+T23/T20, dato desactualizado. Verificado contra el PDF real de la semana
+24-28 agosto.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
