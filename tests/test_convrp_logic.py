@@ -232,6 +232,30 @@ def test_pedazo_partido_hereda_unidades_excluidas():
                 "ninguna sucursal del grupo 1 (excluido de GRANDE) debe terminar ahí"
 
 
+def test_plantilla_con_unidades_excluidas_las_respeta_en_construir_groups():
+    plantilla = [{"grupo": 1, "rigidez": "FLEXIBLE", "dia": "LUNES",
+                  "unidad_ref": None, "sucursales": [1, 2],
+                  "dias_admisibles": ["LUNES"],
+                  "unidades_excluidas": ["GRANDE"]}]
+    pedidos = {1: 50, 2: 50}
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert ("CHICA", "LUNES") in groups
+    assert ("GRANDE", "LUNES") not in groups
+
+
+def test_plantilla_sin_unidades_excluidas_no_rompe():
+    # La mayoría de los grupos NO trae unidades_excluidas -- debe comportarse
+    # como lista vacía (sin restricción), no explotar con KeyError/TypeError.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 50, 2: 50}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 5000}, {"V1": 99}, _sin_tiempo())
+    assert ("V1", "LUNES") in groups
+
+
 # ══ 3. Palanca 1: mover de unidad dentro del mismo día ═════════════════════
 def test_sobrecupo_mueve_flexible_a_otra_unidad_del_mismo_dia():
     # V1 no aguanta los dos grupos (1200 kg > 1000); el FLEXIBLE se va a V2.

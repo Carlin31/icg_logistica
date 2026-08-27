@@ -101,14 +101,6 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
     if not plantilla:
         raise ValueError("No hay plantilla canónica vigente. "
                          "Corre scripts/cargar_plantilla.py primero.")
-    sin_unidad = sorted({g["grupo"] for g in plantilla
-                         if g["unidad_ref"] is not None
-                         and g["unidad_ref"] not in (vehiculos_cap or {})})
-    if sin_unidad:
-        raise ValueError(
-            f"unidad_ref sin resolver contra el catálogo de vehículos en los "
-            f"grupos {sin_unidad}: la preferencia de unidad se ignoraría en "
-            f"silencio. Recarga la plantilla (scripts/cargar_plantilla.py).")
     cfg = dict(cfg_por_defecto(), depot=depot,
                horarios_por_dia=horarios_por_dia(),
                afinidad_unidad=_afinidad_de_plantilla(plantilla),
