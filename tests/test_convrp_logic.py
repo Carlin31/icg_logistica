@@ -430,6 +430,24 @@ def test_particion_desempata_por_num_tienda_ascendente():
     assert part["sucursales_separadas"] == [3]
 
 
+def test_tiempo_solo_no_parte_un_rigido():
+    # RIGIDO con 8 paradas chicas: peso y volumen sobran de holgura: la
+    # ventana horaria es tan corta que SOLO el modelo de tiempo ata. No
+    # debe partirse -- composición intacta, aviso registrado en vez de
+    # PARTIDO_CAPACIDAD.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", list(range(1, 9)),
+                        unidad_ref="V1", dias_admisibles=["LUNES"])]
+    pedidos = {i: 10 for i in range(1, 9)}          # peso irrelevante
+    cfg = _cfg(chequear_tiempo=True, hora_salida_min=420, hora_cierre_min=430)
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 99999}, {"V1": 9999}, cfg)
+    assert not any(e["tipo"] == "PARTIDO_CAPACIDAD" for e in exc), \
+        "TIEMPO solo no debe partir un RIGIDO"
+    assert len(groups[("V1", "LUNES")]) == 8, \
+        "la composición del RIGIDO debe seguir completa"
+    assert any(e["tipo"] == "AVISO_TIEMPO_RIGIDO_NO_PARTIDO" for e in exc)
+
+
 # ══ 6. Determinismo ════════════════════════════════════════════════════════
 def _escenario_grande():
     plantilla = [

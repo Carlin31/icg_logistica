@@ -741,6 +741,22 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             if not candidatos:
                 break
             a = candidatos[0]
+            if restr == "TIEMPO" and a["rigidez"] == "RIGIDO":
+                # El modelo de tiempo sobrestima en rutas de muchas paradas
+                # chicas (ver docstring del módulo) -- decisión de negocio
+                # 2026-08-27: TIEMPO solo (sin PESO/VOLUMEN) ya no fuerza
+                # partir un RIGIDO. Queda como aviso visible, composición
+                # intacta, para que el despachador lo revise a mano.
+                excepciones.append({
+                    "tipo": "AVISO_TIEMPO_RIGIDO_NO_PARTIDO", "grupo": a["grupo"],
+                    "rigidez": a["rigidez"], "restriccion": "TIEMPO",
+                    "unidad": unidad, "dia": dia,
+                    "motivo": f"{unidad}/{dia} excede el tiempo estimado pero "
+                              f"es RIGIDO; no se parte (el modelo de tiempo "
+                              f"sobrestima en rutas de muchas paradas chicas) "
+                              f"-- revisar a mano si hace falta.",
+                })
+                break
             metrica = volumenes if restr == "VOLUMEN" else pedidos
             # pelar primero lo que más reduce el sobrecupo; desempate por
             # num_tienda ascendente (nunca "la que caiga primero")
