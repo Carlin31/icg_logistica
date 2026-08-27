@@ -838,8 +838,8 @@ def test_dos_solitarias_compatibles_se_consolidan_entre_si():
 
 
 # ══ 10. Palanca 5: relleno de capacidad libre ═══════════════════════════════
-def test_cfg_por_defecto_incluye_relleno_capacidad_activado():
-    assert cfg_por_defecto()["relleno_capacidad"] is True
+def test_cfg_por_defecto_tiene_relleno_capacidad_desactivado():
+    assert cfg_por_defecto()["relleno_capacidad"] is False
 
 
 def test_relleno_capacidad_mueve_grupo_compatible_a_ruta_con_espacio():

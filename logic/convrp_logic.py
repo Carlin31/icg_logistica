@@ -66,10 +66,16 @@ CONVRP_VELOCIDAD_KMH = 35.0
 CONVRP_VELOCIDAD_POR_TRAMO = True
 CONVRP_DEPOT = (18.87, -96.95)
 
-# Interruptor dedicado de la Palanca 5 (relleno de capacidad libre). Permite
-# apagarla sin tocar CONVRP_ACTIVO si algo sale mal en producción -- mismo
-# patrón que REBALANCEO_GEOGRAFICO en historico_logic.py.
-CONVRP_RELLENO_CAPACIDAD = True
+# Interruptor dedicado de la Palanca 5 (relleno de capacidad libre).
+# DESACTIVADO desde 2026-08-27: su premisa (grupo "desviado" de su
+# unidad_ref/dia_preferido regresa a rellenar espacio libre) ya no aplica
+# sin preferencia -- desde la Task 2, casi todo grupo bien asignado por
+# peso "parece desviado" ante este chequeo, asi que la palanca terminaba
+# arrastrando grupos bien puestos (p. ej. T 25, 92% de uso) a camiones
+# mucho mas grandes con espacio libre (F350, ~38% de uso), exactamente lo
+# opuesto al objetivo de este proyecto. Se deja el codigo y el interruptor
+# (no se borra `_rellenar_capacidad_libre`) por si hace falta revertir.
+CONVRP_RELLENO_CAPACIDAD = False
 
 
 def cfg_por_defecto() -> dict:
