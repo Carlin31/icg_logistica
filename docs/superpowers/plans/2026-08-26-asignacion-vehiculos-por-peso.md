@@ -2922,3 +2922,217 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Task 14: La reserva de afinidad solo bloquea si el reclamo ajeno es MÁS FUERTE que el propio
+
+**Encontrado por el usuario revisando el PDF real regenerado (mongo_id
+`6a90a5590986c27ba9787866`, generado 2026-08-27 15:00):** T 17_2/JUEVES con
+1546 kg (grupo 20 de la plantilla) -- según la tabla de rangos del usuario,
+debería caber en T 23 o T 25 (1549 kg tras la Task 12). J 19/LUNES con 744 kg
+(grupo 28) y J 19/JUEVES con 1078 kg (grupo 10) -- ambos deberían caber en
+una unidad de 1.5 t.
+
+Investigado con instrumentación temporal en el cálculo de `reservadas`
+(agregada, confirmada, revertida -- `logic/convrp_logic.py` quedó sin diff):
+
+- **Grupo 20 (T 17_2/JUEVES) -- bug real y confirmado.** Su afinidad propia
+  es `{'T 23': 4.0, 'T 25': 4.0, 'T 17_2': 1.0}` -- T 23 y T 25 son sus dos
+  verdaderos hogares históricos. T 25 se pierde legítimamente (grupo 19 tiene
+  ahí un reclamo más fuerte, 5.0 > 4.0). Pero T 23 se pierde ante grupo 8,
+  cuyo reclamo ahí es de solo **2.0** -- la MITAD del de grupo 20. La reserva
+  de afinidad nunca compara la fuerza del reclamo: reserva incondicionalmente
+  con solo que el grupo pendiente tenga CUALQUIER afinidad, sin importar que
+  el grupo actual tenga un reclamo más fuerte a la misma unidad. Grupo 20
+  termina en T 17_2, donde su afinidad es de solo 1.0.
+
+- **Grupo 28 (J 19/LUNES) -- confirmado, pero de otro tipo (fuera de
+  alcance de esta task, documentado en memoria de proyecto, no en código):**
+  T 25 queda reservada para otro grupo y **no la usa NADIE en todo el
+  lunes** -- queda vacía todo el día. La reserva "protegió" una unidad que
+  al final nadie necesitó, dejando a grupo 28 (744 kg, sin afinidad propia,
+  cabría perfecto) forzado a J 19. Arreglar esto necesitaría una lógica de
+  "mirar hacia adelante" (¿el grupo que reserva de verdad termina
+  usándola?) más invasiva -- decisión explícita del usuario de dejarlo
+  documentado por ahora, no intentar un fix en esta task.
+
+- **Grupo 10 (J 19/JUEVES) -- investigado, NO es un bug.** T 25 ya estaba
+  llena (un grupo más pesado la ocupó primero), T 23 está reservada por un
+  reclamo genuinamente MÁS FUERTE (2.0 contra el 1.0 propio de grupo 10), y
+  T 20 está excluida por coocurrencia histórica (anti-fusión, mecanismo
+  distinto y correcto). Solo hay 3 camiones chicos y ese jueves hay más
+  grupos "chicos" que cupos -- escasez real, no una reserva mal calibrada.
+  No se toca.
+
+**Decisión del usuario (confirmada explícitamente)**: implementar la
+comparación de fuerza de reclamo (arregla el caso de grupo 20/T 23). El caso
+de la reserva desperdiciada (grupo 28) se deja documentado, sin tocar
+código en esta task.
+
+**Diseño exacto:** mover el cálculo de `af` (afinidad propia del grupo
+actual) ANTES del bucle que arma `reservadas`, y comparar: un reclamo ajeno
+sólo reserva la unidad si su valor es ESTRICTAMENTE mayor que el propio del
+grupo actual a esa misma unidad (`af.get(claim, 0)`) -- un empate NO
+reserva (el usuario pidió explícitamente "más fuerte", no "igual o más
+fuerte"). Verificado a mano contra los 5 tests existentes de reserva de
+afinidad (Task 9 y Task 13): ninguno depende de que un reclamo IGUAL o MÁS
+DÉBIL reserve, así que la comparación no debería romper ninguno.
+
+**Files:**
+- Modify: `logic/convrp_logic.py` (`_asignar_unidades`, líneas ~355-394: docstring + reordenar `af` + comparación)
+- Test: `tests/test_convrp_logic.py`
+- Memoria de proyecto: documentar el caso de la reserva desperdiciada (grupo 28) como riesgo diferido
+
+- [ ] **Step 1: Escribir el test**
+
+Agrega a `tests/test_convrp_logic.py` (junto a los tests de reserva de
+afinidad existentes):
+
+```python
+def test_reserva_de_afinidad_no_bloquea_si_el_reclamo_propio_es_mas_fuerte():
+    # grupo1 (mas pesado, se procesa primero) tiene afinidad FUERTE a
+    # A_GRANDE (4.0); grupo2 (mas liviano, pendiente) tiene una afinidad mas
+    # DEBIL a la MISMA unidad (2.0). La reserva NO debe aplicar -- un
+    # reclamo mas debil no le puede quitar la unidad a un reclamo mas
+    # fuerte. Hallazgo real: grupo 20 (T 23:4.0, T 25:4.0) perdia T 23 ante
+    # un reclamo ajeno de solo 2.0.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}   # g1=3200 (mas pesado), g2=2000
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={1: {"A_GRANDE": 4}, 2: {"A_GRANDE": 2}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("A_GRANDE", "LUNES")]) == [1, 2], \
+        "grupo 1 tiene el reclamo mas fuerte (4 > 2) -- no debe cederle A_GRANDE a grupo 2"
+```
+
+- [ ] **Step 2: Correr y confirmar que falla**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k reserva_de_afinidad -v
+```
+
+Esperado: el nuevo test FALLA (hoy grupo 1 termina en Z_GRANDE, cediendo
+A_GRANDE sin comparar fuerza); los 5 tests existentes de reserva de
+afinidad (Task 9 y Task 13) siguen pasando sin tocarlos.
+
+- [ ] **Step 3: Implementar el fix**
+
+En `logic/convrp_logic.py`, agrega al docstring de `_asignar_unidades`
+(dentro del párrafo "RESERVA DE AFINIDAD", al final):
+
+```python
+    La reserva sólo aplica si el reclamo ajeno es ESTRICTAMENTE más fuerte
+    que el reclamo propio del grupo actual a esa misma unidad -- un empate o
+    un reclamo más débil no le quita nada (hallazgo real: grupo con afinidad
+    4.0 a T 23 perdía esa unidad ante un reclamo ajeno de sólo 2.0, porque
+    la reserva no comparaba fuerza, sólo existencia).
+```
+
+Reordena: mueve la línea `af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}`
+de donde está hoy (después del bloque de reserva, ~línea 394) a ANTES del
+bucle `for g2 in gids[idx + 1:]:` (~línea 385), y agrega la comparación:
+
+```python
+            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
+
+            reservadas = set()
+            for g2 in gids[idx + 1:]:
+                a2 = asign[g2]
+                af2 = (cfg.get("afinidad_unidad") or {}).get(a2["grupo"]) or {}
+                af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
+                if af2_usable:
+                    claim = max(af2_usable, key=lambda u: af2_usable[u])
+                    if af2_usable[claim] > _num(af.get(claim)):
+                        reservadas.add(claim)
+            compat_sin_reservar = [u for u in compat if u not in reservadas]
+            compat_con_reserva = compat_sin_reservar or compat
+```
+
+(Borra la línea original `af = ...` que quedaba después de este bloque --
+ya no hace falta, quedó movida arriba.)
+
+- [ ] **Step 4: Correr y confirmar que pasa**
+
+```bash
+python -m pytest tests/test_convrp_logic.py -k reserva_de_afinidad -v
+```
+
+- [ ] **Step 5: Correr toda la suite del proyecto**
+
+```bash
+python -m pytest tests/test_vrp_logic.py tests/test_convrp_logic.py tests/test_convrp_integracion.py tests/test_plantilla_canonica.py -v
+```
+
+Esperado: 100% PASS, incluyendo los 5 tests previos de reserva de afinidad
+(Task 9: `test_grupo_pesado_sin_afinidad_no_ocupa_la_reservada_de_uno_pendiente`,
+`test_reserva_de_afinidad_cede_si_es_la_unica_opcion`,
+`test_reserva_de_afinidad_ignora_reclamo_a_unidad_excluida_para_el_propio_grupo`;
+Task 13: `test_reserva_de_afinidad_cede_a_unidad_chica_para_evitar_sobretalla`,
+`test_reserva_de_afinidad_no_cede_si_la_alternativa_tambien_es_tope_maximo`) --
+ninguno debe cambiar de comportamiento.
+
+- [ ] **Step 6: Verificar contra el escenario REAL antes de commitear (obligatorio)**
+
+```bash
+python scripts/pdf_convrp_preview.py "24 al 28 de agosto"
+```
+
+(Recuerda la danza de `git stash` para `logic/consolidacion_mayoristas.py`.
+El logistica_id puede haber cambiado de nuevo si el usuario regeneró el PDF
+-- búscalo por nombre en la tabla `logisticas` antes de asumir un id viejo.)
+
+Confirma en el resultado real:
+- Grupo 20 (T 17_2/JUEVES, 1546 kg) -- debe aterrizar en T 23 (su reclamo
+  más fuerte tras perder T 25 legítimamente ante grupo 19).
+- Grupo 19 (K 20/JUEVES) sigue en una unidad apropiada -- no debe romperse
+  por este cambio (su reclamo a T 25, 5.0, sigue siendo el más fuerte ahí).
+- Cosamaloapan sigue en F 350_1, las 8 sucursales de San Andrés/Catemaco/
+  Santiago Tuxtla/Covarrubias siguen juntas en F 350_3, Santiago Tuxtla 1
+  sigue con el otro Santiago Tuxtla (Tasks 9 y 10 -- no deben romperse).
+- Repite el chequeo de KANGOO (obligatorio, no lo saltes).
+- Grupo 28 (J 19/LUNES, 744 kg) y grupo 10 (J 19/JUEVES, 1078 kg) --
+  documenta su estado (puede que sigan igual, ninguno es objeto de esta
+  task), no los "arregles" de paso.
+
+Si el resultado real no coincide con lo esperado, no commitees -- reporta
+BLOCKED con el detalle exacto.
+
+- [ ] **Step 7: Documentar el caso de la reserva desperdiciada en memoria de proyecto**
+
+Este paso es sobre el sistema de memoria persistente de Claude
+(`C:\Users\carli\.claude\projects\c--Users-carli-Documents-ICG\memory\`), NO
+sobre el repositorio -- no es un commit de git. Crea un archivo de memoria
+tipo `project` documentando: T 25 (u otra unidad) puede quedar reservada y
+sin usarse en todo el día, mientras un grupo que cabría perfecto se ve
+forzado a una unidad más grande -- el fix necesitaría lógica de "mirar
+hacia adelante" no implementada; decisión explícita del usuario de
+diferirlo (2026-08-27). Agrega la entrada correspondiente a `MEMORY.md`.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add logic/convrp_logic.py tests/test_convrp_logic.py
+git commit -m "$(cat <<'EOF'
+La reserva de afinidad solo bloquea si el reclamo ajeno es mas fuerte
+
+Encontrado por el usuario en el PDF real: T 17_2/JUEVES con 1546 kg
+(grupo 20, afinidad T23:4.0/T25:4.0) perdia T 23 ante un reclamo ajeno de
+solo 2.0 -- la reserva de afinidad (Task 9) nunca comparaba fuerza, solo
+existencia. Se agrega la comparacion: un reclamo ajeno solo reserva si es
+ESTRICTAMENTE mas fuerte que el propio del grupo actual a esa misma unidad.
+Verificado a mano que ninguno de los 5 tests previos de reserva de afinidad
+(Tasks 9 y 13) depende de un reclamo empatado o mas debil reservando.
+Verificado contra el PDF real de la semana 24-28 agosto. El caso relacionado
+de la "reserva desperdiciada" (T 25 vacia todo el dia) queda documentado en
+memoria de proyecto, fuera de alcance de este fix.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
