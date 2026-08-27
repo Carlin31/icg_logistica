@@ -1420,8 +1420,13 @@ def test_reserva_predice_la_unidad_que_grupo2_elegiria_de_verdad_no_solo_valor_m
     # grupo terminaba de verdad en T 20 (empatada en capacidad con T 25,
     # gana por nombre) -- dejando T 25 vacia sin necesidad todo el dia,
     # mientras otro grupo sin afinidad ahi se iba a una unidad de mas.
-    # Se excluye ENORME de ambos grupos para que quede fuera del alcance
-    # del tope-maximo-de-la-flota (Task 13): asi se prueba ESTE fix aislado.
+    # ENORME existe en la flota (aunque ambos grupos la tengan excluida)
+    # solo para que el TOPE MAXIMO global (Task 13, = el mayor de TODA la
+    # flota, sin importar exclusiones por grupo) sea 9999 en vez de 3900 --
+    # asi GRANDE nunca es "el tope maximo" y el override de la Task 13
+    # jamas se dispara, probando ESTE fix aislado (sin el, la Task 13 podria
+    # rescatar a grupo1 por su propio mecanismo y el test pasaria igual sin
+    # este fix).
     plantilla = [
         _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
         _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),

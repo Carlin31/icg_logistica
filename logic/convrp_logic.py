@@ -395,11 +395,31 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 af2 = (cfg.get("afinidad_unidad") or {}).get(a2["grupo"]) or {}
                 af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
                 if af2_usable:
+                    # Predice la MISMA unidad que g2 elegiria de verdad en su
+                    # turno -- no solo "el valor de afinidad mas alto": la
+                    # decision real siempre prueba capacidad ascendente
+                    # primero y sólo desempata por afinidad DENTRO de un
+                    # mismo nivel de capacidad. Sin esto, un reclamo empatado
+                    # en varias unidades de capacidad distinta (p. ej. 2.0 en
+                    # T 25, K 16 Y T 20) reservaba la que aparecía primero en
+                    # el dato histórico (orden arbitrario de texto), aunque
+                    # g2 -- al decidir de verdad -- terminara en otra (la de
+                    # MENOR capacidad entre las empatadas, por nombre) --
+                    # dejando la reservada vacía sin necesidad (hallazgo
+                    # real: T 25 reservada y vacía todo el día, mientras el
+                    # grupo "protegido" terminaba en T 20 igual de chica).
+                    # Aproximación de mejor esfuerzo, no garantía: no puede
+                    # saber qué habrá cargado cada unidad para cuando le
+                    # toque su turno a g2 (eso depende de decisiones que
+                    # todavía no pasan), así que ignora el desempate por
+                    # consolidación de la decisión real -- si ninguna de las
+                    # unidades con afinidad le alcanza sola por peso, usa el
+                    # dato completo tal cual, sin poder predecir mejor.
                     kg2 = _kg_grupo(a2, pedidos)
-                    le_alcanzan = {u: v for u, v in af2_usable.items()
-                                   if _num(vehiculos_cap.get(u)) >= kg2}
-                    pool = le_alcanzan or af2_usable
-                    claim = min(pool, key=lambda u: (
+                    elegibles = {u: v for u, v in af2_usable.items()
+                                 if _num(vehiculos_cap.get(u)) >= kg2}
+                    elegibles = elegibles or af2_usable
+                    claim = min(elegibles, key=lambda u: (
                         _num(vehiculos_cap.get(u)), -af2_usable[u], u))
                     # Estrictamente mayor a proposito: un empate NO reserva
                     # (ver docstring "RESERVA DE AFINIDAD" -- si el grupo
