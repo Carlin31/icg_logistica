@@ -3136,3 +3136,61 @@ Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
 EOF
 )"
 ```
+
+---
+
+## Post-Task 14: Ajuste de dia preferido para 2 grupos del jueves (no es una task de codigo)
+
+Tras verificar Task 14 contra el PDF real completo (los 5 dias, no solo
+JUEVES), se confirmó que 4 rutas del jueves seguían en camión mediano
+debiendo (por peso) ir en uno chico -- **no por un bug de asignación**:
+ese jueves hay ~10,850 kg en cargas individualmente ≤1549 kg, pero solo
+existen 3 camiones chicos (4,647 kg de capacidad total). Investigado por
+qué el sistema nunca mueve estos grupos a otro día admisible con más
+espacio: la Palanca 2 (`_dia_alternativo`) solo se evalúa cuando la ruta
+actual VIOLA una restricción (`logic/convrp_logic.py:749-752`) -- nunca de
+forma proactiva para mejorar el nivel de camión. Construir eso sería un
+cambio de diseño más grande (podría mover rutas que hoy están bien); el
+usuario prefirió un ajuste puntual de datos en su lugar.
+
+De los 4 grupos, 2 tenían otro día admisible con espacio real: grupo 10
+(Temascal/Los Naranjos, 1078 kg, admisible JUEVES/MIÉRCOLES/VIERNES -- T 25
+vacía todo el miércoles) y grupo 8 (Valle Nacional/Chiltepec, 900 kg,
+admisible JUEVES/VIERNES -- viernes casi sin demanda). Grupo 7 (1392 kg)
+se dejó sin tocar por decisión explícita del usuario; grupo 17 (793 kg) no
+tiene otro día admisible en la plantilla, no se puede mover sin cambiar esa
+regla de negocio.
+
+**Cambio realizado**: `scripts/mover_dia_preferido_grupos_10_8.py` --
+cambia `es_canonico` en `plantilla_grupo_dia` (grupo 10: JUEVES→MIÉRCOLES;
+grupo 8: JUEVES→VIERNES), dentro de la misma versión 43 vigente, sin crear
+una versión nueva. No es una task de código (no toca `logic/convrp_logic.py`
+ni tests) -- es una decisión de negocio (qué día debe operar cada ruta),
+aplicada como corrección de datos, igual criterio que la corrección de
+capacidad de T 25 (Task 12).
+
+**Verificado contra el PDF real** ("24 al 28 de agosto"): grupo 10 ahora en
+T 25/MIÉRCOLES (1078/1549 kg, 69.6%); grupo 8 ahora en T 23/VIERNES
+(900/1549 kg, 58.1%). Resto de la semana sin cambios: Cosamaloapan,
+San Andrés/Catemaco/Santiago Tuxtla/Covarrubias, Santiago Tuxtla 1+2, y el
+chequeo de KANGOO (sin uso) se confirmaron intactos.
+
+```bash
+git add scripts/mover_dia_preferido_grupos_10_8.py
+git commit -m "$(cat <<'EOF'
+Mueve el dia preferido de 2 grupos del jueves a un dia con mas espacio chico
+
+El jueves 24-28 de agosto tenia mas demanda de camion chico (~10,850 kg en
+cargas <=1549 kg) de la que caben 3 camiones chicos (4,647 kg) -- limite de
+flota, no un bug. De los grupos afectados, 2 tenian otro dia admisible con
+espacio real: grupo 10 (Temascal/Los Naranjos) a MIERCOLES (T25 vacia ese
+dia) y grupo 8 (Valle Nacional/Chiltepec) a VIERNES (casi sin demanda). Se
+cambia es_canonico en plantilla_grupo_dia, misma version 43 vigente, sin
+crear version nueva. Decision de negocio del usuario, no un cambio de logica
+de asignacion. Verificado contra el PDF real: ambos grupos ahora en camion
+chico, resto de la semana sin cambios.
+
+Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+EOF
+)"
+```
