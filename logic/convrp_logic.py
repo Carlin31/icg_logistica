@@ -347,11 +347,20 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
             # otro grupo más liviano que todavía no le tocaba su turno
             # (hallazgo real: Tuxtepec ocupaba F 350_1 antes que Cosamaloapan,
             # que tiene afinidad 9/9 semanas ahí).
+            #
+            # El reclamo sólo cuenta si el propio grupo pendiente PODRÍA
+            # usarlo -- si su unidad de mayor afinidad está en SU PROPIA
+            # unidades_excluidas (dato histórico que ya no aplica, mismo
+            # riesgo documentado que KANGOO), reservarla no protege nada
+            # real, sólo le quita una opción de más al grupo que sí puede
+            # usarla.
             reservadas = set()
             for g2 in gids[idx + 1:]:
-                af2 = (cfg.get("afinidad_unidad") or {}).get(asign[g2]["grupo"]) or {}
-                if af2:
-                    reservadas.add(max(af2, key=lambda u: af2[u]))
+                a2 = asign[g2]
+                af2 = (cfg.get("afinidad_unidad") or {}).get(a2["grupo"]) or {}
+                af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
+                if af2_usable:
+                    reservadas.add(max(af2_usable, key=lambda u: af2_usable[u]))
             compat_sin_reservar = [u for u in compat if u not in reservadas]
             compat = compat_sin_reservar or compat
 

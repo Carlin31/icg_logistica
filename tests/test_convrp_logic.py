@@ -1271,3 +1271,29 @@ def test_reserva_de_afinidad_cede_si_es_la_unica_opcion():
     assert len(groups) == 1 and ("Z_GRANDE", "LUNES") in groups
     sids = sorted(m["sid"] for ms in groups.values() for m in ms)
     assert sids == [1, 2, 3, 4]
+
+
+def test_reserva_de_afinidad_ignora_reclamo_a_unidad_excluida_para_el_propio_grupo():
+    # grupo 2 (pendiente) tiene afinidad a GRANDE, pero GRANDE esta en SUS
+    # PROPIAS unidades_excluidas (dato historico que ya no aplica, mismo
+    # riesgo que KANGOO) -- ese reclamo no debe reservar nada: grupo 1 (mas
+    # pesado, procesado primero) puede usar GRANDE sin problema.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    plantilla[1]["unidades_excluidas"] = ["GRANDE"]
+    pedidos = {1: 1600, 2: 1600, 3: 1000, 4: 1000}
+    caps = {"GRANDE": 3900, "OTRA": 3900}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"GRANDE": 99, "OTRA": 99}, cfg)
+    assert sorted(m["sid"] for m in groups[("GRANDE", "LUNES")]) == [1, 2], \
+        "GRANDE no debia quedar reservada: grupo 2 tiene esa unidad excluida, no puede usarla"
+    # sin el fix, esto igual converge al mismo `groups` final -- pero sólo
+    # después de partir grupo 1 y recomponerlo vía relleno de capacidad
+    # libre (3 excepciones de más). Con el fix, grupo 1 entra directo a
+    # GRANDE en la primera pasada: cero excepciones.
+    assert exc == [], \
+        f"debio asignarse directo sin partir/relocar; huellas de la reserva mal aplicada: {exc}"
