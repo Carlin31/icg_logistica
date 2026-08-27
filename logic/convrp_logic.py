@@ -396,6 +396,10 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 af2_usable = {u: v for u, v in af2.items() if not _excluida(a2, u)}
                 if af2_usable:
                     claim = max(af2_usable, key=lambda u: af2_usable[u])
+                    # Estrictamente mayor a proposito: un empate NO reserva
+                    # (ver docstring "RESERVA DE AFINIDAD" -- si el grupo
+                    # actual tiene el mismo reclamo, no hay razon para que
+                    # ceda ante uno que no es mas fuerte).
                     if af2_usable[claim] > _num(af.get(claim)):
                         reservadas.add(claim)
             compat_sin_reservar = [u for u in compat if u not in reservadas]
