@@ -29,8 +29,12 @@ from logic.plantilla_canonica import obtener_grupos, horarios_por_dia, version_v
 def _afinidad_de_plantilla(plantilla: list) -> dict:
     """
     {grupo: {unidad: semanas}} desde la columna `unidades_afines`
-    ('T 17_1:4 | F 350_3:2'). El motor la usa para desempatar cuando cede la
-    unidad de referencia; sin ella el desempate es el nombre del camión.
+    ('T 17_1:4 | F 350_3:2').
+
+    VESTIGIAL desde la selección por peso (ver `logic/convrp_logic.py`): el
+    motor ya NO lee `afinidad_unidad` para decidir unidad -- el desempate es
+    capacidad ascendente + consolidación, no afinidad histórica. Se sigue
+    calculando y pasando en `cfg` sin que nada la consuma.
 
     Los nombres de unidad llevan espacios ('F 350_1'), así que el corte es por
     el ÚLTIMO ':' de cada término, no por el primero.
@@ -94,8 +98,10 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
     —{(vehiculo, dia): [{"sid","seq"}]}— así que el resto del flujo (reporte,
     secuencia, PDF, persistencia) no cambia.
 
-    Lanza si la plantilla o sus llaves no están sanas: en el arnés de validación
-    un fallo silencioso mediría el motor equivocado.
+    Lanza sólo si no hay plantilla canónica vigente (lista vacía) -- ya no
+    valida `unidad_ref` contra el catálogo de vehículos (ese guard se quitó:
+    `unidad_ref` es vestigial, ninguna preferencia se usa para decidir unidad,
+    válida o no).
     """
     plantilla = obtener_grupos()
     if not plantilla:
@@ -103,6 +109,9 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
                          "Corre scripts/cargar_plantilla.py primero.")
     cfg = dict(cfg_por_defecto(), depot=depot,
                horarios_por_dia=horarios_por_dia(),
+               # vestigial: el motor ya no lee afinidad_unidad para decidir
+               # unidad (selección por peso desde Task 2) -- se calcula y pasa
+               # igual para no romper la firma de cfg, pero no influye en nada.
                afinidad_unidad=_afinidad_de_plantilla(plantilla),
                coocurrencia_grupos=_coocurrencia_de_bd(plantilla))
     groups, excepciones = construir_groups_desde_plantilla(

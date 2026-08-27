@@ -9,8 +9,13 @@ reoptimiza donde la demanda de la semana no cabe.
 Modelo (decisiones fijas del negocio):
   - El GRUPO son las sucursales del grupo canónico CON PEDIDO esa semana, no el
     roster completo: un rígido de 6 con demanda en 4 viaja de 4.
-  - La UNIDAD no es identidad del grupo, pero tampoco es libre: `unidad_ref` es
-    la preferencia y desviarse tiene penalización (se registra como excepción).
+  - La UNIDAD se elige por PESO: cada grupo, sin excepción y sin preferencia,
+    toma entre las unidades no excluidas y compatibles la de MENOR capacidad
+    que le alcanza, desempatando por CONSOLIDACIÓN (la que ya lleva carga ese
+    día) y luego por nombre. `unidad_ref` / `unidades_afines` / `unidad_forzada`
+    son vestigiales: se guardan y se propagan, pero ya no se leen para decidir
+    unidad. `unidades_excluidas` es la única prohibición dura -- ninguna
+    palanca puede violarla, ni siquiera en el último recurso.
   - El DÍA es atributo del GRUPO (se mueve en bloque completo, nunca parcial) y
     sólo dentro de sus `dias_admisibles`; fuera de ese conjunto no se mueve.
   - Rigidez de COMPOSICIÓN y flexibilidad de DÍA son dimensiones independientes:
@@ -20,6 +25,10 @@ Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
     1) mover de UNIDAD dentro del mismo día
     2) mover de DÍA dentro de los admisibles
     3) PARTIR el grupo — último recurso, determinista y siempre registrado
+    4) CONSOLIDAR solitarias — ninguna ruta se queda con una sola sucursal
+       pudiendo sumarse a una activa compatible con cupo
+    5) RELLENAR capacidad libre — grupos ya desviados regresan a su unidad/día
+       preferido si hay una ruta con espacio y precedente histórico
 
 Determinismo: todo recorrido es sobre claves ordenadas; sin aleatoriedad ni
 dependencia del orden de los diccionarios de entrada. Cada grupo se mueve a lo
@@ -587,8 +596,12 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
     Retorna (groups, excepciones):
       groups      : {(vehiculo, dia): [{"sid","seq"}]}  — mismo formato que
                     consume el resto del motor (reporte, secuencia, PDF).
-      excepciones : [{tipo, grupo, restriccion, ...}] — MOVIDO_UNIDAD,
-                    MOVIDO_DIA, PARTIDO_CAPACIDAD, AVISO_RUTA_LARGA.
+      excepciones : [{tipo, grupo, restriccion, ...}] — MOVIDO_DIA,
+                    PARTIDO_CAPACIDAD, AVISO_RUTA_LARGA, SIN_UNIDAD_DISPONIBLE,
+                    CONSOLIDADO_SOLITARIA, AVISO_RUTA_SOLITARIA,
+                    RELLENO_CAPACIDAD_LIBRE. `unidades_excluidas` es la
+                    restricción dura que ninguna de estas palancas puede
+                    violar.
     """
     cfg = dict(cfg_por_defecto(), **(cfg or {}))
     if kg_mayoristas is not None:
@@ -609,8 +622,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
         if dia not in adm:
             adm = [dia] + adm
         unidad_ref = g.get("unidad_ref")
-        unidad = unidad_ref if unidad_ref in vehiculos_cap else (
-            sorted(vehiculos_cap)[0] if vehiculos_cap else "VEHICULO")
+        unidad = None          # se decide en _asignar_unidades; este es sólo un placeholder
         asign[int(g["grupo"])] = dict(
             grupo=int(g["grupo"]), rigidez=str(g.get("rigidez", "")).upper(),
             unidad=unidad, unidad_ref=unidad_ref, dia=dia, dia_preferido=dia,
@@ -618,7 +630,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             unidad_forzada=bool(g.get("unidad_forzada")),
             unidades_excluidas=list(g.get("unidades_excluidas") or []))
 
-    # ── 2. Palanca 1: repartir en la flota (unidad_ref = preferencia) ──
+    # ── 2. Palanca 1: repartir en la flota por peso ──
     desviaciones = _asignar_unidades(asign, pedidos, volumenes, coords,
                                      vehiculos_cap, vehiculos_vol, cfg)
 

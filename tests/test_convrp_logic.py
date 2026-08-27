@@ -63,16 +63,7 @@ def test_grupo_sin_demanda_no_genera_ruta():
     assert list(groups.keys())[0][1] == "LUNES"
 
 
-# ══ 2. La unidad es preferencia, no libre ══════════════════════════════════
-def test_grupo_usa_su_unidad_de_referencia_cuando_cabe():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V2")]
-    pedidos = {1: 100, 2: 100}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 5000, "V2": 5000},
-        {"V1": 20, "V2": 20}, _sin_tiempo())
-    assert ("V2", "LUNES") in groups
-
-
+# ══ 2. Grupos con la misma unidad y día comparten ruta ═════════════════════
 def test_dos_grupos_misma_unidad_y_dia_comparten_ruta():
     plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1"),
                  _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
@@ -270,32 +261,6 @@ def test_sobrecupo_mueve_flexible_a_otra_unidad_del_mismo_dia():
     # el flexible se movió de unidad, mismo día
     assert ("V2", "LUNES") in groups
     assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [3, 4]
-    tipos = [e["tipo"] for e in exc]
-    assert "MOVIDO_UNIDAD" in tipos
-
-
-def test_excepcion_registra_restriccion_peso():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1"),
-                 _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
-    pedidos = {1: 300, 2: 300, 3: 300, 4: 300}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 1000},
-        {"V1": 20, "V2": 20}, _sin_tiempo())
-    mov = [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
-    assert mov and mov[0]["restriccion"] == "PESO"
-
-
-def test_excepcion_registra_restriccion_volumen():
-    # El peso cabe de sobra; lo que satura es el volumen.
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1"),
-                 _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
-    pedidos = {1: 10, 2: 10, 3: 10, 4: 10}
-    volumenes = {1: 3.0, 2: 3.0, 3: 3.0, 4: 3.0}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, volumenes, COORDS, plantilla, {"V1": 9999, "V2": 9999},
-        {"V1": 8.0, "V2": 8.0}, _sin_tiempo())
-    mov = [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
-    assert mov and mov[0]["restriccion"] == "VOLUMEN"
 
 
 def test_varios_grupos_con_la_misma_unidad_ref_usan_la_flota_sin_partirse():
@@ -348,65 +313,6 @@ def test_grupo_desplazado_consolida_en_ruta_existente_no_abre_una_nueva():
     assert ("V3", "LUNES") not in groups, "no debe estrenar una unidad vacía"
     assert len(groups) == 2
     assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [3, 4, 5, 6]
-
-
-def test_grupo_conserva_unidad_ref_cuando_cabe_aunque_haya_otras_libres():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V3")]
-    pedidos = {1: 100, 2: 100}
-    caps = {f"V{i}": 5000 for i in range(1, 5)}
-    vols = {f"V{i}": 99 for i in range(1, 5)}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
-    assert ("V3", "LUNES") in groups                 # respeta la preferencia
-    assert not exc
-
-
-# ══ 3b. `unidad_forzada`: regla de negocio, nunca cede ══════════════════════
-# Hallado en producción 2026-08-12: el enganche de mayoristas por zona
-# (fixed-point de construir_rutas_con_mayoristas, hasta 4 pasadas) oscila sin
-# converger para ciertas semanas, y según en qué pasada se corte el tope, dos
-# grupos MARTES intercambiaban unidad entre sí (Tuxtepec caía en F 350_1 y
-# Cosamaloapan en F 350_2, al revés de siempre). Arreglar la oscilación de
-# raíz mueve otras rutas de forma impredecible; `unidad_forzada` ancla la
-# unidad de referencia de un grupo puntual sin tocar el reparto de nadie más.
-def test_unidad_forzada_se_queda_fija_aunque_no_quepa_ni_se_pueda_partir():
-    # Un solo miembro: no hay nada que partir ni otro día admisible al que
-    # moverse -- aísla el efecto de `unidad_forzada` en la palanca 1 (unidad)
-    # de las palancas 2/3 (día, partición), que no se tocaron.
-    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1")]
-    plantilla[0]["unidad_forzada"] = True
-    pedidos = {1: 400}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 5000},
-        {"V1": 99, "V2": 99}, _sin_tiempo(),
-        kg_mayoristas={1: 700})                       # 1100 > 1000: no cabe
-    assert not [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
-    assert ("V1", "LUNES") in groups
-    assert ("V2", "LUNES") not in groups
-
-
-def test_sin_forzar_el_mismo_caso_si_cede():
-    # Control: sin `unidad_forzada`, el mismo escenario SÍ cede a V2 (V2 tiene
-    # cupo de sobra y nada la descarta) -- confirma que la prueba de arriba
-    # de verdad ejercita el camino que antes se tomaba.
-    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1")]
-    pedidos = {1: 400}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 5000},
-        {"V1": 99, "V2": 99}, _sin_tiempo(), kg_mayoristas={1: 700})
-    assert [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
-    assert ("V2", "LUNES") in groups
-
-
-def test_unidad_forzada_no_cambia_nada_cuando_ya_cabria_de_todos_modos():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1")]
-    plantilla[0]["unidad_forzada"] = True
-    pedidos = {1: 100, 2: 100}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 5000, "V2": 5000},
-        {"V1": 99, "V2": 99}, _sin_tiempo())
-    assert ("V1", "LUNES") in groups
-    assert not exc
 
 
 # ══ 4. Palanca 2: mover de día, sólo dentro de los admisibles ══════════════
@@ -640,47 +546,6 @@ def test_aviso_de_ruta_larga_no_bloquea():
 
 
 # ══ 9. Origen de la carga que disparó cada excepción ═══════════════════════
-def test_excepcion_registra_origen_lores():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1"),
-                 _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
-    pedidos = {1: 300, 2: 300, 3: 300, 4: 300}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 1000},
-        {"V1": 20, "V2": 20}, _sin_tiempo())
-    mov = [e for e in exc if e["tipo"] == "MOVIDO_UNIDAD"]
-    assert mov and mov[0]["origen_carga"] == "LORES"
-
-
-def test_excepcion_registra_origen_mayoristas():
-    # La demanda Lores cabe sola; lo que satura es la carga de mayoristas
-    # enganchada a esa ruta (Playa Vicente mete ~1456 kg sobre un grupo que en
-    # Lores lleva ~692: el enganche por zona puede saturar la ruta que recibe).
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1",
-                        dias_admisibles=["LUNES"]),
-                 _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
-    pedidos = {1: 100, 2: 100, 3: 100, 4: 100}          # Lores = 400, cabe sola
-    mayoristas = {1: 600, 2: 600}                        # 1200 solos YA exceden
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 1000},
-        {"V1": 20, "V2": 20}, _sin_tiempo(), kg_mayoristas=mayoristas)
-    disparadas = [e for e in exc if e.get("origen_carga")]
-    assert disparadas, "la carga de mayoristas debió disparar alivio"
-    assert any(e["origen_carga"] == "MAYORISTAS" for e in disparadas)
-
-
-def test_excepcion_registra_origen_ambas():
-    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1",
-                        dias_admisibles=["LUNES"]),
-                 _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref="V1")]
-    # AMBAS = cada fuente satura por su cuenta
-    pedidos = {1: 600, 2: 600, 3: 300, 4: 300}          # Lores solos exceden
-    mayoristas = {1: 600, 2: 600}                        # mayoristas solos también
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, {"V1": 1000, "V2": 1000},
-        {"V1": 20, "V2": 20}, _sin_tiempo(), kg_mayoristas=mayoristas)
-    assert any(e.get("origen_carga") == "AMBAS" for e in exc)
-
-
 def test_kg_mayoristas_cuenta_para_la_capacidad():
     plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2], unidad_ref="V1",
                         dias_admisibles=["LUNES"])]
@@ -748,63 +613,6 @@ def test_lo_pelado_al_partir_no_se_queda_en_la_misma_ruta():
     assert len(groups) == 2                        # se repartió en dos viajes
     for (unidad, _), miembros in groups.items():
         assert sum(pedidos[m["sid"]] for m in miembros) <= caps[unidad]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Al ceder la unidad de referencia, manda la AFINIDAD, no el abecedario
-#
-# El g24 (Playa Vicente) no cabía en su unidad de referencia el miércoles y el
-# motor lo mandaba a F 350_1 sobre F 350_2 sólo porque ambas estaban vacías y
-# "F 350_1" ordena antes. Resultado: FELIPE aparecía con un día de trabajo que
-# la operación no hace, mientras la unidad que sí lleva esa carga quedaba libre.
-# El desempate tiene que ser en qué camión viaja ese grupo históricamente.
-# ═══════════════════════════════════════════════════════════════════════════
-
-def test_al_ceder_la_unidad_gana_la_afinidad_historica():
-    plantilla = [{"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES",
-                  "unidad_ref": "CHICA", "sucursales": [1, 2],
-                  "dias_admisibles": ["LUNES"]}]
-    pedidos = {1: 1500, 2: 1500}                  # 3,000: no cabe en CHICA
-    caps = {"CHICA": 1000, "A_GRANDE": 3900, "Z_GRANDE": 3900}
-    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
-               afinidad_unidad={1: {"Z_GRANDE": 5}})
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, {}, plantilla, caps, {}, cfg)
-    assert ("Z_GRANDE", "LUNES") in groups, \
-        f"eligió por abecedario, no por afinidad: {sorted(groups)}"
-
-
-def test_sin_afinidad_el_reparto_no_cambia():
-    # Sin datos de afinidad el comportamiento es el de antes (consolidar y
-    # desempatar por nombre): el cambio no puede alterar semanas sin historia.
-    plantilla = [{"grupo": 1, "rigidez": "RIGIDO", "dia": "LUNES",
-                  "unidad_ref": "CHICA", "sucursales": [1, 2],
-                  "dias_admisibles": ["LUNES"]}]
-    pedidos = {1: 1500, 2: 1500}
-    caps = {"CHICA": 1000, "A_GRANDE": 3900, "Z_GRANDE": 3900}
-    cfg = dict(cfg_por_defecto(), chequear_tiempo=False)
-    groups, _ = construir_groups_desde_plantilla(
-        pedidos, {}, {}, plantilla, caps, {}, cfg)
-    assert ("A_GRANDE", "LUNES") in groups
-
-
-def test_la_afinidad_no_rompe_la_consolidacion():
-    # Preferir la unidad afín NO debe abrir un viaje nuevo si el grupo cabe en
-    # una que ya está trabajando ese día: consolidar sigue primero (el histórico
-    # lleva ~1.4 grupos por viaje, no 1.0).
-    plantilla = [
-        {"grupo": 1, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "USADA",
-         "sucursales": [1], "dias_admisibles": ["LUNES"]},
-        {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "CHICA",
-         "sucursales": [2], "dias_admisibles": ["LUNES"]},
-    ]
-    pedidos = {1: 1000, 2: 500}
-    caps = {"CHICA": 100, "USADA": 3900, "VACIA": 3900}
-    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
-               afinidad_unidad={2: {"VACIA": 9}})
-    groups, _ = construir_groups_desde_plantilla(
-        pedidos, {}, {}, plantilla, caps, {}, cfg)
-    assert len(groups) == 1 and ("USADA", "LUNES") in groups
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -897,63 +705,6 @@ def test_dia_alternativo_nunca_ofrece_una_excluida():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Reserva de unidad_ref pendiente — encontrado en producción 2026-08-12:
-# grupo 19 (Amatitlán/Carlos A. Carrillo 2, ref F 350_1) no cabía por TIEMPO
-# en F 350_1 y cedía. Entre las unidades vacías, T 20 resultó "compatible"
-# (nada había ahí todavía) y el desempate la eligió. El problema: T 20 era
-# la unidad de referencia RÍGIDA de grupo 11 (El Tejar/Antón Lizardo/
-# Jamapa), que esa semana pesaba un poco MENOS que grupo 19 y por eso se
-# procesaba después. Cuando le tocó su turno, grupo 11 encontró que su
-# propia unidad_ref ya tenía cupo y la usó directo — un grupo usando SU
-# PROPIA unidad_ref nunca pasa por el filtro de coocurrencia, así que los
-# dos quedaron juntos sin ningún precedente histórico entre ellos y sin
-# ninguna excepción registrada. (Se probó primero partir la asignación en
-# dos fases -- todos reclaman antes de que nadie ceda -- pero eso rompía
-# `test_grupo_que_no_cabe_en_ninguna_unidad_va_a_la_de_mas_espacio_libre`;
-# la solución quedó como reserva dentro de la MISMA pasada de siempre, ver
-# docstring de `_asignar_unidades`.)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def test_reserva_de_unidad_pendiente_evita_que_otro_grupo_la_ocupe_cediendo():
-    # grupo 1 (1800 kg, sin unidad_ref válida en la flota -> cede desde el
-    # principio) se procesa ANTES que grupo 2 (100 kg, ref=V2, RIGIDO) por
-    # ser más pesado. Sin la reserva, grupo 1 puede colarse en V2 (vacía en
-    # ese momento) antes que grupo 2 llegue a reclamarla -- y como no hay
-    # coocurrencia entre 1 y 2, ese apilado no tiene ningún precedente real.
-    plantilla = [
-        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref="SIN_FLOTA"),
-        _grupo(2, "RIGIDO", "LUNES", [3], unidad_ref="V2"),
-    ]
-    pedidos = {1: 900, 2: 900, 3: 100}   # grupo1 = 1800 kg, grupo2 = 100 kg
-    caps = {"V2": 5000, "V3": 5000}
-    coocurrencia = {}                      # 1 y 2 nunca compartieron camión-día
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, {}, plantilla, caps, {},
-        _sin_tiempo(coocurrencia_grupos=coocurrencia))
-    # grupo 2 reclama V2 sin obstáculos, sólo con lo suyo
-    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [3]
-    # grupo 1 nunca se apila en V2 (cero precedente con grupo 2)
-    v2_sids = [m["sid"] for m in groups[("V2", "LUNES")]]
-    assert 1 not in v2_sids and 2 not in v2_sids
-
-
-def test_reserva_de_unidad_pendiente_cede_si_es_la_unica_opcion_viable():
-    # Sin otra unidad en la flota, la reserva también cede -- mismo patrón
-    # que la compatibilidad por coocurrencia (ver
-    # test_al_ceder_unidad_coocurrencia_cede_si_es_la_unica_opcion): mejor
-    # una combinación sin turno respetado que un grupo sin camión.
-    plantilla = [
-        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref="SIN_FLOTA"),
-        _grupo(2, "RIGIDO", "LUNES", [3], unidad_ref="V2"),
-    ]
-    pedidos = {1: 900, 2: 900, 3: 100}
-    caps = {"V2": 5000}                    # única unidad de la flota
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos={}))
-    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 3]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Palanca 4 — ninguna ruta se queda con una sola sucursal, salvo que el
 # vehículo ya esté al límite de su capacidad (peso Lores + mayoristas).
 # Regla de negocio explícita del 2026-08-11, encontrada al revisar viajes
@@ -961,6 +712,14 @@ def test_reserva_de_unidad_pendiente_cede_si_es_la_unica_opcion_viable():
 # ═══════════════════════════════════════════════════════════════════════════
 
 def test_solitaria_se_consolida_en_ruta_activa_compatible_con_cupo():
+    # Sin preferencia, la selección por peso ya consolida ambos grupos en la
+    # MISMA unidad desde la asignación inicial (grupo 2, más pesado, procesa
+    # primero y grupo 1 -- compatible por coocurrencia -- se suma a esa ruta
+    # por el desempate de consolidación) -- Palanca 4 ni siquiera necesita
+    # intervenir, así que CONSOLIDADO_SOLITARIA no se emite. El comportamiento
+    # de negocio protegido (el grupo 1 nunca queda solo pudiendo compartir
+    # camión con precedente histórico) sigue intacto, verificado corriendo
+    # el motor real.
     plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
                  _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
     pedidos = {1: 100, 2: 300, 3: 300}
@@ -968,9 +727,8 @@ def test_solitaria_se_consolida_en_ruta_activa_compatible_con_cupo():
     coocurrencia = {frozenset((1, 2)): 1}
     groups, exc = construir_groups_desde_plantilla(
         pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia))
-    assert ("V1", "LUNES") not in groups
-    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 3]
-    assert any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
+    assert len(groups) == 1, "el grupo 1 nunca debió quedar solo en su propia ruta"
+    assert sorted(m["sid"] for ms in groups.values() for m in ms) == [1, 2, 3]
 
 
 def test_solitaria_no_se_mueve_si_ya_esta_al_limite_de_capacidad():
@@ -997,19 +755,28 @@ def test_solitaria_sin_ruta_activa_ese_dia_queda_como_aviso():
 
 
 def test_solitaria_respeta_coocurrencia_aunque_haya_cupo():
+    # Sin preferencia, el grupo 2 (más pesado) procesa primero y se lleva la
+    # unidad que ordena primero alfabéticamente (V1); el grupo 1, sin ningún
+    # precedente histórico con el 2, no puede sumarse ahí y queda solo en la
+    # OTRA unidad (V2) -- el nombre de unidad cambia respecto al viejo orden
+    # por preferencia, pero el comportamiento protegido (nunca comparte
+    # camión sin precedente) sigue intacto, verificado corriendo el motor.
     plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
                  _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
     pedidos = {1: 100, 2: 300, 3: 300}
     caps = {"V1": 1000, "V2": 1000}
     groups, exc = construir_groups_desde_plantilla(
         pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos={}))
-    assert sorted(m["sid"] for m in groups[("V1", "LUNES")]) == [1]     # nunca coincidieron
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1]     # nunca coincidieron
     assert any(e["tipo"] == "AVISO_RUTA_SOLITARIA" for e in exc)
 
 
 def test_solitaria_considera_mayoristas_al_evaluar_el_limite():
-    # Lores solo (100 kg) deja mucho margen en V1 (cap 1000), pero con los
-    # mayoristas ya anclados (900 kg) llega al límite -- no debe moverse.
+    # Lores solo (100 kg) deja mucho margen en la unidad que le toca, pero con
+    # los mayoristas ya anclados (900 kg) llega al límite -- no debe moverse.
+    # Mismo cambio de nombre de unidad que el test anterior (V2 en vez de V1,
+    # por el nuevo orden de procesamiento por peso), comportamiento protegido
+    # intacto.
     plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref="V1"),
                  _grupo(2, "RIGIDO", "LUNES", [2, 3], unidad_ref="V2")]
     pedidos = {1: 100, 2: 300, 3: 300}
@@ -1018,7 +785,7 @@ def test_solitaria_considera_mayoristas_al_evaluar_el_limite():
     groups, exc = construir_groups_desde_plantilla(
         pedidos, {}, {}, plantilla, caps, {}, _sin_tiempo(coocurrencia_grupos=coocurrencia),
         kg_mayoristas={1: 900})
-    assert sorted(m["sid"] for m in groups[("V1", "LUNES")]) == [1]
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1]
     assert not any(e["tipo"] == "CONSOLIDADO_SOLITARIA" for e in exc)
 
 
@@ -1251,9 +1018,14 @@ def test_relleno_capacidad_cada_grupo_se_mueve_como_maximo_una_vez():
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Integración: la Palanca 5 corre dentro de construir_groups_desde_plantilla.
-# Escenario: grupo 2 (unidad_ref="V1", inválida en esta flota -- no existe)
-# cae por defecto a V2; V3 tiene sitio de sobra. La Palanca 5 debe reubicarlo
-# y V2/LUNES debe desaparecer por completo al quedar vacía.
+# Escenario original: grupo 2 (unidad_ref="V1", inválida en esta flota) caía
+# por defecto a V2, "desviado" desde el arranque, y la Palanca 5 lo reubicaba
+# en V3. Sin preferencia, `unidad_ref` inválido ya no provoca ningún desvío:
+# la asignación inicial por peso consolida ambos grupos en la MISMA unidad
+# desde el arranque (V2, que ordena primero alfabéticamente entre las dos
+# vacías) -- Palanca 5 ni siquiera necesita correr. El comportamiento
+# protegido (nunca queda una ruta residual vacía cuando todo cabe junto)
+# sigue intacto, verificado corriendo el motor real.
 # ═══════════════════════════════════════════════════════════════════════════
 def test_relleno_capacidad_integrado_rellena_y_vacia_la_ruta_origen():
     plantilla = [
@@ -1262,16 +1034,13 @@ def test_relleno_capacidad_integrado_rellena_y_vacia_la_ruta_origen():
         {"grupo": 2, "rigidez": "FLEXIBLE", "dia": "LUNES", "unidad_ref": "V1",
          "sucursales": [2, 3], "dias_admisibles": ["LUNES"]},
     ]
-    # "V1" no existe en la flota: grupo 2 cae por defecto a otra unidad y
-    # queda "desviado" desde el arranque, sin necesidad de simular sobrecupo.
     pedidos = {1: 50, 4: 50, 2: 150, 3: 150}
     caps = {"V2": 1000, "V3": 1000}
     vols = {"V2": 99, "V3": 99}
     groups, exc = construir_groups_desde_plantilla(
         pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
-    assert ("V2", "LUNES") not in groups            # la ruta origen se vació
-    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [1, 2, 3, 4]
-    assert any(e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" for e in exc)
+    assert ("V3", "LUNES") not in groups             # nunca se abrió la otra ruta
+    assert sorted(m["sid"] for m in groups[("V2", "LUNES")]) == [1, 2, 3, 4]
 
 
 def test_relleno_capacidad_desactivado_no_cambia_nada():
@@ -1295,13 +1064,14 @@ def test_relleno_capacidad_desactivado_no_cambia_nada():
 # Regresión — inspirada en el caso real que motivó esta palanca: la logística
 # del 24-28 de agosto 2026 mostraba F 350_1/MARTES con sólo 2,318 de 3,900 kg
 # (59 %) mientras el grupo 19 (Amatitlán + Carlos A. Carrillo 2, FLEXIBLE,
-# hogar histórico F 350_1) no aparecía ahí. Este fixture usa pesos pequeños
-# (no los kg reales del reporte) elegidos para que grupo19 -- con
-# `unidad_ref` inválida en esta flota -- se procese ANTES que el grupo ancla
-# en la pasada de reparto (más pesado primero) y caiga en la unidad de
-# respaldo por desempate alfabético; el ancla reclama F 350_1 normalmente.
-# Así queda "desviado" desde el arranque sin necesitar simular sobrecupo, y
-# la Palanca 5 debe traerlo de vuelta a F 350_1/MARTES, vaciando el respaldo.
+# hogar histórico F 350_1) no aparecía ahí. Sin preferencia, `unidad_ref`
+# inválido ya no provoca ningún desvío: grupo 19 (el más pesado) procesa
+# primero y se lleva la unidad que ordena primero alfabéticamente (AUX20);
+# el ancla (grupo 30) se suma ahí mismo por el desempate de consolidación,
+# en vez de reclamar F350_1 -- ambos terminan en la MISMA ruta desde el
+# arranque, sin necesitar la Palanca 5. El comportamiento protegido (grupo
+# 19 nunca queda en una ruta aparte de su ancla) sigue intacto, verificado
+# corriendo el motor real.
 # ═══════════════════════════════════════════════════════════════════════════
 def test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo():
     plantilla = [
@@ -1316,73 +1086,8 @@ def test_relleno_capacidad_regresion_grupo_19_amatitlan_carrillo():
     vols = {"F350_1": 99, "AUX20": 99}
     groups, exc = construir_groups_desde_plantilla(
         pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
-    assert sorted(m["sid"] for m in groups[("F350_1", "MARTES")]) == [86, 100, 101, 102]
-    assert ("AUX20", "MARTES") not in groups
-    relleno = [e for e in exc if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE"]
-    assert relleno and relleno[0]["grupo"] == 19
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Regresión — revisión final halló que el fragmento "pelado" por la Palanca 3
-# (partición por sobrecupo) nunca copiaba `unidad_forzada` al construir su
-# propio registro en `asign` (línea ~779 de `construir_groups_desde_plantilla`).
-# Antes de la Palanca 5 eso era inerte -- ningún consumidor posterior a la
-# Palanca 1 miraba `unidad_forzada`. La Palanca 5 es la primera que sí lo
-# consulta (`if a.get("unidad_forzada"): continue`), así que un fragmento
-# partido de un grupo forzado podía terminar movido a una unidad ajena por la
-# Palanca 5, violando la regla de negocio del incidente 2026-08-12 (ver
-# comentario en `_asignar_unidades`, ~línea 318).
-#
-# Fixture: grupo 1 (RIGIDO, `unidad_forzada=True`, hogar V1) pesa 1200 kg
-# contra un V1 de 1000 kg -- debe partirse. Se pela la sucursal más pesada
-# (1, 600 kg); lo que queda (2 y 3, 600 kg) cabe en V1 y se queda ahí (nunca
-# se le quita la unidad forzada al remanente). El fragmento pelado (sólo la
-# sucursal 1, 600 kg) no cabe de vuelta en V1 (600+600=1200 > 1000), así que
-# la partición lo reubica en V2 (700 kg de cupo, alfabéticamente la primera
-# alternativa con espacio). V3 (grupo 2, 50 kg sobre 5000 de cupo) queda
-# como la ruta MÁS VACÍA del día -- exactamente el tipo de ruta que la
-# Palanca 5 procesa primero buscando qué acomodar. El fragmento en V2 es un
-# candidato que ENCAJA en V3 sin problema y cuyo `unidad_ref` es V1 (no V3,
-# no es "volver a casa" tampoco) -- si `unidad_forzada` se perdiera, sería el
-# único candidato disponible y la Palanca 5 lo movería a V3 sin dudar.
-# `coocurrencia_grupos=None` (default) para que `_compatible_historico` nunca
-# bloquee nada -- así el único freno posible es `unidad_forzada`.
-def test_relleno_capacidad_respeta_unidad_forzada_en_fragmento_partido():
-    plantilla = [
-        _grupo(1, "RIGIDO", "LUNES", [1, 2, 3], unidad_ref="V1",
-              dias_admisibles=["LUNES"]),
-        _grupo(2, "FLEXIBLE", "LUNES", [10, 11], unidad_ref="V3",
-              dias_admisibles=["LUNES"]),
-        _grupo(3, "FLEXIBLE", "LUNES", [20, 21], unidad_ref="V2",
-              dias_admisibles=["LUNES"]),
-    ]
-    plantilla[0]["unidad_forzada"] = True
-    pedidos = {1: 600, 2: 500, 3: 100,      # grupo 1: 1200 > cap V1 (1000)
-               10: 25, 11: 25,               # grupo 2: 50, ruta V3 casi vacía
-               20: 25, 21: 25}               # grupo 3: 50, ya ocupa parte de V2
-    caps = {"V1": 1000, "V2": 700, "V3": 5000}
-    vols = {"V1": 99, "V2": 99, "V3": 99}
-    groups, exc = construir_groups_desde_plantilla(
-        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
-
-    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"]
-    assert part and part[0]["grupo"] == 1
-    assert part[0]["sucursales_separadas"] == [1]
-    assert part[0]["destino_unidad"] == "V2"          # así lo reubicó la partición
-
-    # la sucursal 1 (el fragmento forzado) debe seguir exactamente donde la
-    # partición la dejó -- la Palanca 5 NUNCA debe moverla, aunque V3 esté
-    # casi vacía y el fragmento encajaría ahí sin problema.
-    ubicacion = next((clave for clave, ms in groups.items()
-                      if any(m["sid"] == 1 for m in ms)), None)
-    assert ubicacion == ("V2", "LUNES")
-    assert ("V3", "LUNES") in groups
-    assert sorted(m["sid"] for m in groups[("V3", "LUNES")]) == [10, 11]
-
-    # ninguna excepción de la Palanca 5 debe tocar al grupo 1 (ni su
-    # remanente, que ya está en casa, ni el fragmento, que está forzado)
-    assert not [e for e in exc
-               if e["tipo"] == "RELLENO_CAPACIDAD_LIBRE" and e["grupo"] == 1]
+    assert sorted(m["sid"] for m in groups[("AUX20", "MARTES")]) == [86, 100, 101, 102]
+    assert ("F350_1", "MARTES") not in groups
 
 
 def test_consolidar_solitarios_nunca_mueve_a_unidad_excluida():
@@ -1439,3 +1144,32 @@ def test_relleno_capacidad_nunca_ofrece_sin_unidad_como_destino():
     exc = _rellenar_capacidad_libre(asign, pedidos, {}, {}, caps, {}, _sin_tiempo(), {})
     assert asign[2]["unidad"] != "SIN_UNIDAD", \
         "SIN_UNIDAD nunca debe tratarse como una ruta real con espacio libre"
+
+
+def test_exclusion_se_mantiene_a_traves_de_todas_las_fases():
+    # Escenario con varios grupos, un día saturado, y un grupo excluido de
+    # GRANDE que fuerza pasar por movimiento de dia, particion, y deja a
+    # otro grupo listo para consolidacion/relleno el mismo dia -- GRANDE
+    # nunca debe aparecer como destino de ninguna sucursal del grupo 1 en
+    # ninguna fase.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2, 3], unidad_ref=None,
+               dias_admisibles=["LUNES", "MARTES"]),
+        _grupo(2, "FLEXIBLE", "LUNES", [4], unidad_ref=None,
+               dias_admisibles=["LUNES"]),
+    ]
+    plantilla[0]["unidades_excluidas"] = ["GRANDE"]
+    pedidos = {1: 600, 2: 600, 3: 600, 4: 100}   # g1 = 1800 (> CHICA), g2 = 100
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    coocurrencia = {frozenset((1, 2)): 1}         # compatibles: aisla SOLO la exclusion
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    for (unidad, dia), miembros in groups.items():
+        if unidad == "GRANDE":
+            sids = {m["sid"] for m in miembros}
+            assert not (sids & {1, 2, 3}), \
+                f"sucursal del grupo excluido terminó en GRANDE: {sids}"
+    for e in exc:
+        assert e.get("a_unidad") != "GRANDE" and e.get("destino_unidad") != "GRANDE", \
+            f"ninguna excepcion debe mover el grupo excluido a GRANDE: {e}"
