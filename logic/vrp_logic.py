@@ -21,18 +21,28 @@ UMBRAL_PEQUEÑO   = 1300   # kg ≤ este valor → excepción (no restricción d
 # CAP-4: regla de capacidad máxima permitida (igual que en asignacion_logic.py).
 # Los únicos vehículos que pueden superar el 100 % de su capacidad nominal son
 # los de 3.5 a 4.0 t (3500-4000 kg), con un tope fijo de 3900 kg (promedio de
-# carga 3.5 t, sin superar nunca las 4 t). Cualquier otro vehículo tiene como
-# límite máximo exactamente el 100 % de su capacidad nominal, sin tolerancia
-# adicional, bajo ninguna circunstancia.
+# carga 3.5 t, sin superar nunca las 4 t). CAP-1.5 (abajo) es la única otra
+# excepción -- cualquier otro vehículo tiene como límite máximo exactamente
+# el 100 % de su capacidad nominal, sin tolerancia adicional.
 CAP_EXCEPCION_MIN_KG  = 3500
 CAP_EXCEPCION_MAX_KG  = 4000
 CAP_EXCEPCION_TOPE_KG = 3900
 
+# CAP-1.5: los vehículos de 1.5 t (1500 kg nominal) tienen tolerancia
+# operativa hasta 1549 kg -- confirmado por el usuario, así lo admite la
+# empresa. A diferencia de CAP-4 (que LIMITA un nominal ya inflado hacia
+# abajo), ésta da margen hacia ARRIBA de un nominal real de 1.5 t.
+CAP_1500_MIN_KG  = 1500
+CAP_1500_MAX_KG  = 1500
+CAP_1500_TOPE_KG = 1549
+
 
 def capacidad_efectiva_kg(cap_kg: float) -> float:
-    """Aplica la regla CAP-4 a una capacidad nominal expresada en kg."""
+    """Aplica las reglas CAP-4 y CAP-1.5 a una capacidad nominal en kg."""
     if CAP_EXCEPCION_MIN_KG <= cap_kg <= CAP_EXCEPCION_MAX_KG:
         return float(CAP_EXCEPCION_TOPE_KG)
+    if CAP_1500_MIN_KG <= cap_kg <= CAP_1500_MAX_KG:
+        return float(CAP_1500_TOPE_KG)
     return float(cap_kg)
 
 _CONSOL_DEV_LOW = 0.50    # ruta >50 % por debajo del histórico → candidata a consolidar
@@ -164,8 +174,9 @@ def obtener_capacidades_vehiculos() -> dict:
     `activo` -- así era también en el Mongo original, a diferencia de
     obtener_placas_por_abrev()/obtener_info_vehiculos() que sí filtran; se
     preserva esa asimetría tal cual).
-    Retorna: {abreviatura: capacidad_kg (int)} — ya con la regla CAP-4 aplicada
-    (tope fijo de 3900 kg para vehículos de 3.5-4 t; 100 % nominal para el resto).
+    Retorna: {abreviatura: capacidad_kg (int)} — ya con las reglas CAP-4 y
+    CAP-1.5 aplicadas (tope fijo de 3900 kg para vehículos de 3.5-4 t; tope
+    de 1549 kg para vehículos de 1.5 t; 100 % nominal para el resto).
     """
     try:
         db    = get_db()
