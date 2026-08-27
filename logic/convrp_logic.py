@@ -258,9 +258,13 @@ def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
                         vehiculos_cap, vehiculos_vol, cfg):
     """Otra unidad, MISMO día, donde el grupo quepa sin saturarla. Nunca una
     de `unidades_excluidas` del grupo; entre las que le alcanzan, prueba
-    primero la de menor capacidad."""
+    primero la de menor capacidad, desempatando por afinidad histórica
+    (`cfg["afinidad_unidad"]`) cuando dos o más quedan empatadas en
+    capacidad."""
+    af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
     candidatas = sorted((u for u in vehiculos_cap if not _excluida(a, u)),
-                        key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
+                        key=lambda u: (_num(vehiculos_cap.get(u)),
+                                       -_num(af.get(u)), str(u)))
     for unidad in candidatas:
         if unidad == a["unidad"]:
             continue
@@ -281,8 +285,11 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     coocurrencia que le alcanzan, la de MENOR capacidad -- nunca manda un
     grupo chico a una unidad grande de más si una chica ya le alcanza --
     desempatando por CONSOLIDACIÓN (la que ya lleva carga ese día, para no
-    abrir un viaje nuevo: en el histórico un viaje lleva ~1.4 grupos, no 1.0)
-    y por último por nombre.
+    abrir un viaje nuevo: en el histórico un viaje lleva ~1.4 grupos, no 1.0),
+    luego por AFINIDAD HISTÓRICA (`cfg["afinidad_unidad"]`: cuántas semanas
+    ese grupo cayó en esa unidad -- sólo decide cuando capacidad y
+    consolidación ya quedaron empatadas entre dos o más candidatos) y por
+    último por nombre.
 
     No hay preferencia de unidad: todo grupo pasa por el mismo criterio,
     sin importar `unidad_ref` (vestigial, ya no se lee para decidir) ni
@@ -320,12 +327,13 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 a["grupo"], u, dia, asign, coocurrencia)]
             compat = compat or candidatas
 
+            af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
             ordenadas = sorted(
                 compat,
                 key=lambda u: (_num(vehiculos_cap.get(u)),
                                -sum(_num(pedidos.get(s))
                                     for s in _sids_de_ruta(asign, u, dia)),
-                               str(u)))
+                               -_num(af.get(u)), str(u)))
 
             elegido = None
             for unidad in ordenadas:
@@ -372,14 +380,18 @@ def _dia_alternativo(asign, a, pedidos, volumenes, coords,
     El grupo se mueve completo -- el día es atributo del bloque.
 
     Nunca prueba una unidad de `unidades_excluidas` del grupo; entre las que
-    le alcanzan, prueba primero la de menor capacidad.
+    le alcanzan, prueba primero la de menor capacidad, desempatando por
+    afinidad histórica (`cfg["afinidad_unidad"]`) cuando dos o más quedan
+    empatadas en capacidad.
 
     Dos pasadas: primero sólo destinos compatibles por historial (mismo
     criterio que `_asignar_unidades`), y sólo si ninguno sirve se repite sin
     ese filtro -- mejor un destino sin precedente que un grupo sin día."""
     coocurrencia = cfg.get("coocurrencia_grupos")
+    af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
     candidatas = sorted((u for u in vehiculos_cap if not _excluida(a, u)),
-                        key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
+                        key=lambda u: (_num(vehiculos_cap.get(u)),
+                                       -_num(af.get(u)), str(u)))
     for exigir_compat in (True, False):
         for dia in a["dias_admisibles"]:
             if dia == a["dia"]:

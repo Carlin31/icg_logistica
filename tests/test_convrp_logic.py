@@ -1173,3 +1173,43 @@ def test_exclusion_se_mantiene_a_traves_de_todas_las_fases():
     for e in exc:
         assert e.get("a_unidad") != "GRANDE" and e.get("destino_unidad") != "GRANDE", \
             f"ninguna excepcion debe mover el grupo excluido a GRANDE: {e}"
+
+
+# ══ 9. Afinidad histórica como desempate entre unidades empatadas en capacidad ═
+def test_entre_capacidad_empatada_gana_la_afinidad_historica():
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 1500, 2: 1500}          # 3000 kg: cabe en cualquiera de las dos
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}     # empatadas en capacidad
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={1: {"Z_GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99}, cfg)
+    assert ("Z_GRANDE", "LUNES") in groups, \
+        "debio ganar la afinidad historica (Z_GRANDE), no el abecedario (A_GRANDE)"
+
+
+def test_afinidad_no_gana_sobre_capacidad_distinta():
+    # La afinidad es SOLO desempate entre empatadas -- si las capacidades
+    # difieren, sigue mandando la mas chica que alcanza, aunque la afinidad
+    # apunte a la mas grande.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 400, 2: 400}             # 800 kg: cabe en CHICA y en GRANDE
+    caps = {"CHICA": 1000, "GRANDE": 5000}
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={1: {"GRANDE": 9}})
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99}, cfg)
+    assert ("CHICA", "LUNES") in groups, \
+        "la capacidad ascendente sigue mandando cuando no hay empate real"
+
+
+def test_sin_afinidad_el_desempate_sigue_siendo_alfabetico():
+    # Sin datos de afinidad (grupo nuevo, sin historial) el comportamiento
+    # no cambia: sigue siendo capacidad -> consolidacion -> alfabetico.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 1500, 2: 1500}
+    caps = {"A_GRANDE": 3900, "Z_GRANDE": 3900}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"A_GRANDE": 99, "Z_GRANDE": 99},
+        _sin_tiempo())
+    assert ("A_GRANDE", "LUNES") in groups
