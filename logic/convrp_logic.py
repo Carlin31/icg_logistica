@@ -260,6 +260,26 @@ def _excluida(a, unidad) -> bool:
     return unidad in (a.get("unidades_excluidas") or ())
 
 
+def _respeta_exclusividad(asign, a, unidad, dia) -> bool:
+    """
+    True si `a` puede entrar a (unidad, dia) sin violar exclusividad:
+      - si `a` es exclusivo, esa (unidad, dia) debe estar VACÍA (sin ningún
+        otro grupo ya asignado ahí).
+      - si `a` NO es exclusivo, esa (unidad, dia) no debe tener ya un grupo
+        exclusivo (distinto de `a`).
+
+    Grupos marcados `exclusivo` nunca comparten camión con otro grupo, sin
+    importar cuánto margen de peso quede (ver
+    docs/superpowers/specs/2026-08-28-grupos-exclusivos-convrp-design.md).
+    """
+    ocupantes = [g for g in asign
+                if asign[g]["unidad"] == unidad and asign[g]["dia"] == dia
+                and g != a["grupo"]]
+    if a.get("exclusivo"):
+        return not ocupantes
+    return not any(asign[g].get("exclusivo") for g in ocupantes)
+
+
 def _candidatos_a_mover(asign, unidad, dia, pedidos):
     """Grupos de la ruta, ordenados: FLEXIBLE antes que RIGIDO, luego el de mayor
     peso (alivia más), desempate por id de grupo ascendente."""

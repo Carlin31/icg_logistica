@@ -1447,3 +1447,32 @@ def test_reserva_predice_la_unidad_que_grupo2_elegiria_de_verdad_no_solo_valor_m
     assert sorted(m["sid"] for m in groups[("CHICA_A", "LUNES")]) == [3, 4], \
         "grupo 2 debe terminar en CHICA_A: empatada en capacidad con CHICA_B " \
         "(ambas mas chicas que MEDIA), desempata por nombre"
+
+
+# ══ Grupos exclusivos: nunca comparten camión con otro grupo ═══════════════
+def test_respeta_exclusividad_bloquea_unidad_ocupada_para_grupo_exclusivo():
+    from logic.convrp_logic import _respeta_exclusividad
+    asign = {1: {"grupo": 1, "unidad": "V1", "dia": "LUNES"},
+             2: {"grupo": 2, "unidad": None, "dia": "LUNES", "exclusivo": True}}
+    a = asign[2]
+    assert _respeta_exclusividad(asign, a, "V1", "LUNES") is False, \
+        "V1 ya tiene al grupo 1: un exclusivo no puede entrar"
+    assert _respeta_exclusividad(asign, a, "V2", "LUNES") is True
+
+
+def test_respeta_exclusividad_bloquea_sumarse_a_ruta_con_exclusivo():
+    from logic.convrp_logic import _respeta_exclusividad
+    asign = {1: {"grupo": 1, "unidad": "V1", "dia": "LUNES", "exclusivo": True},
+             2: {"grupo": 2, "unidad": None, "dia": "LUNES"}}
+    a = asign[2]
+    assert _respeta_exclusividad(asign, a, "V1", "LUNES") is False, \
+        "V1 ya tiene un grupo exclusivo: nadie más puede sumarse"
+    assert _respeta_exclusividad(asign, a, "V2", "LUNES") is True
+
+
+def test_respeta_exclusividad_no_bloquea_consolidacion_normal_entre_no_exclusivos():
+    from logic.convrp_logic import _respeta_exclusividad
+    asign = {1: {"grupo": 1, "unidad": "V1", "dia": "LUNES"},
+             2: {"grupo": 2, "unidad": None, "dia": "LUNES"}}
+    a = asign[2]
+    assert _respeta_exclusividad(asign, a, "V1", "LUNES") is True
