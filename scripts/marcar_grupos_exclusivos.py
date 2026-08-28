@@ -3,8 +3,18 @@ marcar_grupos_exclusivos.py
 
 Marca exclusivo=1 en los grupos que nunca deben compartir camión con otro
 grupo, aunque el peso combinado quepa. Corrige la plantilla VIGENTE in
-place -- no crea una versión nueva, mismo criterio ya usado para cargar
-grupos_unidad_forzada.csv sobre `unidad_forzada`.
+place -- no crea una versión nueva, mismo criterio ya usado por
+scripts/mover_dia_preferido_grupo_17.py para ediciones puntuales sobre la
+plantilla vigente (a diferencia de `unidad_forzada`, que se re-deriva de
+grupos_unidad_forzada.csv en cada carga completa vía
+cargar_plantilla_desde_excel/cargar_zonas_manual).
+
+IMPORTANTE -- no sobrevive una recarga completa: si alguna vez se vuelve a
+correr cargar_plantilla_desde_excel() o cargar_zonas_manual() (creando una
+versión nueva de plantilla_grupo), el flag `exclusivo` NO se traslada solo
+-- la versión nueva nace con exclusivo=0 en todos lados (default de la
+columna) y este script debe volver a correrse después. No hay hoy ningún
+aviso automático de esto.
 
 Ver docs/superpowers/specs/2026-08-28-grupos-exclusivos-convrp-design.md.
 
