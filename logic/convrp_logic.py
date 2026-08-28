@@ -313,6 +313,80 @@ def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
     return None
 
 
+def _asignar_exclusivos(asign, pedidos, volumenes, coords, vehiculos_cap,
+                        vehiculos_vol, cfg):
+    """
+    Corre ANTES que `_asignar_unidades` (Palanca 1): fija día y unidad de
+    los grupos marcados `exclusivo` -- nunca comparten camión con otro
+    grupo, sin importar cuánto margen de peso quede.
+
+    Para cada uno (orden determinista: `grupo` ascendente), prueba TODOS
+    sus `dias_admisibles` (preferido primero) y en cada uno busca la unidad
+    VACÍA (sin ningún otro grupo asignado ese día -- ni siquiera de otro
+    exclusivo ya procesado) de menor capacidad que lo admita sin violar
+    restricciones. Entre las combinaciones encontradas en sus distintos
+    días, se queda con la de MENOR capacidad de camión; empate por orden de
+    `dias_admisibles`, luego por nombre de unidad.
+
+    Si ningún día ofrece una unidad vacía viable (p. ej. un rígido de un
+    solo día sin ninguna unidad libre que le alcance), cae al mismo
+    criterio de último recurso que `_asignar_unidades`: la unidad no
+    excluida y vacía con más espacio libre en su día preferido. Si ni eso
+    hay (`unidades_excluidas` deja la flota entera afuera), registra
+    SIN_UNIDAD_DISPONIBLE, igual que `_asignar_unidades`.
+
+    Devuelve la lista de excepciones SIN_UNIDAD_DISPONIBLE.
+    """
+    excepciones: list = []
+    for gid in sorted(g for g in asign if asign[g].get("exclusivo")):
+        a = asign[gid]
+        mejor = None   # (capacidad, idx_dia_admisible, unidad, dia)
+        for idx, dia in enumerate(a["dias_admisibles"]):
+            candidatas = sorted(
+                (u for u in vehiculos_cap if not _excluida(a, u)
+                 and _respeta_exclusividad(asign, a, u, dia)),
+                key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
+            for unidad in candidatas:
+                if _restriccion_violada(sorted(a["miembros"]), unidad, pedidos,
+                                        volumenes, coords, vehiculos_cap,
+                                        vehiculos_vol, cfg, dia=dia) is None:
+                    opcion = (_num(vehiculos_cap.get(unidad)), idx, unidad, dia)
+                    if mejor is None or opcion < mejor:
+                        mejor = opcion
+                    break   # candidatas ya viene ordenada por capacidad: la
+                            # primera viable de este día es la más chica
+        if mejor is not None:
+            _, _, unidad, dia = mejor
+            a["dia"] = dia
+            a["unidad"] = unidad
+            continue
+
+        # último recurso: ninguna unidad vacía en ningún día admisible
+        # admite el grupo completo -- se queda en su día preferido, en la
+        # unidad no excluida y vacía con más espacio libre.
+        dia = a["dia"]
+        kg_may = cfg.get("kg_mayoristas") or {}
+
+        def _libre(u):
+            ocupado = sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
+                         for s in _sids_de_ruta(asign, u, dia))
+            return _num(vehiculos_cap.get(u)) - ocupado
+
+        candidatas = [u for u in vehiculos_cap if not _excluida(a, u)
+                     and _respeta_exclusividad(asign, a, u, dia)]
+        if not candidatas:
+            a["unidad"] = "SIN_UNIDAD"
+            excepciones.append({
+                "tipo": "SIN_UNIDAD_DISPONIBLE", "grupo": a["grupo"],
+                "rigidez": a["rigidez"], "dia": dia,
+                "motivo": f"ninguna unidad no excluida y vacía disponible "
+                          f"para el grupo exclusivo {a['grupo']} el {dia}",
+            })
+            continue
+        a["unidad"] = min(candidatas, key=lambda u: (-_libre(u), str(u)))
+    return excepciones
+
+
 def _asignar_unidades(asign, pedidos, volumenes, coords,
                       vehiculos_cap, vehiculos_vol, cfg):
     """
@@ -371,9 +445,12 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     se puede volver a llamar tras mover un día.
     """
     for a in asign.values():
-        a["unidad"] = None
+        if not a.get("exclusivo"):
+            a["unidad"] = None
     por_dia: dict = {}
     for gid in sorted(asign):
+        if asign[gid].get("exclusivo"):
+            continue      # ya lo fijó _asignar_exclusivos antes de esta pasada
         por_dia.setdefault(asign[gid]["dia"], []).append(gid)
 
     excepciones: list = []
@@ -788,6 +865,10 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             unidad_forzada=bool(g.get("unidad_forzada")),
             exclusivo=bool(g.get("exclusivo")),
             unidades_excluidas=list(g.get("unidades_excluidas") or []))
+
+    # ── 1.5. Palanca 0: fijar día/unidad de los grupos exclusivos ──
+    excepciones += _asignar_exclusivos(asign, pedidos, volumenes, coords,
+                                       vehiculos_cap, vehiculos_vol, cfg)
 
     # ── 2. Palanca 1: repartir en la flota por peso ──
     desviaciones = _asignar_unidades(asign, pedidos, volumenes, coords,

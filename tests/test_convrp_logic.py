@@ -1501,3 +1501,88 @@ def test_consolidar_solitarios_nunca_ofrece_una_ruta_con_grupo_exclusivo():
     assert ruta_3 != ruta_1, \
         "el grupo 3 nunca debió consolidarse en la ruta del grupo exclusivo"
     assert any(e["tipo"] == "AVISO_RUTA_SOLITARIA" for e in exc)
+
+
+def test_dos_grupos_exclusivos_nunca_comparten_camion_aunque_el_peso_alcance():
+    plantilla = [_grupo(1, "FLEXIBLE", "JUEVES", [1, 2], unidad_ref=None),
+                 _grupo(2, "FLEXIBLE", "JUEVES", [3, 4], unidad_ref=None)]
+    plantilla[0]["exclusivo"] = True
+    plantilla[1]["exclusivo"] = True
+    # 1000 + 1000 = 2000 kg: cabrían juntos en V_GRANDE (5000), pero al ser
+    # ambos exclusivos deben terminar en camiones distintos.
+    pedidos = {1: 500, 2: 500, 3: 500, 4: 500}
+    caps = {"V_CHICA": 1200, "V_GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"V_CHICA": 99, "V_GRANDE": 99},
+        _sin_tiempo())
+    claves_con_paradas = [k for k, ms in groups.items() if ms]
+    assert len(claves_con_paradas) == 2, \
+        "cada grupo exclusivo debe quedar en su propia ruta"
+    sids_por_clave = sorted(sorted(m["sid"] for m in groups[k])
+                            for k in claves_con_paradas)
+    assert sids_por_clave == [[1, 2], [3, 4]]
+
+
+def test_exclusivo_prefiere_otro_dia_admisible_a_camion_grande_en_su_dia_preferido():
+    # Dos grupos exclusivos, mismo día preferido, un solo camión chico libre
+    # ese día. El grupo 2 (que también admite VIERNES) debe moverse ahí --
+    # donde el camión chico SÍ está libre -- en vez de tomar GRANDE el jueves.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "JUEVES", [1], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "JUEVES", [2], unidad_ref=None,
+               dias_admisibles=["JUEVES", "VIERNES"]),
+    ]
+    plantilla[0]["exclusivo"] = True
+    plantilla[1]["exclusivo"] = True
+    pedidos = {1: 500, 2: 500}
+    caps = {"CHICA": 1200, "GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("CHICA", "JUEVES")]) == [1]
+    assert ("CHICA", "VIERNES") in groups, \
+        "el grupo 2 debió moverse a VIERNES para tomar el camión chico libre"
+    assert sorted(m["sid"] for m in groups[("CHICA", "VIERNES")]) == [2]
+    assert ("GRANDE", "JUEVES") not in groups
+
+
+def test_exclusivo_rigido_de_un_solo_dia_usa_camion_grande_si_no_hay_chico():
+    # Sin otro día a donde moverse (rígido, un solo día admisible) y sin que
+    # el camión chico le alcance por peso, debe usar el que le alcance --
+    # sin fallar y sin compartirlo con nadie.
+    #
+    # Nota: `_asignar_exclusivos` corre ANTES que la asignación de unidades
+    # de los grupos no exclusivos (Palanca 1) -- por diseño (ver
+    # docs/superpowers/specs/2026-08-28-grupos-exclusivos-convrp-design.md
+    # sección 5), así que en el momento en que evalúa al grupo 2 el camión
+    # CHICA todavía no tiene a nadie asignado, sin importar qué otro grupo
+    # comparta ese día. Por eso este caso de "no hay camión chico" se
+    # construye con una CAPACIDAD insuficiente (1500 kg no caben en 1200),
+    # no con otro grupo "ocupando" el chico primero -- esa otra situación
+    # (dos EXCLUSIVOS compitiendo por el mismo chico) ya la cubre
+    # test_exclusivo_prefiere_otro_dia_admisible_a_camion_grande_en_su_dia_preferido.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "JUEVES", [1], unidad_ref=None),
+        _grupo(2, "RIGIDO", "JUEVES", [2], unidad_ref=None,
+               dias_admisibles=["JUEVES"]),
+    ]
+    plantilla[1]["exclusivo"] = True
+    pedidos = {1: 500, 2: 1500}
+    caps = {"CHICA": 1200, "GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("GRANDE", "JUEVES")]) == [2]
+    assert not any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
+
+
+def test_exclusivo_sin_unidad_disponible_si_la_exclusion_deja_la_flota_vacia():
+    from logic.convrp_logic import _asignar_exclusivos
+    asign = {1: {"grupo": 1, "unidad": None, "dia": "LUNES", "miembros": [1],
+                "rigidez": "FLEXIBLE", "dias_admisibles": ["LUNES"],
+                "exclusivo": True, "unidades_excluidas": ["UNICA"]}}
+    pedidos = {1: 100}
+    caps = {"UNICA": 5000}          # la única unidad de la flota, excluida
+    exc = _asignar_exclusivos(asign, pedidos, {}, {}, caps, {}, _sin_tiempo())
+    assert asign[1]["unidad"] == "SIN_UNIDAD"
+    assert any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
