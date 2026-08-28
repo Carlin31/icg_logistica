@@ -303,6 +303,8 @@ def _unidad_alternativa(asign, a, pedidos, volumenes, coords,
     for unidad in candidatas:
         if unidad == a["unidad"]:
             continue
+        if not _respeta_exclusividad(asign, a, unidad, a["dia"]):
+            continue
         destino = _sids_de_ruta(asign, unidad, a["dia"]) + list(a["miembros"])
         if _restriccion_violada(sorted(destino), unidad, pedidos, volumenes,
                                 coords, vehiculos_cap, vehiculos_vol, cfg,
@@ -384,7 +386,8 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
 
         for idx, gid in enumerate(gids):
             a = asign[gid]
-            candidatas = [u for u in vehiculos_cap if not _excluida(a, u)]
+            candidatas = [u for u in vehiculos_cap if not _excluida(a, u)
+                         and _respeta_exclusividad(asign, a, u, dia)]
 
             compat = [u for u in candidatas if _compatible_historico(
                 a["grupo"], u, dia, asign, coocurrencia)]
@@ -532,6 +535,8 @@ def _dia_alternativo(asign, a, pedidos, volumenes, coords,
             if dia == a["dia"]:
                 continue
             for unidad in candidatas:
+                if not _respeta_exclusividad(asign, a, unidad, dia):
+                    continue
                 if exigir_compat and not _compatible_historico(
                         a["grupo"], unidad, dia, asign, coocurrencia):
                     continue
@@ -581,6 +586,8 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
         gid = next(g for g in asign
                   if asign[g]["unidad"] == unidad and asign[g]["dia"] == dia)
         a = asign[gid]
+        if a.get("exclusivo"):
+            continue    # nunca se mueve a consolidarse en otra ruta
         # candidatas: unidades YA ACTIVAS ese día (nunca abrir una vacía sólo
         # para esto), compatibles por historial, ordenadas por carga
         # descendente (consolidar en la más llena que todavía quepa).
@@ -589,7 +596,8 @@ def _consolidar_solitarios(asign, pedidos, volumenes, coords, vehiculos_cap,
                                   and u != "SIN_UNIDAD"
                                   and not _excluida(a, u)})
         candidatas = [u for u in activas_ese_dia
-                     if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)]
+                     if _compatible_historico(a["grupo"], u, dia, asign, coocurrencia)
+                     and _respeta_exclusividad(asign, a, u, dia)]
         candidatas.sort(key=lambda u: (
             -sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
                 for s in _sids_de_ruta(asign, u, dia)), u))

@@ -1476,3 +1476,28 @@ def test_respeta_exclusividad_no_bloquea_consolidacion_normal_entre_no_exclusivo
              2: {"grupo": 2, "unidad": None, "dia": "LUNES"}}
     a = asign[2]
     assert _respeta_exclusividad(asign, a, "V1", "LUNES") is True
+
+
+def test_consolidar_solitarios_nunca_ofrece_una_ruta_con_grupo_exclusivo():
+    # grupo 3 (solitaria) es compatible por historial SOLO con el grupo 1
+    # (exclusivo) -- sin el guard de exclusividad, Palanca 4 lo consolidaría
+    # ahí (hay cupo de sobra y coocurrencia real). Debe quedar como aviso.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [2, 3], unidad_ref=None),
+        _grupo(3, "FLEXIBLE", "LUNES", [4], unidad_ref=None),
+    ]
+    plantilla[0]["exclusivo"] = True
+    pedidos = {1: 100, 2: 200, 3: 200, 4: 100}
+    caps = {"V1": 1000, "V2": 1000, "V3": 1000}
+    coocurrencia = {frozenset((1, 3)): 1}     # el 3 solo coincidió antes con el 1
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"V1": 99, "V2": 99, "V3": 99},
+        _sin_tiempo(coocurrencia_grupos=coocurrencia))
+    ruta_1 = next(k for k, ms in groups.items() if any(m["sid"] == 1 for m in ms))
+    ruta_3 = next(k for k, ms in groups.items() if any(m["sid"] == 4 for m in ms))
+    assert sorted(m["sid"] for m in groups[ruta_1]) == [1], \
+        "el grupo exclusivo debe quedar solo en su ruta"
+    assert ruta_3 != ruta_1, \
+        "el grupo 3 nunca debió consolidarse en la ruta del grupo exclusivo"
+    assert any(e["tipo"] == "AVISO_RUTA_SOLITARIA" for e in exc)
