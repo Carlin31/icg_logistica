@@ -362,3 +362,27 @@ def test_obtener_mayoristas_guardados_sin_coordenadas_va_a_sin_coords(app_ctx):
     assert any(m["id_cliente"] == 999999 for m in dist["sin_coords"])
     assert dist["mayoristas_por_ruta"]["vrpaf_v1_sabado"] == []
     assert not any(p.get("id_cliente") == 999999 for p in dist["paradas_integradas"]["vrpaf_v1_sabado"])
+
+
+def test_obtener_mayoristas_guardados_respeta_orden_no_posicion_de_lista(app_ctx):
+    # Bug real (2026-08-28): el llamador (obtener_rutas_para_modificar) arma
+    # `sucursales` leyendo `asignaciones_sucursales` con un SELECT sin
+    # ORDER BY -- SQL Server no garantiza el orden de fila sin eso -- pero
+    # cada sucursal SÍ trae su "orden" real correcto (el fijado por
+    # orden_fijo_paradas/histórico). `obtener_mayoristas_guardados` debe
+    # respetar ese campo "orden", no la posición en la lista de entrada.
+    from logic.mayoristas_logic import guardar_mayoristas_convrp, obtener_mayoristas_guardados
+    lid = "507f1f77bcf86cd799439021"
+    rutas = [{"_id": "vrpaf_v1_domingo", "sucursales": [
+        {"num_tienda": 30, "latitud": 19.002, "longitud": -96.002, "orden": 3},
+        {"num_tienda": 10, "latitud": 19.000, "longitud": -96.000, "orden": 1},
+        {"num_tienda": 20, "latitud": 19.001, "longitud": -96.001, "orden": 2},
+    ]}]
+    por_ruta = {("V1", "DOMINGO"): [
+        {"id_cliente": 709, "nombre": "SUPER LA DESPENSA", "peso_kg": 10.0,
+         "latitud": 19.0005, "longitud": -96.0005}]}
+    guardar_mayoristas_convrp(lid, por_ruta, [], rutas)
+    dist = obtener_mayoristas_guardados(lid, rutas)
+    orden_map = dist["orden_sucursales"]["vrpaf_v1_domingo"]
+    assert orden_map["10"] < orden_map["20"] < orden_map["30"], (
+        f"se perdió el orden real de las sucursales: {orden_map}")

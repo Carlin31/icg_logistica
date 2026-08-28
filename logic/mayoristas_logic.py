@@ -1125,7 +1125,17 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
     sin_coords: list = []
 
     for rid in todos_los_rid:
-        sucursales_raw = sucursales_por_rid.get(rid, [])
+        # El llamador arma `sucursales` leyendo `asignaciones_sucursales`/
+        # `modificacion_ruta_sucursales` sin ORDER BY (SQL no garantiza el
+        # orden de fila sin eso) -- pero cada sucursal SÍ trae su campo
+        # "orden" real (orden_fijo_paradas/histórico). Hay que ordenar por
+        # ese campo ANTES de renumerar; enumerar directo sobre la lista tal
+        # como llegó (bug real 2026-08-28) tira ese orden y lo reemplaza por
+        # la posición arbitraria de la fila en la respuesta de SQL.
+        sucursales_raw = sorted(
+            sucursales_por_rid.get(rid, []),
+            key=lambda s: s.get("orden") if s.get("orden") is not None else 10**9,
+        )
         sucursales = [dict(s, tipo="sucursal") for s in sucursales_raw]
         for idx, suc in enumerate(sucursales, start=1):
             suc["orden"] = idx
