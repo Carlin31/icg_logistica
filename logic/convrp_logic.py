@@ -254,6 +254,18 @@ def _kg_grupo(a, pedidos):
     return sum(_num(pedidos.get(s)) for s in a["miembros"])
 
 
+def _espacio_libre(unidad, dia, asign, pedidos, vehiculos_cap, cfg) -> float:
+    """Capacidad restante de `unidad` en `dia`: capacidad total menos lo ya
+    cargado ese día (kg Lores + kg de mayoristas ya anclados). Usado por el
+    último recurso de `_asignar_unidades` y `_asignar_exclusivos` para
+    elegir, entre varias unidades que no alcanzan a admitir el grupo
+    completo, la que deja pelar menos al partir después."""
+    kg_may = cfg.get("kg_mayoristas") or {}
+    ocupado = sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
+                 for s in _sids_de_ruta(asign, unidad, dia))
+    return _num(vehiculos_cap.get(unidad)) - ocupado
+
+
 def _excluida(a, unidad) -> bool:
     """True si `unidad` está en las `unidades_excluidas` del grupo -- nunca
     es un destino válido para él, ni siquiera en el último recurso."""
@@ -365,12 +377,7 @@ def _asignar_exclusivos(asign, pedidos, volumenes, coords, vehiculos_cap,
         # admite el grupo completo -- se queda en su día preferido, en la
         # unidad no excluida y vacía con más espacio libre.
         dia = a["dia"]
-        kg_may = cfg.get("kg_mayoristas") or {}
-
-        def _libre(u):
-            ocupado = sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
-                         for s in _sids_de_ruta(asign, u, dia))
-            return _num(vehiculos_cap.get(u)) - ocupado
+        af = (cfg.get("afinidad_unidad") or {}).get(a["grupo"]) or {}
 
         candidatas = [u for u in vehiculos_cap if not _excluida(a, u)
                      and _respeta_exclusividad(asign, a, u, dia)]
@@ -383,7 +390,9 @@ def _asignar_exclusivos(asign, pedidos, volumenes, coords, vehiculos_cap,
                           f"para el grupo exclusivo {a['grupo']} el {dia}",
             })
             continue
-        a["unidad"] = min(candidatas, key=lambda u: (-_libre(u), str(u)))
+        a["unidad"] = min(candidatas, key=lambda u: (
+            -_espacio_libre(u, dia, asign, pedidos, vehiculos_cap, cfg),
+            -_num(af.get(u)), str(u)))
     return excepciones
 
 
@@ -565,16 +574,10 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                 # pele lo mínimo -- "más vacía" es capacidad menos lo ya
                 # cargado (incluida la carga de mayoristas anclada), NO menos
                 # kilos encima (ver incidente 6-10 abril en el histórico git).
-                kg_may = cfg.get("kg_mayoristas") or {}
-
-                def _libre(u):
-                    sids_u = _sids_de_ruta(asign, u, dia)
-                    ocupado = sum(_num(pedidos.get(s)) + _num(kg_may.get(s))
-                                  for s in sids_u)
-                    return _num(vehiculos_cap.get(u)) - ocupado
-
                 candidatas_ur = [u for u in candidatas if u not in reservadas] or candidatas
-                elegido = min(candidatas_ur, key=lambda u: (-_libre(u), -_num(af.get(u)), str(u)))
+                elegido = min(candidatas_ur, key=lambda u: (
+                    -_espacio_libre(u, dia, asign, pedidos, vehiculos_cap, cfg),
+                    -_num(af.get(u)), str(u)))
             elif elegido is None:
                 # unidades_excluidas dejó la flota entera afuera: no hay
                 # ninguna unidad válida. Nunca se asigna una excluida.

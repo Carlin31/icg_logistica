@@ -1586,3 +1586,21 @@ def test_exclusivo_sin_unidad_disponible_si_la_exclusion_deja_la_flota_vacia():
     exc = _asignar_exclusivos(asign, pedidos, {}, {}, caps, {}, _sin_tiempo())
     assert asign[1]["unidad"] == "SIN_UNIDAD"
     assert any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
+
+
+def test_exclusivo_que_no_cabe_en_ninguna_unidad_va_a_la_de_mas_espacio_libre():
+    # Ni CHICA ni GRANDE alcanzan (6000 kg > cualquiera): cae al ultimo
+    # recurso -- la unidad no excluida y vacia con mas espacio libre,
+    # nunca SIN_UNIDAD_DISPONIBLE (eso es solo cuando unidades_excluidas
+    # deja la flota entera afuera, no cuando simplemente no cabe).
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1], unidad_ref=None,
+                        dias_admisibles=["LUNES"])]
+    plantilla[0]["exclusivo"] = True
+    pedidos = {1: 6000}
+    caps = {"CHICA": 1200, "GRANDE": 5000}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, {"CHICA": 99, "GRANDE": 99},
+        _sin_tiempo())
+    assert ("GRANDE", "LUNES") in groups, \
+        "debe caer en GRANDE, la unidad vacia con mas espacio libre"
+    assert not any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
