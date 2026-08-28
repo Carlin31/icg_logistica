@@ -657,6 +657,7 @@ def obtener_grupos(version: int = None) -> list:
                             str(r.get("unidades_excluidas") or "").split("|")
                             if u.strip()],
                         unidad_forzada=bool(r.get("unidad_forzada")),
+                        exclusivo=bool(r.get("exclusivo")),
                         que_hace_vrp=r["que_hace_vrp"],
                         sucursales=sorted(miembros.get(g, [])),
                         dias_admisibles=[d for _, d, _ in sorted(dias.get(g, []))],

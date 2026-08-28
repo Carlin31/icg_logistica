@@ -758,6 +758,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             unidad=unidad, unidad_ref=unidad_ref, dia=dia, dia_preferido=dia,
             dias_admisibles=adm, miembros=activos,
             unidad_forzada=bool(g.get("unidad_forzada")),
+            exclusivo=bool(g.get("exclusivo")),
             unidades_excluidas=list(g.get("unidades_excluidas") or []))
 
     # ── 2. Palanca 1: repartir en la flota por peso ──
@@ -882,6 +883,7 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
                 grupo=a["grupo"], rigidez=a["rigidez"],
                 unidad=(destino[0] if destino else unidad),
                 unidad_ref=a["unidad_ref"], unidad_forzada=a.get("unidad_forzada", False),
+                exclusivo=a.get("exclusivo", False),
                 dia=(destino[1] if destino else dia), dia_preferido=a["dia_preferido"],
                 dias_admisibles=a["dias_admisibles"], miembros=sorted(separadas),
                 unidades_excluidas=list(a.get("unidades_excluidas") or []))
