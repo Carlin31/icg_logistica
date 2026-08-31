@@ -76,6 +76,16 @@ def _insertar_pos_proxima(route: list, nuevo: dict) -> int:
     Devuelve el índice (0-based) DESPUÉS del cual insertar `nuevo`
     para colocarlo junto a su parada más cercana en `route`.
     Si `nuevo` no tiene coordenadas, devuelve len(route) (al final).
+
+    Empate (misma distancia a dos paradas): gana la de índice MAYOR (la
+    más reciente en `route`), no la primera encontrada. Con `<` estricto,
+    un mayorista empatado entre dos paradas ya insertadas de su mismo
+    bloque (p. ej. dos mayoristas de la misma poblacion, coordenadas
+    identicas o casi) se insertaba junto a la PRIMERA de esas paradas,
+    partiendo el bloque en vez de extenderlo -- ver
+    _agrupar_por_poblacion_y_ordenar, que ya agrupa el ORDEN de
+    procesamiento por poblacion pero necesita este desempate para que la
+    inserción en sí no vuelva a separarlos.
     """
     lat_n = _to_float(nuevo.get("latitud"))
     lon_n = _to_float(nuevo.get("longitud"))
@@ -90,10 +100,50 @@ def _insertar_pos_proxima(route: list, nuevo: dict) -> int:
         if lat_p is None or lon_p is None:
             continue
         dist = _haversine_km(lat_n, lon_n, lat_p, lon_p)
-        if dist < best_dist:
+        if dist <= best_dist:
             best_dist = dist
             best_idx = i + 1   # insertar DESPUÉS de esta parada
     return best_idx
+
+
+def _agrupar_por_poblacion_y_ordenar(mayoristas: list, key_fn) -> list:
+    """
+    Ordena `mayoristas` por `key_fn`, pero agrupando antes por `poblacion`
+    para que dos mayoristas de la misma poblacion nunca queden separados
+    por uno de otra poblacion en el orden resultante.
+
+    Sin esto, dos mayoristas de pueblos distintos con valores de `key_fn`
+    intercalados (p. ej. por distancia cruda al centroide de la ruta) se
+    procesan/insertan uno a la vez en ese orden intercalado -- bug real
+    2026-08-31: la ruta de jueves de T 17_1 alternaba Jalapa de Diaz /
+    Ojitlan / Jalapa de Diaz / Ojitlan en vez de visitar cada pueblo junto.
+    Agrupando primero, cada pueblo se mueve como bloque (ordenado
+    internamente por `key_fn`) y el bloque completo se ubica por su
+    miembro con mejor `key_fn` -- ya no se alternan entre si.
+
+    Mayoristas sin poblacion (cadena vacia) no comparten nada entre si:
+    cada uno es su propio grupo de 1, ordenados igual que antes.
+    """
+    grupos: dict = {}
+    orden_grupos: list = []
+    sin_poblacion = 0
+    for m in mayoristas:
+        pob = (m.get("poblacion") or "").strip()
+        if pob:
+            clave = pob
+        else:
+            sin_poblacion += 1
+            clave = f"__sin_poblacion_{sin_poblacion}"
+        if clave not in grupos:
+            grupos[clave] = []
+            orden_grupos.append(clave)
+        grupos[clave].append(m)
+
+    for clave in orden_grupos:
+        grupos[clave].sort(key=key_fn)
+
+    orden_grupos.sort(key=lambda clave: key_fn(grupos[clave][0]))
+    return [m for clave in orden_grupos for m in grupos[clave]]
 
 
 def _ordenar_sucursales_planificacion(sucursales: list) -> list:
@@ -377,31 +427,16 @@ def _ordenar_mayoristas_en_ruta(mayoristas: list, ruta_id: str, historico_orden:
 
     if ruta_id in historico_orden:
         ranking = historico_orden[ruta_id]
-        ordenadas = sorted(
-            mayoristas_con,
-            key=lambda m: (
-                ranking.get(m["id_cliente"], 999999),
-                m["id_cliente"],
-            ),
-        )
+        key_fn = lambda m: (ranking.get(m["id_cliente"], 999999), m["id_cliente"])
+    elif centro_lat is None or centro_lon is None:
+        key_fn = lambda m: (-(m.get("latitud") or -999999), m["id_cliente"])
     else:
-        if centro_lat is None or centro_lon is None:
-            ordenadas = sorted(
-                mayoristas_con,
-                key=lambda m: (
-                    -(m.get("latitud") or -999999),
-                    m["id_cliente"],
-                ),
-            )
-        else:
-            ordenadas = sorted(
-                mayoristas_con,
-                key=lambda m: (
-                    _haversine_km(m["latitud"], m["longitud"], centro_lat, centro_lon),
-                    m["id_cliente"],
-                ),
-            )
+        key_fn = lambda m: (
+            _haversine_km(m["latitud"], m["longitud"], centro_lat, centro_lon),
+            m["id_cliente"],
+        )
 
+    ordenadas = _agrupar_por_poblacion_y_ordenar(mayoristas_con, key_fn)
     return ordenadas + sorted(mayoristas_sin, key=lambda m: m["id_cliente"])
 
 
@@ -730,15 +765,13 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
 
     centro_lat, centro_lon = _ruta_centroid(sucursales or [])
     if centro_lat is None or centro_lon is None:
-        mayoristas_ordenados = sorted(mayoristas_con, key=lambda m: m.get("id_cliente") or 0)
+        key_fn = lambda m: m.get("id_cliente") or 0
     else:
-        mayoristas_ordenados = sorted(
-            mayoristas_con,
-            key=lambda m: (
-                _haversine_km(m["latitud"], m["longitud"], centro_lat, centro_lon),
-                m.get("id_cliente") or 0,
-            ),
+        key_fn = lambda m: (
+            _haversine_km(m["latitud"], m["longitud"], centro_lat, centro_lon),
+            m.get("id_cliente") or 0,
         )
+    mayoristas_ordenados = _agrupar_por_poblacion_y_ordenar(mayoristas_con, key_fn)
 
     paradas = list(sucs_nodos)
     for m in mayoristas_ordenados:

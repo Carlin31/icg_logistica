@@ -63,6 +63,67 @@ def test_seleccionar_ruta_por_zona_poblacion_sin_zona_registrada_es_none():
     assert _seleccionar_ruta_por_zona(m, cache) is None
 
 
+# ── zigzag de mayoristas entre poblaciones (bug real 2026-08-31, reportado ──
+# por el usuario en la ruta de jueves de T 17_1: la secuencia alternaba
+# Jalapa de Diaz / Ojitlan / Jalapa de Diaz / Ojitlan en vez de agrupar cada
+# poblacion junta). Causa raiz: tanto _ordenar_mayoristas_en_ruta como
+# _integrar_paradas ordenaban/procesaban los mayoristas por distancia cruda
+# al centroide (o ranking historico) SIN agrupar antes por poblacion, asi
+# que dos mayoristas de pueblos distintos con distancias intercaladas se
+# insertaban uno a la vez en ese orden intercalado. Estas pruebas usan
+# coordenadas IDENTICAS para los 4 mayoristas a proposito: aisla el efecto
+# del ORDEN de procesamiento (que es lo que se corrige) del efecto de la
+# geometria real (que ya autocorrige casi siempre y esconderia el bug).
+def test_ordenar_mayoristas_en_ruta_agrupa_por_poblacion_sin_intercalar():
+    from logic.mayoristas_logic import _ordenar_mayoristas_en_ruta
+    sucursales = [{"latitud": 0.0, "longitud": 0.0}]
+    # Mismas coordenadas para los 4 -> sin agrupar por poblacion, el orden
+    # ingenuo por distancia (empatada) desempata por id_cliente: 1,2,3,4 =
+    # JALAPA, OJITLAN, JALAPA, OJITLAN -- intercalado.
+    mayoristas = [
+        {"id_cliente": 1, "poblacion": "JALAPA DE DIAZ", "latitud": 1.0, "longitud": 1.0},
+        {"id_cliente": 2, "poblacion": "OJITLAN",        "latitud": 1.0, "longitud": 1.0},
+        {"id_cliente": 3, "poblacion": "JALAPA DE DIAZ", "latitud": 1.0, "longitud": 1.0},
+        {"id_cliente": 4, "poblacion": "OJITLAN",        "latitud": 1.0, "longitud": 1.0},
+    ]
+    ordenadas = _ordenar_mayoristas_en_ruta(mayoristas, "vrpaf_t17_1_jueves", {}, sucursales)
+    poblaciones = [m["poblacion"] for m in ordenadas]
+    assert poblaciones == ["JALAPA DE DIAZ", "JALAPA DE DIAZ", "OJITLAN", "OJITLAN"], (
+        f"mayoristas de la misma poblacion quedaron intercalados: {poblaciones}")
+
+
+def test_integrar_paradas_agrupa_por_poblacion_sin_intercalar():
+    from logic.mayoristas_logic import _integrar_paradas
+    sucursales = [
+        {"num_tienda": 1, "nombre_base": "Ancla", "latitud": 0.0, "longitud": 0.0, "orden": 1},
+    ]
+    id_a_poblacion = {1: "JALAPA DE DIAZ", 2: "OJITLAN", 3: "JALAPA DE DIAZ", 4: "OJITLAN"}
+    mayoristas = [
+        {"id_cliente": i, "poblacion": pob, "latitud": 1.0, "longitud": 1.0, "peso_kg": 5.0}
+        for i, pob in id_a_poblacion.items()
+    ]
+    paradas = _integrar_paradas(sucursales, mayoristas)
+    poblaciones = [id_a_poblacion[p["id_cliente"]] for p in paradas if p["tipo"] == "mayorista"]
+    assert poblaciones in (
+        ["JALAPA DE DIAZ", "JALAPA DE DIAZ", "OJITLAN", "OJITLAN"],
+        ["OJITLAN", "OJITLAN", "JALAPA DE DIAZ", "JALAPA DE DIAZ"],
+    ), f"mayoristas de la misma poblacion quedaron intercalados: {poblaciones}"
+
+
+def test_ordenar_mayoristas_en_ruta_sin_poblacion_no_se_agrupan_entre_si():
+    # Los mayoristas sin poblacion (cadena vacia) no comparten nada entre
+    # si -- no deben tratarse como un solo grupo gigante que ignore su
+    # propio orden por distancia/historico.
+    from logic.mayoristas_logic import _ordenar_mayoristas_en_ruta
+    sucursales = [{"latitud": 0.0, "longitud": 0.0}]
+    mayoristas = [
+        {"id_cliente": 1, "poblacion": "", "latitud": 0.0, "longitud": 0.30},
+        {"id_cliente": 2, "poblacion": "", "latitud": 0.0, "longitud": 0.10},
+    ]
+    ordenadas = _ordenar_mayoristas_en_ruta(mayoristas, "vrpaf_x_lunes", {}, sucursales)
+    assert [m["id_cliente"] for m in ordenadas] == [2, 1]
+
+
 # ── _construir_cache_zonas (contra BD real) ────────────────────────────────
 @pytest.fixture(scope="module")
 def app_ctx():
