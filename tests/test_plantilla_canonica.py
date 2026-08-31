@@ -141,29 +141,54 @@ def app_ctx():
     ctx.pop()
 
 
+#  Llave natural por tabla (ademas de `version`) para restaurar `vigente`
+#  fila por fila, no por version -- ver docstring de _vigente_restaurada.
+_LLAVE_NATURAL_POR_TABLA = {
+    "plantilla_meta":            [],
+    "plantilla_grupo":           ["grupo"],
+    "plantilla_grupo_sucursal":  ["grupo", "num_tienda"],
+    "plantilla_grupo_dia":       ["grupo", "dia"],
+}
+
+
 @pytest.fixture
 def _vigente_restaurada():
     """cargar_zonas_manual() reemplaza la plantilla vigente ENTERA (no es
     aislado): un test que la llama directamente contra la BD real dejaria
     su propia plantilla de prueba como la vigente para toda la app si no se
-    restaura. Este fixture guarda que version esta vigente en las 4 tablas
-    antes del test y la restaura despues, pase o falle el test."""
+    restaura. Este fixture guarda que FILAS (no que version) estan vigentes
+    en las 4 tablas antes del test y las restaura despues, pase o falle el
+    test.
+
+    IMPORTANTE: restaura por fila (version + llave natural), no por
+    version completa. Un restore "por version" (poner vigente=True para
+    TODA fila con version==vigente_antes) resucitaria filas retiradas por
+    un parche puntual que vive dentro de esa misma version sin crear una
+    version nueva -- p. ej. scripts/dividir_zona11_dos_grupos.py o
+    scripts/mover_dia_preferido_grupo_20.py, que si cambian `vigente`
+    en filas especificas de la version vigente. Esto paso de verdad el
+    2026-08-31: este fixture resucito el grupo 28 (Tierra Blanca) que
+    dividir_zona11_dos_grupos.py habia retirado, duplicando sucursales
+    entre el grupo 28 retirado y los grupos 11/27 que las absorbieron."""
     from db import get_db, get_table, transaccion
     from sqlalchemy import update, select
     tablas = ["plantilla_meta", "plantilla_grupo", "plantilla_grupo_sucursal", "plantilla_grupo_dia"]
-    vigente_antes = {}
+    vigentes_antes = {}
     for nombre in tablas:
         t = get_table(nombre)
-        fila = get_db().execute(select(t.c.version).where(t.c.vigente == True)).first()
-        vigente_antes[nombre] = fila[0] if fila else None
+        llave = ["version"] + _LLAVE_NATURAL_POR_TABLA[nombre]
+        cols = [t.c[c] for c in llave]
+        vigentes_antes[nombre] = (llave, [tuple(r) for r in get_db().execute(
+            select(*cols).where(t.c.vigente == True))])
     yield
     with transaccion() as conn:
         for nombre in tablas:
             t = get_table(nombre)
             conn.execute(update(t).values(vigente=False))
-            v = vigente_antes[nombre]
-            if v is not None:
-                conn.execute(update(t).where(t.c.version == v).values(vigente=True))
+            llave, filas = vigentes_antes[nombre]
+            for valores in filas:
+                cond = [t.c[c] == v for c, v in zip(llave, valores)]
+                conn.execute(update(t).where(*cond).values(vigente=True))
 
 
 def test_roundtrip_lectura_bd(app_ctx):
