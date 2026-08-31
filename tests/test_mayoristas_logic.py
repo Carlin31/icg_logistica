@@ -124,6 +124,55 @@ def test_ordenar_mayoristas_en_ruta_sin_poblacion_no_se_agrupan_entre_si():
     assert [m["id_cliente"] for m in ordenadas] == [2, 1]
 
 
+def test_integrar_paradas_no_parte_bloques_con_datos_reales_jalapa_ojitlan():
+    # Reproduccion fiel del bug real 2026-08-31 (ruta de jueves de T 17_1,
+    # "Jalapa de Diaz 2"/"San Felipe Jalapa de Diaz") con coordenadas REALES
+    # tomadas de la BD -- no sinteticas. Con solo el agrupar-antes-de-ordenar
+    # (sin este fix), el orden de PROCESAMIENTO ya quedaba agrupado por
+    # poblacion pero la insercion uno-a-la-vez seguia partiendo los bloques:
+    # SAN LUCAS OJITLAN 3+1, JALAPA DE DIAZ 2+1, JALAPA 4+1. Este test
+    # verifica que _insertar_mayoristas_en_bloques ya no los parte.
+    from logic.mayoristas_logic import _integrar_paradas
+    sucursales = [
+        {"num_tienda": 97, "nombre_base": "Jalapa de Diaz 2",
+         "latitud": 18.07389925, "longitud": -96.53703431, "orden": 1},
+        {"num_tienda": 35, "nombre_base": "San Felipe Jalapa de Diaz",
+         "latitud": 18.07117598, "longitud": -96.53689484, "orden": 2},
+    ]
+    # (id_cliente, poblacion, latitud, longitud) -- orden persistido real.
+    datos = [
+        (437, "JALAPA",            18.071751, -96.537349),
+        (530, "JALAPA",            18.071493, -96.537159),
+        (598, "JALAPA",            18.071400, -96.537100),
+        (558, "JALAPA",            18.071203, -96.537053),
+        (555, "JALAPA",            18.071048, -96.537577),
+        (609, "JALAPA DE DIAZ",    18.071695, -96.537300),
+        (318, "JALAPA DE DIAZ",    18.071295, -96.536932),
+        (594, "JALAPA DE DIAZ",    18.069931, -96.535417),
+        (433, "SAN LUCAS OJITLAN", 18.071300, -96.536900),
+        (440, "SAN LUCAS OJITLAN", 18.080451, -96.527644),
+        (528, "SAN LUCAS OJITLAN", 18.059700, -96.395700),
+        (654, "SAN LUCAS OJITLAN", 18.058777, -96.394301),
+    ]
+    id_a_poblacion = {id_cl: pob for id_cl, pob, _, _ in datos}
+    mayoristas = [
+        {"id_cliente": id_cl, "poblacion": pob, "latitud": lat, "longitud": lon, "peso_kg": 10.0}
+        for id_cl, pob, lat, lon in datos
+    ]
+
+    paradas = _integrar_paradas(sucursales, mayoristas)
+    poblaciones = [id_a_poblacion[p["id_cliente"]] for p in paradas if p["tipo"] == "mayorista"]
+
+    # Cada poblacion debe aparecer como un solo tramo contiguo (no partida
+    # en dos o mas grupos separados por otra poblacion).
+    tramos = []
+    for pob in poblaciones:
+        if not tramos or tramos[-1] != pob:
+            tramos.append(pob)
+    assert len(tramos) == len(set(poblaciones)), (
+        f"una poblacion quedo partida en mas de un tramo: {poblaciones}")
+
+
 # ── _construir_cache_zonas (contra BD real) ────────────────────────────────
 @pytest.fixture(scope="module")
 def app_ctx():

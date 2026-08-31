@@ -146,6 +146,49 @@ def _agrupar_por_poblacion_y_ordenar(mayoristas: list, key_fn) -> list:
     return [m for clave in orden_grupos for m in grupos[clave]]
 
 
+def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, construir_nodo) -> None:
+    """
+    Inserta `mayoristas_ordenados` (YA agrupados por poblacion, p. ej. via
+    _agrupar_por_poblacion_y_ordenar, o por venir ordenados por el `orden`
+    persistido que ya quedo agrupado) en `paradas` (mutada in-place) como
+    BLOQUES contiguos por poblacion -- no un mayorista a la vez.
+
+    Bug real 2026-08-31 (ruta de jueves de T 17_1): aun con el orden de
+    PROCESAMIENTO ya agrupado por poblacion, insertar uno a la vez con
+    _insertar_pos_proxima no garantiza que el RESULTADO quede agrupado --
+    un miembro puede terminar mas cerca de una parada ya puesta de OTRA
+    poblacion que de la suya propia, partiendo el bloque en el paso de
+    insercion mismo (SAN LUCAS OJITLAN quedo partido 3+1 en dos puntos
+    distintos de la ruta, JALAPA DE DIAZ 2+1, JALAPA 4+1). Fix: se calcula
+    UN solo punto de insercion por bloque completo (el centroide de sus
+    miembros con coordenadas), y el bloque entero se inserta ahi junto,
+    en vez de un punto de insercion independiente por mayorista.
+
+    `construir_nodo(m)` arma el dict final a insertar para un mayorista
+    `m` -- cada llamador ya tiene su propio formato de nodo, este helper
+    no lo impone. Mayoristas sin poblacion (bloques de 1, ver
+    _agrupar_por_poblacion_y_ordenar) se insertan igual que antes.
+    """
+    i = 0
+    n = len(mayoristas_ordenados)
+    while i < n:
+        pob = (mayoristas_ordenados[i].get("poblacion") or "").strip()
+        j = i + 1
+        if pob:
+            while j < n and (mayoristas_ordenados[j].get("poblacion") or "").strip() == pob:
+                j += 1
+        bloque = mayoristas_ordenados[i:j]
+
+        lats = [v for v in (_to_float(m.get("latitud")) for m in bloque) if v is not None]
+        lons = [v for v in (_to_float(m.get("longitud")) for m in bloque) if v is not None]
+        ancla = ({"latitud": sum(lats) / len(lats), "longitud": sum(lons) / len(lons)}
+                 if lats and lons else {})
+        pos = _insertar_pos_proxima(paradas, ancla)
+
+        paradas[pos:pos] = [construir_nodo(m) for m in bloque]
+        i = j
+
+
 def _ordenar_sucursales_planificacion(sucursales: list) -> list:
     if not isinstance(sucursales, list) or len(sucursales) <= 1:
         return sucursales or []
@@ -773,9 +816,8 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
         )
     mayoristas_ordenados = _agrupar_por_poblacion_y_ordenar(mayoristas_con, key_fn)
 
-    paradas = list(sucs_nodos)
-    for m in mayoristas_ordenados:
-        nodo = {
+    def _nodo_mayorista(m):
+        return {
             "tipo":       "mayorista",
             "id_cliente": m.get("id_cliente"),
             "documento":  m.get("documento", ""),
@@ -785,8 +827,9 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
             "peso_kg":    float(m.get("peso_kg") or 0),
             "desvio_m":   m.get("desvio_m"),
         }
-        pos = _insertar_pos_proxima(paradas, nodo)
-        paradas.insert(pos, nodo)
+
+    paradas = list(sucs_nodos)
+    _insertar_mayoristas_en_bloques(paradas, mayoristas_ordenados, _nodo_mayorista)
 
     for m in mayoristas_sin:
         paradas.append({
@@ -947,13 +990,15 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
             sucursales_raw,
         )
 
-        # Insertar cada mayorista junto a su parada más cercana en la ruta
+        # Insertar los mayoristas en bloques contiguos por poblacion (ver
+        # _insertar_mayoristas_en_bloques) junto a su parada más cercana.
         paradas = list(sucursales)
         centro_raw = _ruta_centroid(sucursales_raw)
-        for m in mays:
+
+        def _nodo_mayorista(m, centro_raw=centro_raw):
             lat_m = _to_float(m.get("latitud"))
             lon_m = _to_float(m.get("longitud"))
-            p = {
+            return {
                 "tipo":       "mayorista",
                 "id_cliente": m.get("id_cliente"),
                 "documento":  m.get("documento", ""),
@@ -971,8 +1016,8 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
                     1,
                 ),
             }
-            pos = _insertar_pos_proxima(paradas, p)
-            paradas.insert(pos, p)
+
+        _insertar_mayoristas_en_bloques(paradas, mays, _nodo_mayorista)
 
         # Asignar orden secuencial a la lista entrelazada
         for idx, p in enumerate(paradas, start=1):
@@ -1175,6 +1220,8 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
 
         paradas = list(sucursales)
         centro_raw = _ruta_centroid(sucursales_raw)
+
+        mayoristas_con_coords = []
         for f in sorted(por_rid.get(rid, []), key=lambda x: x["orden"]):
             cat = coords_may.get(f["id_cliente"]) or {}
             lat_m = cat.get("latitud")
@@ -1187,19 +1234,28 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
                     "poblacion": cat.get("poblacion") or "",
                 })
                 continue
-            p = {
-                "tipo": "mayorista", "id_cliente": f["id_cliente"],
+            mayoristas_con_coords.append({
+                "id_cliente": f["id_cliente"],
                 "nombre": f["nombre"] or cat.get("nombre") or "",
-                "nombre_base": f["nombre"] or cat.get("nombre") or "",
                 "latitud": lat_m, "longitud": lon_m,
                 "poblacion": cat.get("poblacion") or "",
-                "peso_kg": float(f["peso_kg"]), "ruta_id": rid,
+                "peso_kg": float(f["peso_kg"]),
+            })
+
+        def _nodo_mayorista(m, rid=rid, centro_raw=centro_raw):
+            lat_m, lon_m = m["latitud"], m["longitud"]
+            return {
+                "tipo": "mayorista", "id_cliente": m["id_cliente"],
+                "nombre": m["nombre"], "nombre_base": m["nombre"],
+                "latitud": lat_m, "longitud": lon_m,
+                "poblacion": m["poblacion"],
+                "peso_kg": m["peso_kg"], "ruta_id": rid,
                 "desvio_m": round(_haversine_km(
                     centro_raw[0] or lat_m or 0, centro_raw[1] or lon_m or 0,
                     lat_m, lon_m) * 1000, 1),
             }
-            pos = _insertar_pos_proxima(paradas, p)
-            paradas.insert(pos, p)
+
+        _insertar_mayoristas_en_bloques(paradas, mayoristas_con_coords, _nodo_mayorista)
 
         for idx, p in enumerate(paradas, start=1):
             p["orden"] = idx
