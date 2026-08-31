@@ -172,9 +172,11 @@ def test_roundtrip_lectura_bd(app_ctx):
     )
     assert version_vigente() is not None
     grupos = obtener_grupos()
-    assert len(grupos) == 28
+    # Zona 11 (Tierra Blanca) paso de 3 grupos a 2 el 2026-08-31 (ver
+    # scripts/dividir_zona11_dos_grupos.py): 28 - 1 = 27 grupos vigentes.
+    assert len(grupos) == 27
     assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 18
-    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 10
+    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 9
     # zona: 24 zonas de negocio distintas, todo grupo tiene una asignada
     assert len({g["zona"] for g in grupos}) == 24
     assert all(g["zona"] is not None for g in grupos)
@@ -188,12 +190,13 @@ def test_roundtrip_lectura_bd(app_ctx):
         assert len(g["sucursales"]) <= limite, \
             f"grupo {g['grupo']} (zona {g['zona']}) tiene {len(g['sucursales'])} sucursales"
     # zona 5 (Tuxtepec) y zona 11 (Tierra Blanca): confirmar que quedaron
-    # partidas en varios grupos y que sus totales son los esperados (10 y 8)
+    # partidas en varios grupos y que sus totales son los esperados (10 y 8).
+    # Zona 11 paso de 3 grupos a 2 el 2026-08-31 (dividir_zona11_dos_grupos.py).
     por_zona = {}
     for g in grupos:
         por_zona.setdefault(g["zona"], []).append(g["grupo"])
     assert len(por_zona[5]) == 3
-    assert len(por_zona[11]) == 3
+    assert len(por_zona[11]) == 2
     total_zona5 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 5)
     total_zona11 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 11)
     assert total_zona5 == 10
@@ -340,6 +343,10 @@ def test_construir_sub_rutas_produce_28_filas_validas(app_ctx):
 
 
 def test_tierra_blanca_queda_en_3_grupos_3_3_2_sin_f350(app_ctx):
+    # Prueba la salida ORIGINAL/historica de este script, no la BD viva:
+    # Zona 11 volvio a 2 grupos el 2026-08-31 via un parche puntual
+    # (scripts/dividir_zona11_dos_grupos.py), sin re-editar SUB_RUTAS_ESPECIALES
+    # (ver la nota "ACTUALIZACION 2026-08-31" en reorganizar_zonas_2026.py).
     from scripts.reorganizar_zonas_2026 import construir_sub_rutas
     sub_rutas, _ = construir_sub_rutas()
     tb = [r for r in sub_rutas if r["zona"] == 11]

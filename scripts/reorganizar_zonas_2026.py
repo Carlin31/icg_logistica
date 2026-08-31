@@ -19,6 +19,17 @@ nunca necesite F350 (prohibido para Tierra Blanca vía `unidades_excluidas`).
 Tuxtepec (grupo 5) perdió `unidad_forzada=True`: se re-evalúa por peso como
 cualquier otro grupo.
 
+ACTUALIZACIÓN 2026-08-31: Tierra Blanca volvió a 2 grupos (pedido del
+usuario), pero NO reeditando este script (ver más abajo por qué) sino con
+un parche puntual: `scripts/dividir_zona11_dos_grupos.py` fusionó el grupo
+28 en los otros dos, dejando grupo 11 = [24,25,76,77] y grupo 27 =
+[1,36,63,101] -- la combinación que preserva mejor la coasignación
+histórica de camión (24+25 y 76+77 viajan juntos 12/13 semanas) y minimiza
+el riesgo de F350. SUB_RUTAS_ESPECIALES de abajo NO se tocó: sigue
+describiendo la salida ORIGINAL de este script (3 grupos), no el estado
+vigente en producción. `construir_sub_rutas()`/`test_tierra_blanca_queda_en_3_grupos_3_3_2_sin_f350`
+siguen probando esa salida histórica del script, no la BD viva.
+
 PENDIENTE (no lo resuelve este script): los CSV
 datos/dias_admisibles_por_grupo.csv, datos/unidad_ref_por_grupo.csv y
 datos/grupos_unidad_forzada.csv siguen referenciando la numeración VIEJA de
