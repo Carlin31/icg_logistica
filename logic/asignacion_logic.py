@@ -50,8 +50,9 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from sqlalchemy import select, insert, update, delete
 
+from config import Config
 from db import get_db, get_table, transaccion
-from logic.mayoristas_logic import calcular_distribucion_mayoristas
+from logic.mayoristas_logic import calcular_distribucion_mayoristas, _distancias_carretera_km
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -60,7 +61,7 @@ HORAS_EXTRA_RUTA_MIN       = 120   # 2 h adicionales al total de la ruta
 MATRIZ_LAT_DEFAULT   = 18.87329315661368
 MATRIZ_LON_DEFAULT   = -96.9491574270346
 
-OSRM_BASE_URL    = "https://router.project-osrm.org/route/v1/driving"
+OSRM_BASE_URL    = f"{Config.OSRM_HOST}/route/v1/driving"
 OSRM_TIMEOUT     = 20
 OSRM_MAX_RETRIES = 3
 OSRM_RETRY_DELAY = 1.5
@@ -539,7 +540,8 @@ def calcular_tiempos_multiples_rutas(rutas: list, pesos: dict, logistica_id: str
             # coinciden; usarlo aquí dejaba el peso de mayoristas en cero en
             # vez de caer al cálculo en vivo (encontrado 2026-08-10, revertido
             # el mismo día).
-            dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+            dist = calcular_distribucion_mayoristas(
+                logistica_id, rutas, calcular_distancias_km=_distancias_carretera_km)
             paradas_map = dist.get("paradas_integradas", {})
         except Exception:
             paradas_map = {}
@@ -1050,7 +1052,8 @@ def _cargar_datos_mayoristas(logistica_id: str, rutas: list | None = None) -> tu
         # generar_asignacion_optimizada() con el payload del frontend
         # (espacio de IDs de rutas_config/mongo_id), incompatible con las
         # claves vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
-        dist = calcular_distribucion_mayoristas(logistica_id, rutas)
+        dist = calcular_distribucion_mayoristas(
+            logistica_id, rutas, calcular_distancias_km=_distancias_carretera_km)
         return dist.get("mayoristas_por_ruta", {}), dist.get("todos_mayoristas", [])
     except Exception as e:
         print(f"[_cargar_datos_mayoristas] Error al calcular cercania: {e}")
@@ -1693,7 +1696,8 @@ def obtener_mayoristas_por_ruta(logistica_id: str) -> dict:
         # NO usar obtener_mayoristas_guardados: obtener_rutas() lee
         # rutas_config (mongo_id), incompatible con las claves
         # vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
-        dist = calcular_distribucion_mayoristas(logistica_id)
+        dist = calcular_distribucion_mayoristas(
+            logistica_id, calcular_distancias_km=_distancias_carretera_km)
         return {
             "mayoristas": dist.get("mayoristas_por_ruta", {}),
             "orden_sucursales": dist.get("orden_sucursales", {}),
@@ -1761,7 +1765,8 @@ def obtener_geometria_ruta(ruta_id: str, logistica_id: str) -> dict:
         # NO usar obtener_mayoristas_guardados: obtener_rutas() lee
         # rutas_config (mongo_id), incompatible con las claves
         # vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
-        dist = calcular_distribucion_mayoristas(logistica_id)
+        dist = calcular_distribucion_mayoristas(
+            logistica_id, calcular_distancias_km=_distancias_carretera_km)
         base = dist.get("paradas_integradas", {}).get(ruta_id, [])
         for p in base:
             lat = p.get("latitud")

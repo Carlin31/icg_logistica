@@ -39,6 +39,12 @@ class Config:
     # ── Groq (LLM para nombres de rutas) ──────────────────────
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
+    # ── OSRM (ruteo por carretera) ─────────────────────────────
+    # Por defecto usa el servidor público de demostración (limitado en tasa
+    # de peticiones). Para una instancia local (Docker: osrm-routed en el
+    # puerto 5000), define OSRM_HOST=http://localhost:5000 en el .env.
+    OSRM_HOST = os.getenv("OSRM_HOST", "https://router.project-osrm.org")
+
     @classmethod
     def validar(cls):
         """Llama a esto en create_app() para detectar config faltante temprano."""

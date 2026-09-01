@@ -12,15 +12,19 @@ Se elimina la lógica de cheapest insertion. En su lugar:
 
 import json
 import math
+import urllib.error
+import urllib.request
 from datetime import datetime
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from sqlalchemy import select, insert, delete
 
-from config import es_semana_canonica
+from config import Config, es_semana_canonica
 from db import get_db, get_table
 from logic.vrp_logic import capacidad_efectiva_kg
+
+OSRM_TABLE_TIMEOUT = 3  # local: falla rapido si no hay servidor, nunca bloquea la generacion de rutas
 
 # Al resolver una sobrecarga de mayoristas, True = se expulsa al mayorista más
 # LEJANO del centroide de su ruta (conserva a los geográficamente afines);
@@ -71,11 +75,19 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _insertar_pos_proxima(route: list, nuevo: dict) -> int:
+def _insertar_pos_proxima(route: list, nuevo: dict, distancias_km: "list | None" = None) -> int:
     """
     Devuelve el índice (0-based) DESPUÉS del cual insertar `nuevo`
     para colocarlo junto a su parada más cercana en `route`.
     Si `nuevo` no tiene coordenadas, devuelve len(route) (al final).
+
+    `distancias_km`, si se da, es una lista alineada con `route` (misma
+    longitud, un valor -- o None si no se pudo calcular -- por parada) con
+    la distancia REAL a usar en vez de recalcular con `_haversine_km`. Ver
+    _distancias_carretera_km: la línea recta puede invertir el orden real
+    (bug real 2026-08-31 -- San Lucas Ojitlan mide más lejos que Jalapa de
+    Diaz por línea recta pero más cerca por carretera), así que cuando hay
+    distancia real disponible debe ganar sobre la línea recta.
 
     Empate (misma distancia a dos paradas): gana la de índice MAYOR (la
     más reciente en `route`), no la primera encontrada. Con `<` estricto,
@@ -95,11 +107,16 @@ def _insertar_pos_proxima(route: list, nuevo: dict) -> int:
     best_idx = len(route)
     best_dist = float("inf")
     for i, parada in enumerate(route):
-        lat_p = _to_float(parada.get("latitud"))
-        lon_p = _to_float(parada.get("longitud"))
-        if lat_p is None or lon_p is None:
-            continue
-        dist = _haversine_km(lat_n, lon_n, lat_p, lon_p)
+        if distancias_km is not None:
+            dist = distancias_km[i] if i < len(distancias_km) else None
+            if dist is None:
+                continue
+        else:
+            lat_p = _to_float(parada.get("latitud"))
+            lon_p = _to_float(parada.get("longitud"))
+            if lat_p is None or lon_p is None:
+                continue
+            dist = _haversine_km(lat_n, lon_n, lat_p, lon_p)
         if dist <= best_dist:
             best_dist = dist
             best_idx = i + 1   # insertar DESPUÉS de esta parada
@@ -146,7 +163,47 @@ def _agrupar_por_poblacion_y_ordenar(mayoristas: list, key_fn) -> list:
     return [m for clave in orden_grupos for m in grupos[clave]]
 
 
-def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, construir_nodo) -> None:
+def _distancias_carretera_km(origen: tuple, destinos: list) -> "list | None":
+    """
+    Distancia real por carretera (km) desde `origen` (lat, lon) hacia cada
+    punto de `destinos` (lista de (lat, lon) o None), vía el servicio
+    /table de OSRM (una sola consulta para todos los destinos a la vez).
+
+    Devuelve None si la consulta falla por completo (servidor caído,
+    timeout, respuesta inválida) -- el llamador debe caer a línea recta en
+    ese caso, nunca bloquear la generación de rutas por un problema de
+    OSRM. Cada elemento de la lista devuelta es None si ese destino en
+    particular no se pudo resolver (p. ej. coordenada fuera de la red vial
+    cargada), aunque el resto sí haya respondido.
+    """
+    validos = [(i, d) for i, d in enumerate(destinos) if d is not None]
+    if not validos:
+        return [None] * len(destinos)
+
+    coords = [origen] + [d for _, d in validos]
+    coords_str = ";".join(f"{lon},{lat}" for lat, lon in coords)
+    url = f"{Config.OSRM_HOST}/table/v1/driving/{coords_str}?sources=0&annotations=distance"
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "ICG-Mayoristas/1.0", "Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=OSRM_TABLE_TIMEOUT) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        if data.get("code") != "Ok":
+            return None
+        fila = data["distances"][0]
+    except Exception as e:  # noqa: BLE001
+        print(f"[mayoristas] distancia por carretera no disponible, se usa línea recta: "
+              f"{type(e).__name__}: {e}")
+        return None
+
+    resultado = [None] * len(destinos)
+    for (idx_original, _), metros in zip(validos, fila[1:]):
+        resultado[idx_original] = (metros / 1000.0) if metros is not None else None
+    return resultado
+
+
+def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, construir_nodo,
+                                     calcular_distancias_km=None) -> None:
     """
     Inserta `mayoristas_ordenados` (YA agrupados por poblacion, p. ej. via
     _agrupar_por_poblacion_y_ordenar, o por venir ordenados por el `orden`
@@ -163,6 +220,14 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
     UN solo punto de insercion por bloque completo (el centroide de sus
     miembros con coordenadas), y el bloque entero se inserta ahi junto,
     en vez de un punto de insercion independiente por mayorista.
+
+    `calcular_distancias_km(origen, destinos)`, si se da, calcula distancia
+    real por carretera (ver _distancias_carretera_km) en vez de línea recta
+    para elegir el punto de inserción del bloque -- bug real 2026-08-31: el
+    bloque de San Lucas Ojitlan se insertaba después del de Jalapa de Diaz
+    porque por línea recta mide más lejos de la matriz, aunque por
+    carretera real está más cerca. Si falla (excepción o None), cae a línea
+    recta -- nunca bloquea la inserción por un problema de OSRM.
 
     `construir_nodo(m)` arma el dict final a insertar para un mayorista
     `m` -- cada llamador ya tiene su propio formato de nodo, este helper
@@ -183,7 +248,23 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
         lons = [v for v in (_to_float(m.get("longitud")) for m in bloque) if v is not None]
         ancla = ({"latitud": sum(lats) / len(lats), "longitud": sum(lons) / len(lons)}
                  if lats and lons else {})
-        pos = _insertar_pos_proxima(paradas, ancla)
+
+        distancias_km = None
+        if calcular_distancias_km is not None and ancla:
+            destinos = []
+            for p in paradas:
+                lat_p = _to_float(p.get("latitud"))
+                lon_p = _to_float(p.get("longitud"))
+                destinos.append((lat_p, lon_p) if lat_p is not None and lon_p is not None else None)
+            try:
+                distancias_km = calcular_distancias_km(
+                    (ancla["latitud"], ancla["longitud"]), destinos)
+            except Exception as e:  # noqa: BLE001
+                print(f"[mayoristas] calcular_distancias_km falló, se usa línea recta: "
+                      f"{type(e).__name__}: {e}")
+                distancias_km = None
+
+        pos = _insertar_pos_proxima(paradas, ancla, distancias_km=distancias_km)
 
         paradas[pos:pos] = [construir_nodo(m) for m in bloque]
         i = j
@@ -780,7 +861,8 @@ def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoris
 
 
 def _integrar_paradas(sucursales: list, mayoristas: list,
-                      depot_lat: float = None, depot_lon: float = None) -> list:
+                      depot_lat: float = None, depot_lon: float = None,
+                      calcular_distancias_km=None) -> list:
     """
     Combina sucursales y mayoristas en una secuencia unificada ordenada por proximidad.
 
@@ -829,7 +911,8 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
         }
 
     paradas = list(sucs_nodos)
-    _insertar_mayoristas_en_bloques(paradas, mayoristas_ordenados, _nodo_mayorista)
+    _insertar_mayoristas_en_bloques(paradas, mayoristas_ordenados, _nodo_mayorista,
+                                     calcular_distancias_km=calcular_distancias_km)
 
     for m in mayoristas_sin:
         paradas.append({
@@ -848,7 +931,8 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
     return paradas
 
 
-def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = None) -> dict:
+def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = None,
+                                     calcular_distancias_km=None) -> dict:
     """
     Calcula la distribución de mayoristas sin cheapest insertion.
 
@@ -1017,7 +1101,8 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
                 ),
             }
 
-        _insertar_mayoristas_en_bloques(paradas, mays, _nodo_mayorista)
+        _insertar_mayoristas_en_bloques(paradas, mays, _nodo_mayorista,
+                                         calcular_distancias_km=calcular_distancias_km)
 
         # Asignar orden secuencial a la lista entrelazada
         for idx, p in enumerate(paradas, start=1):
@@ -1149,7 +1234,8 @@ def guardar_mayoristas_convrp(logistica_id: str, por_ruta: dict, detalle: list,
         return -1
 
 
-def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None":
+def obtener_mayoristas_guardados(logistica_id: str, rutas: list,
+                                 calcular_distancias_km=None) -> "dict | None":
     """
     Reconstruye la MISMA forma de respuesta que `calcular_distribucion_mayoristas`
     a partir de lo guardado en `convrp_mayoristas` -- backfillea coordenadas
@@ -1255,7 +1341,8 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list) -> "dict | None
                     lat_m, lon_m) * 1000, 1),
             }
 
-        _insertar_mayoristas_en_bloques(paradas, mayoristas_con_coords, _nodo_mayorista)
+        _insertar_mayoristas_en_bloques(paradas, mayoristas_con_coords, _nodo_mayorista,
+                                         calcular_distancias_km=calcular_distancias_km)
 
         for idx, p in enumerate(paradas, start=1):
             p["orden"] = idx

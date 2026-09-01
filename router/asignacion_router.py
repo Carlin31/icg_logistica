@@ -147,8 +147,8 @@ def get_calcular_tiempos_ruta(ruta_id: str):
         # NO usar obtener_mayoristas_guardados: `ruta` viene de obtener_rutas()
         # (rutas_config, mongo_id), incompatible con las claves
         # vrpaf_{unidad}_{dia} de convrp_mayoristas (2026-08-10).
-        from logic.mayoristas_logic import calcular_distribucion_mayoristas
-        dist = calcular_distribucion_mayoristas(lid, [ruta])
+        from logic.mayoristas_logic import calcular_distribucion_mayoristas, _distancias_carretera_km
+        dist = calcular_distribucion_mayoristas(lid, [ruta], calcular_distancias_km=_distancias_carretera_km)
         paradas = dist.get("paradas_integradas", {}).get(ruta_id)
         resultado = calcular_tiempos_ruta(ruta, pesos, paradas=paradas)
         return jsonify(resultado)

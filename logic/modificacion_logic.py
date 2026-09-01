@@ -26,8 +26,10 @@ from bson import ObjectId
 from bson.errors import InvalidId
 from sqlalchemy import select, insert, update, delete, or_, func
 
+from config import Config
 from db import get_db, get_table, transaccion
-from logic.mayoristas_logic import calcular_distribucion_mayoristas, _integrar_paradas, obtener_mayoristas_guardados
+from logic.mayoristas_logic import (calcular_distribucion_mayoristas, _integrar_paradas,
+                                     obtener_mayoristas_guardados, _distancias_carretera_km)
 
 # ── Constantes ────────────────────────────────────────────────
 MIN_DESCARGA_POR_KG        = 0.1
@@ -36,7 +38,7 @@ HORAS_EXTRA_RUTA_MIN       = 120   # 2 h adicionales al total de la ruta
 MATRIZ_LAT_DEFAULT   = 18.87329315661368
 MATRIZ_LON_DEFAULT   = -96.9491574270346
 
-OSRM_BASE_URL    = "https://router.project-osrm.org/route/v1/driving"
+OSRM_BASE_URL    = f"{Config.OSRM_HOST}/route/v1/driving"
 OSRM_TIMEOUT     = 20
 OSRM_MAX_RETRIES = 3
 OSRM_RETRY_DELAY = 1.5
@@ -156,7 +158,7 @@ def _aplicar_overrides_mayoristas(dist: dict, overrides: dict, sucursales_por_ru
         sucs_raw = sucursales_por_ruta.get(ruta_id, [])
         sucs = sorted(sucs_raw, key=lambda s: int(s.get("orden") or 9999))
         mays = mayoristas_por_ruta.get(ruta_id, [])
-        paradas = _integrar_paradas(sucs, mays)
+        paradas = _integrar_paradas(sucs, mays, calcular_distancias_km=_distancias_carretera_km)
         paradas_integradas[ruta_id] = paradas
 
         orden_map: dict = {}
@@ -669,7 +671,8 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
     # ── 1. ¿Existe una asignación guardada? ───────────────────
     tabla_asig = get_table("asignaciones")
     if not db.execute(select(tabla_asig.c.mongo_id).where(tabla_asig.c.logistica_id == oid)).first():
-        dist_vacia = calcular_distribucion_mayoristas(logistica_id)
+        dist_vacia = calcular_distribucion_mayoristas(
+            logistica_id, calcular_distancias_km=_distancias_carretera_km)
         return {
             "status":                "ok",
             "logistica_id":          str(logistica_id),
@@ -808,8 +811,10 @@ def obtener_rutas_para_modificar(logistica_id: str) -> dict:
         {"_id": rid, "sucursales": sucs, "cap_ton": meta_por_ruta.get(rid, {}).get("cap_ton")}
         for rid, sucs in sucursales_por_ruta.items()
     ]
-    dist = (obtener_mayoristas_guardados(logistica_id, _rutas_para_mayoristas)
-            or calcular_distribucion_mayoristas(logistica_id, _rutas_para_mayoristas))
+    dist = (obtener_mayoristas_guardados(logistica_id, _rutas_para_mayoristas,
+                                          calcular_distancias_km=_distancias_carretera_km)
+            or calcular_distribucion_mayoristas(logistica_id, _rutas_para_mayoristas,
+                                                 calcular_distancias_km=_distancias_carretera_km))
 
     # mayoristas_overrides desde tabla normalizada (clave reconstruida a
     # documento(str)/id_cliente(int) -- ver _clave_a_python)

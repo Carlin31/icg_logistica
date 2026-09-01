@@ -173,6 +173,143 @@ def test_integrar_paradas_no_parte_bloques_con_datos_reales_jalapa_ojitlan():
         f"una poblacion quedo partida en mas de un tramo: {poblaciones}")
 
 
+# ── orden por carretera real (OSRM) en vez de linea recta ──────────────────
+# Bug real 2026-08-31 (misma ruta de jueves de T 17_1): con datos reales,
+# San Lucas Ojitlan mide MAS lejos que Jalapa de Diaz por linea recta
+# (haversine: 103.2km vs 99.2km desde la matriz), pero por carretera real es
+# al reves (OSRM: 198.7km vs 209.9km) -- Ojitlan si esta mas cerca por
+# carretera. _insertar_pos_proxima/_insertar_mayoristas_en_bloques aceptan
+# ahora distancias reales inyectadas (via `distancias_km`/
+# `calcular_distancias_km`) para que el bloque se ubique donde realmente
+# corresponde por carretera, en vez de la linea recta que producia el orden
+# incorrecto.
+def test_insertar_pos_proxima_usa_distancias_km_si_se_proveen():
+    from logic.mayoristas_logic import _insertar_pos_proxima
+    route = [
+        {"latitud": 0.0, "longitud": 0.0},
+        {"latitud": 0.0, "longitud": 10.0},
+    ]
+    nuevo = {"latitud": 0.0, "longitud": 1.0}
+
+    # Por linea recta, la parada 0 (a 1 grado) gana sobre la 1 (a 9 grados).
+    assert _insertar_pos_proxima(route, nuevo) == 1
+
+    # Con distancias reales invertidas (simula carretera), debe ganar la 1.
+    assert _insertar_pos_proxima(route, nuevo, distancias_km=[500.0, 5.0]) == 2
+
+
+def test_insertar_pos_proxima_distancias_km_none_ignora_esa_parada():
+    from logic.mayoristas_logic import _insertar_pos_proxima
+    route = [
+        {"latitud": 0.0, "longitud": 0.0},
+        {"latitud": 0.0, "longitud": 10.0},
+    ]
+    nuevo = {"latitud": 0.0, "longitud": 1.0}
+    # parada 0 sin distancia real disponible (None) -> se ignora, gana la 1.
+    assert _insertar_pos_proxima(route, nuevo, distancias_km=[None, 5.0]) == 2
+
+
+def test_insertar_mayoristas_en_bloques_usa_calcular_distancias_km():
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+    paradas = [
+        {"tipo": "sucursal", "latitud": 0.0, "longitud": 0.0},
+        {"tipo": "sucursal", "latitud": 0.0, "longitud": 10.0},
+    ]
+    bloque = [{"id_cliente": 1, "poblacion": "X", "latitud": 0.0, "longitud": 1.0}]
+    llamadas = []
+
+    def fake_distancias(origen, destinos):
+        llamadas.append((origen, destinos))
+        return [500.0, 5.0]  # invierte el resultado de haversine
+
+    _insertar_mayoristas_en_bloques(
+        paradas, bloque, lambda m: {"tipo": "mayorista", "id_cliente": m["id_cliente"]},
+        calcular_distancias_km=fake_distancias,
+    )
+
+    assert [p.get("id_cliente") for p in paradas] == [None, None, 1]
+    assert llamadas == [((0.0, 1.0), [(0.0, 0.0), (0.0, 10.0)])]
+
+
+def test_insertar_mayoristas_en_bloques_fallback_haversine_si_calcular_distancias_km_falla():
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+    paradas = [
+        {"tipo": "sucursal", "latitud": 0.0, "longitud": 0.0},
+        {"tipo": "sucursal", "latitud": 0.0, "longitud": 10.0},
+    ]
+    bloque = [{"id_cliente": 1, "poblacion": "X", "latitud": 0.0, "longitud": 1.0}]
+
+    def rota(origen, destinos):
+        raise RuntimeError("sin red")
+
+    _insertar_mayoristas_en_bloques(
+        paradas, bloque, lambda m: {"tipo": "mayorista", "id_cliente": m["id_cliente"]},
+        calcular_distancias_km=rota,
+    )
+
+    # Sin distancias reales -> cae a haversine: parada 0 mas cerca (1 grado).
+    assert [p.get("id_cliente") for p in paradas] == [None, 1, None]
+
+
+def test_distancias_carretera_km_parsea_respuesta_osrm_ok(monkeypatch):
+    from logic import mayoristas_logic
+
+    class _FakeResp:
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+        def read(self):
+            return b'{"code": "Ok", "distances": [[0, 12345.6, null]]}'
+
+    monkeypatch.setattr(mayoristas_logic.urllib.request, "urlopen", lambda *a, **k: _FakeResp())
+
+    resultado = mayoristas_logic._distancias_carretera_km(
+        (18.87, -96.94), [(18.07, -96.53), (18.06, -96.46)])
+    assert resultado[0] == pytest.approx(12.3456)
+    assert resultado[1] is None
+
+
+def test_distancias_carretera_km_none_si_falla_la_consulta(monkeypatch):
+    from logic import mayoristas_logic
+
+    def _rompe(*a, **k):
+        raise mayoristas_logic.urllib.error.URLError("sin conexion")
+
+    monkeypatch.setattr(mayoristas_logic.urllib.request, "urlopen", _rompe)
+
+    resultado = mayoristas_logic._distancias_carretera_km((18.87, -96.94), [(18.07, -96.53)])
+    assert resultado is None
+
+
+def test_integrar_paradas_usa_calcular_distancias_km_si_se_provee():
+    from logic.mayoristas_logic import _integrar_paradas
+    sucursales = [
+        {"num_tienda": 1, "nombre_base": "A", "latitud": 0.0, "longitud": 0.0, "orden": 1},
+        {"num_tienda": 2, "nombre_base": "B", "latitud": 0.0, "longitud": 10.0, "orden": 2},
+    ]
+    mayoristas = [{"id_cliente": 1, "poblacion": "X", "latitud": 0.0, "longitud": 1.0, "peso_kg": 5.0}]
+
+    def fake_distancias(origen, destinos):
+        return [500.0, 5.0]  # invierte la linea recta: gana la sucursal B
+
+    paradas = _integrar_paradas(sucursales, mayoristas, calcular_distancias_km=fake_distancias)
+    orden = [(p["tipo"], p.get("num_tienda") or p.get("id_cliente")) for p in paradas]
+    assert orden == [("sucursal", 1), ("sucursal", 2), ("mayorista", 1)]
+
+
+def test_distancias_carretera_km_sin_destinos_con_coords_no_consulta(monkeypatch):
+    from logic import mayoristas_logic
+
+    def _no_deberia_llamarse(*a, **k):
+        raise AssertionError("no debe consultar OSRM si no hay destinos con coordenadas")
+
+    monkeypatch.setattr(mayoristas_logic.urllib.request, "urlopen", _no_deberia_llamarse)
+
+    resultado = mayoristas_logic._distancias_carretera_km((18.87, -96.94), [None, None])
+    assert resultado == [None, None]
+
+
 # ── _construir_cache_zonas (contra BD real) ────────────────────────────────
 @pytest.fixture(scope="module")
 def app_ctx():
