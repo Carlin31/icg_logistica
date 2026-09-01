@@ -21,9 +21,11 @@
         Productos <i data-lucide="chevron-down" class="nav-tab-dropdown__chevron"></i>
       </button>
       <ul class="nav-tab-dropdown__menu">
-        <li><a href="#tab-icg"      data-tab="icg">ICG</a></li>
-        <li><a href="#tab-proalmex" data-tab="proalmex">Proalmex</a></li>
-        <li><a href="#tab-bimbo"    data-tab="bimbo">Bimbo</a></li>
+        <li><a href="#tab-icg"       data-tab="icg">ICG</a></li>
+        <li><a href="#tab-proalmex"  data-tab="proalmex">Proalmex</a></li>
+        <li><a href="#tab-bimbo"     data-tab="bimbo">Bimbo</a></li>
+        <li><a href="#tab-pymsa"     data-tab="pymsa">Pymsa</a></li>
+        <li><a href="#tab-vina-real" data-tab="vina-real">Viña Real</a></li>
       </ul>
     </li>
     <li><a href="#tab-sucursales"          data-tab="sucursales">Sucursales</a></li>
@@ -150,6 +152,69 @@
             <th class="sortable col-num">Altura (m)</th>
             <th class="sortable col-num">Ancho (m)</th>
             <th class="sortable col-num">Largo (m)</th>
+            <th class="sortable col-num">Volumen (m³)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB PYMSA ── -->
+  <section id="tab-pymsa" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Base de Datos Pymsa</h2>
+      <button id="btn-nuevo-producto-pymsa" class="btn btn-success">+ Nuevo producto Pymsa</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-producto_pymsa-nombre" placeholder="Buscar producto Pymsa…" class="input-search">
+      <input type="date" id="buscar-producto_pymsa-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-productos-pymsa" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Clave</th>
+            <th class="sortable">Descripción</th>
+            <th class="sortable">Tamaño</th>
+            <th class="sortable col-num">Capacidad Caja</th>
+            <th class="sortable col-num">Peso (kg)</th>
+            <th class="sortable col-num">Alto (cm)</th>
+            <th class="sortable col-num">Ancho (cm)</th>
+            <th class="sortable col-num">Largo (cm)</th>
+            <th class="sortable col-num">Volumen (m³)</th>
+            <th class="sortable">Última Modificación</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── TAB VIÑA REAL ── -->
+  <section id="tab-vina-real" class="tab-content hidden">
+    <div class="section-header">
+      <h2>Base de Datos Viña Real</h2>
+      <button id="btn-nuevo-producto-vina-real" class="btn btn-success">+ Nuevo producto Viña Real</button>
+    </div>
+    <div class="filter-container">
+      <input type="text" id="buscar-producto_vina_real-nombre" placeholder="Buscar producto Viña Real…" class="input-search">
+      <input type="date" id="buscar-producto_vina_real-fecha" class="input-search">
+    </div>
+    <div class="table-responsive">
+      <table id="tabla-productos-vina-real" class="data-table">
+        <thead>
+          <tr>
+            <th class="sortable">Descripción</th>
+            <th class="sortable">Tamaño</th>
+            <th class="sortable col-num">Capacidad Caja</th>
+            <th class="sortable col-num">Peso (kg)</th>
+            <th class="sortable col-num">Alto (cm)</th>
+            <th class="sortable col-num">Ancho (cm)</th>
+            <th class="sortable col-num">Largo (cm)</th>
             <th class="sortable col-num">Volumen (m³)</th>
             <th class="sortable">Última Modificación</th>
             <th>Acciones</th>

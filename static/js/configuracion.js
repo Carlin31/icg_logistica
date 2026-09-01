@@ -14,6 +14,8 @@ function getEndpoint(tipo) {
   if (tipo === "producto")          return "productos";
   if (tipo === "producto_proalmex") return "productos-proalmex";
   if (tipo === "producto_bimbo")    return "productos-bimbo";
+  if (tipo === "producto_pymsa")    return "productos-pymsa";
+  if (tipo === "producto_vina_real") return "productos-vina-real";
   if (tipo === "sucursal")          return "sucursales";
   if (tipo === "cliente_mayorista") return "clientes-mayoristas";
   return tipo + "s";
@@ -171,6 +173,29 @@ const CAMPOS_PRODUCTO_BIMBO = [
   { key: "volumen",      label: "Volumen (m³)",     type: "number", readonly: true },
 ];
 
+const CAMPOS_PRODUCTO_PYMSA = [
+  { key: "clave",          label: "Clave",           type: "text"   },
+  { key: "descripcion",    label: "Descripción",     type: "text"   },
+  { key: "tamano",         label: "Tamaño",          type: "text"   },
+  { key: "capacidad_caja", label: "Capacidad Caja",  type: "number" },
+  { key: "peso_kg",        label: "Peso (kg)",       type: "number", step: "any", min: "0" },
+  { key: "alto_cm",        label: "Alto (cm)",       type: "number" },
+  { key: "ancho_cm",       label: "Ancho (cm)",      type: "number" },
+  { key: "largo_cm",       label: "Largo (cm)",      type: "number" },
+  { key: "volumen_m3",     label: "Volumen (m³)",    type: "number", readonly: true },
+];
+
+const CAMPOS_PRODUCTO_VINA_REAL = [
+  { key: "descripcion",    label: "Descripción",     type: "text"   },
+  { key: "tamano",         label: "Tamaño",          type: "text"   },
+  { key: "capacidad_caja", label: "Capacidad Caja",  type: "number" },
+  { key: "peso_kg",        label: "Peso (kg)",       type: "number", step: "any", min: "0" },
+  { key: "alto_cm",        label: "Alto (cm)",       type: "number" },
+  { key: "ancho_cm",       label: "Ancho (cm)",      type: "number" },
+  { key: "largo_cm",       label: "Largo (cm)",      type: "number" },
+  { key: "volumen_m3",     label: "Volumen (m³)",    type: "number", readonly: true },
+];
+
 const CAMPOS_CLIENTE_MAYORISTA = [
   { key: "id_cliente", label: "ID Cliente", type: "number" },
   { key: "nombre",     label: "Nombre",     type: "text"   },
@@ -208,6 +233,8 @@ const _TIPO_LABEL = {
   producto:          "Producto ICG",
   producto_proalmex: "Producto Proalmex",
   producto_bimbo:    "Producto Bimbo",
+  producto_pymsa:    "Producto Pymsa",
+  producto_vina_real:"Producto Viña Real",
   sucursal:          "Sucursal",
   vehiculo:          "Vehículo",
   cliente_mayorista: "Cliente Mayorista",
@@ -445,6 +472,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   cargarDatos("producto");
   cargarDatos("producto_proalmex");
   cargarDatos("producto_bimbo");
+  cargarDatos("producto_pymsa");
+  cargarDatos("producto_vina_real");
   cargarDatos("sucursal");
   cargarDatos("vehiculo");
   cargarDatos("cliente_mayorista");
@@ -462,13 +491,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("btn-nuevo-producto-icg").addEventListener("click", () => abrirModal("create", "producto"));
   document.getElementById("btn-nuevo-producto-proalmex").addEventListener("click", () => abrirModal("create", "producto_proalmex"));
   document.getElementById("btn-nuevo-producto-bimbo").addEventListener("click", () => abrirModal("create", "producto_bimbo"));
+  document.getElementById("btn-nuevo-producto-pymsa").addEventListener("click", () => abrirModal("create", "producto_pymsa"));
+  document.getElementById("btn-nuevo-producto-vina-real").addEventListener("click", () => abrirModal("create", "producto_vina_real"));
   document.getElementById("btn-nueva-sucursal").addEventListener("click", () => abrirModal("create", "sucursal"));
   document.getElementById("btn-nuevo-vehiculo").addEventListener("click", () => abrirModal("create", "vehiculo"));
   document.getElementById("btn-nuevo-cliente-mayorista").addEventListener("click", () => abrirModal("create", "cliente_mayorista"));
   document.getElementById("modal-cancel").addEventListener("click", cerrarModal);
   document.getElementById("modal-save").addEventListener("click", guardarModal);
 
-  ["producto", "producto_proalmex", "producto_bimbo", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
+  ["producto", "producto_proalmex", "producto_bimbo", "producto_pymsa", "producto_vina_real", "sucursal", "vehiculo", "cliente_mayorista"].forEach(tipo => {
     const tableEl = document.querySelector(`#tabla-${getEndpoint(tipo)} tbody`);
     if (tableEl) {
       tableEl.addEventListener("click", e => {
@@ -712,6 +743,10 @@ function _volBimbo(p) {
   const v = (parseFloat(p.largo) || 0) * (parseFloat(p.ancho) || 0) * (parseFloat(p.altura) || 0);
   return v > 0 ? v.toFixed(6) : "—";
 }
+function _volCm(p) {
+  const v = ((parseFloat(p.largo_cm) || 0) / 100) * ((parseFloat(p.ancho_cm) || 0) / 100) * ((parseFloat(p.alto_cm) || 0) / 100);
+  return v > 0 ? v.toFixed(6) : "—";
+}
 
 async function cargarDatos(tipo) {
   const nombre = document.getElementById(`buscar-${tipo}-nombre`).value;
@@ -725,7 +760,7 @@ async function cargarDatos(tipo) {
 
     if (!Array.isArray(data) || data.length === 0) {
       // AQUÍ SUMAMOS +1 A LAS COLUMNAS PARA QUE LA TABLA VACÍA NO SE DESCUADRE
-      const cols = { producto: 13, producto_proalmex: 14, producto_bimbo: 9, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
+      const cols = { producto: 13, producto_proalmex: 14, producto_bimbo: 9, producto_pymsa: 11, producto_vina_real: 10, sucursal: 11, vehiculo: 13, cliente_mayorista: 8 };
       tbody.innerHTML = `<tr><td colspan="${cols[tipo]}" style="text-align:center;color:#999">Sin registros</td></tr>`;
       return;
     }
@@ -781,6 +816,41 @@ async function cargarDatos(tipo) {
           <td>${p.ancho  ?? ""}</td>
           <td>${p.largo  ?? ""}</td>
           <td>${_volBimbo(p)}</td>
+          <td>${p.ultima_modificacion ?? "-"}</td>
+          <td>
+            <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
+            <button class="btn btn-sm btn-danger"  data-id="${p._id}" data-accion="eliminar">Eliminar</button>
+          </td>
+        </tr>`).join("");
+    } else if (tipo === "producto_pymsa") {
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${h(p.clave ?? "")}</td>
+          <td>${h(p.descripcion)}</td>
+          <td>${h(p.tamano ?? "")}</td>
+          <td>${p.capacidad_caja ?? ""}</td>
+          <td>${p.peso_kg != null ? p.peso_kg + " kg" : ""}</td>
+          <td>${p.alto_cm  ?? ""}</td>
+          <td>${p.ancho_cm ?? ""}</td>
+          <td>${p.largo_cm ?? ""}</td>
+          <td>${_volCm(p)}</td>
+          <td>${p.ultima_modificacion ?? "-"}</td>
+          <td>
+            <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
+            <button class="btn btn-sm btn-danger"  data-id="${p._id}" data-accion="eliminar">Eliminar</button>
+          </td>
+        </tr>`).join("");
+    } else if (tipo === "producto_vina_real") {
+      tbody.innerHTML = data.map(p => `
+        <tr>
+          <td>${h(p.descripcion)}</td>
+          <td>${h(p.tamano ?? "")}</td>
+          <td>${p.capacidad_caja ?? ""}</td>
+          <td>${p.peso_kg != null ? p.peso_kg + " kg" : ""}</td>
+          <td>${p.alto_cm  ?? ""}</td>
+          <td>${p.ancho_cm ?? ""}</td>
+          <td>${p.largo_cm ?? ""}</td>
+          <td>${_volCm(p)}</td>
           <td>${p.ultima_modificacion ?? "-"}</td>
           <td>
             <button class="btn btn-sm btn-warning" data-id="${p._id}" data-accion="editar">Editar</button>
@@ -946,6 +1016,8 @@ async function abrirModal(mode, tipo, docId = null) {
   const campos = tipo === "producto"          ? CAMPOS_PRODUCTO_ICG
                : tipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
                : tipo === "producto_bimbo"    ? CAMPOS_PRODUCTO_BIMBO
+               : tipo === "producto_pymsa"     ? CAMPOS_PRODUCTO_PYMSA
+               : tipo === "producto_vina_real" ? CAMPOS_PRODUCTO_VINA_REAL
                : tipo === "sucursal"          ? CAMPOS_SUCURSAL
                : tipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
                : CAMPOS_VEHICULO;
@@ -1039,6 +1111,14 @@ async function abrirModal(mode, tipo, docId = null) {
     _actualizarVolumenBimboModal();
   }
 
+  if (tipo === "producto_pymsa" || tipo === "producto_vina_real") {
+    ['largo_cm', 'ancho_cm', 'alto_cm'].forEach(k => {
+      const el = document.getElementById(`modal-field-${k}`);
+      if (el) el.addEventListener('input', _actualizarVolumenCmModal);
+    });
+    _actualizarVolumenCmModal();
+  }
+
   if (tipo === "vehiculo") {
     ['largo_volumetria', 'ancho_volumetria', 'alto_volumetria'].forEach(k => {
       const el = document.getElementById(`modal-field-${k}`);
@@ -1066,6 +1146,14 @@ function _actualizarVolumenBimboModal() {
   if (volEl) volEl.value = (largo * ancho * altura).toFixed(6);
 }
 
+function _actualizarVolumenCmModal() {
+  const largo = (parseFloat(document.getElementById('modal-field-largo_cm')?.value) || 0) / 100;
+  const ancho = (parseFloat(document.getElementById('modal-field-ancho_cm')?.value) || 0) / 100;
+  const alto  = (parseFloat(document.getElementById('modal-field-alto_cm')?.value)  || 0) / 100;
+  const volEl = document.getElementById('modal-field-volumen_m3');
+  if (volEl) volEl.value = (largo * ancho * alto).toFixed(6);
+}
+
 function _actualizarVolumenVehiculoModal() {
   const largo = parseFloat(document.getElementById('modal-field-largo_volumetria')?.value) || 0;
   const ancho = parseFloat(document.getElementById('modal-field-ancho_volumetria')?.value) || 0;
@@ -1088,6 +1176,8 @@ async function guardarModal(e) {
     const campos = modalTipo === "producto"          ? CAMPOS_PRODUCTO_ICG
                : modalTipo === "producto_proalmex" ? CAMPOS_PRODUCTO_PROALMEX
                : modalTipo === "producto_bimbo"    ? CAMPOS_PRODUCTO_BIMBO
+               : modalTipo === "producto_pymsa"     ? CAMPOS_PRODUCTO_PYMSA
+               : modalTipo === "producto_vina_real" ? CAMPOS_PRODUCTO_VINA_REAL
                : modalTipo === "sucursal"          ? CAMPOS_SUCURSAL
                : modalTipo === "cliente_mayorista" ? CAMPOS_CLIENTE_MAYORISTA
                : CAMPOS_VEHICULO;

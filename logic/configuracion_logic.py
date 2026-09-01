@@ -13,6 +13,7 @@ ID_CAMPO = {
     "sucursales":          "num_tienda",
     "clientes_mayoristas": "id_cliente",
     "productos_bimbo":     "codigo_barra",
+    "productos_pymsa":     "clave",
 }
 
 # Tablas cuyo campo ID se almacena como entero (las demás se tratan como string)
@@ -151,6 +152,12 @@ def _calcular_volumen_bimbo(datos: dict) -> float:
     except (TypeError, ValueError):
         return 0.0
 
+# `volumen_m3` en productos_pymsa/productos_vina_real es una columna
+# CALCULADA (persisted) por SQL Server a partir de alto_cm/ancho_cm/largo_cm
+# — a diferencia de "volumen"/"volumen_m3" en las demás tablas, que la app
+# calcula e inserta. SQL Server rechaza cualquier INSERT/UPDATE que la
+# incluya, así que hay que quitarla del payload en vez de calcularla aquí.
+
 def _calcular_volumen_vehiculo(datos: dict) -> float:
     """Calcula volumen_m3 = largo_volumetria × ancho_volumetria × alto_volumetria (en metros)."""
     try:
@@ -218,6 +225,8 @@ def _agregar(nombre_tabla: str, datos: dict) -> dict:
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif nombre_tabla == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
+    elif nombre_tabla in ("productos_pymsa", "productos_vina_real"):
+        datos.pop('volumen_m3', None)
     elif nombre_tabla == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         datos.setdefault("activo", True)
@@ -263,6 +272,8 @@ def _editar(nombre_tabla: str, doc_id: str, datos: dict) -> dict:
         datos['volumen'] = _calcular_volumen_producto(datos)
     elif nombre_tabla == "productos_bimbo":
         datos['volumen'] = _calcular_volumen_bimbo(datos)
+    elif nombre_tabla in ("productos_pymsa", "productos_vina_real"):
+        datos.pop('volumen_m3', None)
     elif nombre_tabla == "vehiculos":
         datos['volumen_m3'] = _calcular_volumen_vehiculo(datos)
         if "chofer_id" in datos:
@@ -348,6 +359,18 @@ def obtener_producto_bimbo(producto_id: str): return _obtener("productos_bimbo",
 def agregar_producto_bimbo(datos: dict): return _agregar("productos_bimbo", datos)
 def editar_producto_bimbo(producto_id: str, datos: dict): return _editar("productos_bimbo", producto_id, datos)
 def eliminar_producto_bimbo(producto_id: str): return _eliminar("productos_bimbo", producto_id)
+
+def listar_productos_pymsa(nombre: str = "", fecha: str = ""): return _listar("productos_pymsa", ["descripcion", "clave"], nombre, fecha, "descripcion")
+def obtener_producto_pymsa(producto_id: str): return _obtener("productos_pymsa", producto_id)
+def agregar_producto_pymsa(datos: dict): return _agregar("productos_pymsa", datos)
+def editar_producto_pymsa(producto_id: str, datos: dict): return _editar("productos_pymsa", producto_id, datos)
+def eliminar_producto_pymsa(producto_id: str): return _eliminar("productos_pymsa", producto_id)
+
+def listar_productos_vina_real(nombre: str = "", fecha: str = ""): return _listar("productos_vina_real", "descripcion", nombre, fecha, "descripcion")
+def obtener_producto_vina_real(producto_id: str): return _obtener("productos_vina_real", producto_id)
+def agregar_producto_vina_real(datos: dict): return _agregar("productos_vina_real", datos)
+def editar_producto_vina_real(producto_id: str, datos: dict): return _editar("productos_vina_real", producto_id, datos)
+def eliminar_producto_vina_real(producto_id: str): return _eliminar("productos_vina_real", producto_id)
 
 def listar_sucursales(nombre: str = "", fecha: str = "") -> list:
     db    = get_db()

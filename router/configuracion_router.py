@@ -20,6 +20,10 @@ from logic.configuracion_logic import (
     editar_producto_proalmex, eliminar_producto_proalmex,
     listar_productos_bimbo, obtener_producto_bimbo, agregar_producto_bimbo,
     editar_producto_bimbo, eliminar_producto_bimbo,
+    listar_productos_pymsa, obtener_producto_pymsa, agregar_producto_pymsa,
+    editar_producto_pymsa, eliminar_producto_pymsa,
+    listar_productos_vina_real, obtener_producto_vina_real, agregar_producto_vina_real,
+    editar_producto_vina_real, eliminar_producto_vina_real,
     listar_sucursales, obtener_sucursal, agregar_sucursal, editar_sucursal, eliminar_sucursal,
     listar_vehiculos,  obtener_vehiculo,  agregar_vehiculo,  editar_vehiculo,  eliminar_vehiculo,
     toggle_activo_vehiculo, actualizar_chofer_vehiculo,
@@ -193,6 +197,82 @@ def put_producto_bimbo(producto_id):
 @configuracion_bp.route("/productos-bimbo/<producto_id>", methods=["DELETE"])
 def delete_producto_bimbo(producto_id):
     return _respuesta(eliminar_producto_bimbo(producto_id))
+
+
+# ── Productos Pymsa ───────────────────────────────────────────
+@configuracion_bp.route("/productos-pymsa", methods=["GET"])
+def get_productos_pymsa():
+    return jsonify(listar_productos_pymsa(
+        request.args.get("nombre", ""),
+        request.args.get("fecha",  ""),
+    ))
+
+
+@configuracion_bp.route("/productos-pymsa/<producto_id>", methods=["GET"])
+def get_producto_pymsa(producto_id):
+    doc = obtener_producto_pymsa(producto_id)
+    return jsonify(doc) if doc else (jsonify({"error": "No encontrado"}), 404)
+
+
+@configuracion_bp.route("/productos-pymsa", methods=["POST"])
+def post_producto_pymsa():
+    datos, err = _json_o_400()
+    if err:
+        return err
+    resultado = agregar_producto_pymsa(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@configuracion_bp.route("/productos-pymsa/<producto_id>", methods=["PUT"])
+def put_producto_pymsa(producto_id):
+    datos, err = _json_o_400()
+    if err:
+        return err
+    return _respuesta(editar_producto_pymsa(producto_id, datos))
+
+
+@configuracion_bp.route("/productos-pymsa/<producto_id>", methods=["DELETE"])
+def delete_producto_pymsa(producto_id):
+    return _respuesta(eliminar_producto_pymsa(producto_id))
+
+
+# ── Productos Viña Real ────────────────────────────────────────
+@configuracion_bp.route("/productos-vina-real", methods=["GET"])
+def get_productos_vina_real():
+    return jsonify(listar_productos_vina_real(
+        request.args.get("nombre", ""),
+        request.args.get("fecha",  ""),
+    ))
+
+
+@configuracion_bp.route("/productos-vina-real/<producto_id>", methods=["GET"])
+def get_producto_vina_real(producto_id):
+    doc = obtener_producto_vina_real(producto_id)
+    return jsonify(doc) if doc else (jsonify({"error": "No encontrado"}), 404)
+
+
+@configuracion_bp.route("/productos-vina-real", methods=["POST"])
+def post_producto_vina_real():
+    datos, err = _json_o_400()
+    if err:
+        return err
+    resultado = agregar_producto_vina_real(datos)
+    code = 201 if resultado.get("status") == "ok" else 400
+    return jsonify(resultado), code
+
+
+@configuracion_bp.route("/productos-vina-real/<producto_id>", methods=["PUT"])
+def put_producto_vina_real(producto_id):
+    datos, err = _json_o_400()
+    if err:
+        return err
+    return _respuesta(editar_producto_vina_real(producto_id, datos))
+
+
+@configuracion_bp.route("/productos-vina-real/<producto_id>", methods=["DELETE"])
+def delete_producto_vina_real(producto_id):
+    return _respuesta(eliminar_producto_vina_real(producto_id))
 
 
 # ── Sucursales ─────────────────────────────────────────────────

@@ -52,7 +52,7 @@ registrado en una colección de auditoría consultable desde el panel de adminis
 |---|---|---|
 | Auth | `router/auth_router.py` | Selección de tipo de acceso, login/logout |
 | Menú principal | `router/menu_router.py` | Alta/baja de logísticas, activar/completar |
-| 0 — Configuración | `router/configuracion_router.py` | Productos, sucursales, vehículos, choferes, clientes mayoristas, rutas históricas |
+| 0 — Configuración | `router/configuracion_router.py` | Productos (catálogos ICG, Proalmex, Bimbo, Pymsa, Viña Real), sucursales, vehículos, choferes, clientes mayoristas, rutas históricas |
 | 1 — Extracción | `router/extraccion_router.py` | Lee Excel por proveedor (ICG/Bimbo/Proalmex) y clientes mayoristas; calcula peso y volumen |
 | 3 — Asignación | `router/asignacion_router.py` | Asigna sucursales/mayoristas a vehículos y rutas; VRP híbrido; geometría OSRM; nombres de ruta vía LLM (Groq) |
 | 6 — Modificación | `router/modificacion_router.py` | Edición manual de rutas ya asignadas |
