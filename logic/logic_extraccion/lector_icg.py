@@ -5,7 +5,19 @@ class LectorICG:
     COLUMNAS_METADATA = ['#', 'Proveedor', 'Línea', 'Marca', 'PROVEEDOR', 'CLAVE SAE', 'Descripción', 'Tamaño', 'Clave', 'Producto', 'Origen']
 
     @classmethod
-    def leer_y_normalizar(cls, archivo) -> pd.DataFrame:
+    def leer_y_normalizar(cls, archivo, sucursales_validas: set = None) -> pd.DataFrame:
+        """
+        `sucursales_validas`: si se pasa, lista blanca de nombres de tienda
+        conocidos (ya en minúsculas) -- cualquier columna que no calce se
+        excluye, sin importar cómo se llame. Reemplaza la necesidad de
+        adivinar cada columna de resumen nueva del Excel ('Piezas Pedido',
+        'Venta Lores Piezas'...) en `COLUMNAS_IGNORAR`, que sólo atrapa
+        variantes ya vistas y conocidas por su nombre exacto (hallado en
+        producción 2026-08-12: esas dos columnas se colaron como sucursales
+        fantasma con 684 kg y 1,329 kg de peso que no le correspondía a
+        ninguna tienda real). Si no se pasa, el comportamiento es el de
+        siempre (compatibilidad con otros llamadores).
+        """
         try:
             df = pd.read_excel(archivo, header=1)
 
@@ -22,6 +34,13 @@ class LectorICG:
                 or 'OBSERV' in str(col).upper()
                 or 'BODEGA' in str(col).upper()
             ]
+            if sucursales_validas is not None:
+                cols_a_borrar += [
+                    col for col in df.columns
+                    if col not in cols_a_borrar
+                    and col not in cls.COLUMNAS_METADATA
+                    and str(col).strip().lower() not in sucursales_validas
+                ]
 
             df = df.drop(columns=cols_a_borrar, errors='ignore')
 

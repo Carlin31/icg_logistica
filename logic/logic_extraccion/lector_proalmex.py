@@ -31,13 +31,20 @@ class LectorProalmex:
     PALABRAS_EXCLUIR = ('BODEGA', 'DISPONIBLE', 'OBSERVACIONES')
 
     @staticmethod
-    def leer_y_normalizar(archivo) -> pd.DataFrame:
+    def leer_y_normalizar(archivo, sucursales_validas: set = None) -> pd.DataFrame:
         """
         Lee el Excel de Proalmex y retorna un DataFrame con:
             Sucursal | descripcion_proalmex | tamano_proalmex | Piezas
 
         Los productos se identifican por la combinación (Descripción, Tamaño)
         para poder cruzarlos contra la colección productos_proalmex en MongoDB.
+
+        `sucursales_validas`: si se pasa, lista blanca de nombres de tienda
+        conocidos (ya en minúsculas) -- cualquier columna que no calce se
+        excluye, sin importar cómo se llame. Complementa (no reemplaza) las
+        listas de exclusión: esas ya han fallado varias veces con variantes
+        nuevas del Excel que no calzan exacto (ver tests arriba). Si no se
+        pasa, el comportamiento es el de siempre.
         """
         try:
             df = pd.read_excel(archivo, header=1)
@@ -48,11 +55,15 @@ class LectorProalmex:
 
             # Columnas de sucursales = todo lo que no sea un atributo de producto
             # ni una columna auxiliar de IMPORTE/INVENTARIO pegada a una sucursal
+            # ('Descripción'/'Tamaño' ya quedan fuera por COLUMNAS_EXCLUIR, así
+            # que la lista blanca de abajo nunca necesita protegerlas aparte).
             cols_sucursales = [
                 col for col in df.columns
                 if str(col).strip() not in LectorProalmex.COLUMNAS_EXCLUIR
                 and not str(col).strip().upper().endswith(LectorProalmex.SUFIJOS_EXCLUIR)
                 and not any(p in str(col).strip().upper() for p in LectorProalmex.PALABRAS_EXCLUIR)
+                and (sucursales_validas is None
+                     or str(col).strip().lower() in sucursales_validas)
             ]
 
             # Preservar Descripción y Tamaño (si existe) como identificadores

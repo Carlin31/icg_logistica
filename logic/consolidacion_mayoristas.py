@@ -21,7 +21,7 @@ reales lo obligan:
     ('BB3294/96_CTES.SOCHIAPAN') pero cuyos puntos están a **51 km**. Ese no se
     consolida: la etiqueta de la hoja es una comodidad de escritura, no una
     parada física. La discrepancia se reporta, no se fuerza.
-
+    
 Enlace COMPLETO (todos los pares del grupo dentro del radio), el mismo criterio
 que ya usan los grupos de co-viaje: evita el encadenamiento que produciría un
 enlace simple (A cerca de B, B cerca de C, y A y C lejísimos).
@@ -239,3 +239,4 @@ def partir_parada_por_capacidad(parada: dict, capacidad_kg: float):
                    f"entregas por folios completos"),
     }
     return partes, excepcion
+

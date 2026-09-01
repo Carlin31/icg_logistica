@@ -2175,8 +2175,15 @@ def guardar_modificacion(payload: dict, logistica_id: str) -> dict:
                         "latitud": m.get("latitud"), "longitud": m.get("longitud"),
                     })
 
-            if filas_hdr:
-                conn.execute(insert(t_hdr), filas_hdr)
+            # t_hdr va fila por fila (no en un solo insert por lotes): cada fila
+            # trae geometria_osrm_json/via_points_json (hasta ~100 KB c/u).
+            # SQLAlchemy agrupa un insert-por-lotes en una sola sentencia con
+            # todos los parámetros juntos — con 25+ rutas eso pasa de varios MB
+            # en una sola sentencia, y en esta máquina (6 GB RAM, ~340 MB libres
+            # medidos) eso truena SQL Server con error 802 "insufficient memory
+            # available in the buffer pool". Uno por uno evita el pico de memoria.
+            for fila in filas_hdr:
+                conn.execute(insert(t_hdr), fila)
             if filas_suc:
                 conn.execute(insert(t_suc), filas_suc)
             if filas_may:

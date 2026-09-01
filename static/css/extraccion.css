@@ -203,7 +203,9 @@
 .ext-badge--proalmex { background: #dcfce7; color: #15803d; }
 .ext-badge--bimbo    { background: #fef9c3; color: #78350f; }
 /* Pedido sin peso capturado en el origen (p. ej. mercancía pendiente de surtir) */
-.ext-badge--pendiente { background: #ffedd5; color: #9a3412; }
+/* margin-left negativo compensa el padding izquierdo del badge (12px)
+   para que el texto "PENDIENTE" arranque en el mismo punto que los kg */
+.ext-badge--pendiente { background: #ffedd5; color: #9a3412; margin-left: -12px; }
 
 .ext-perfil-filename {
   font-size: 0.84rem;

@@ -22,6 +22,17 @@ from logic.logic_extraccion.calculadora       import calcular_peso, calcular_vol
 from logic.configuracion_logic                import listar_productos, listar_productos_proalmex, listar_productos_bimbo, listar_sucursales
 
 
+def _mapa_nombre_sucursal(sucursales_db: list, campo: str) -> dict:
+    """{alias_excel_lower: nombre_base} -- traduce el encabezado de columna
+    del Excel (ICG/Proalmex/Bimbo) al nombre canónico, sin distinguir
+    mayúsculas/minúsculas (los alias en BD y los encabezados del Excel no
+    siguen la misma convención de capitalización)."""
+    return {
+        str(s.get(campo, '')).strip().lower(): s.get('nombre_base', 'Desconocida')
+        for s in sucursales_db if s.get(campo)
+    }
+
+
 def procesar_archivos_extraccion(archivos: dict) -> dict:
     """
     Procesa los archivos Excel recibidos y devuelve peso y volumen consolidados.
@@ -106,16 +117,20 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
     ).round(6)
 
     # ── 2. Mapas de sucursales ───────────────────────────────────────────────
-    # nombre_icg-proalmex → nombre_base  (para archivos ICG y Proalmex)
-    map_pedido = {
-        str(s.get('nombre_icg-proalmex', '')).strip(): s.get('nombre_base', 'Desconocida')
-        for s in sucursales_db if s.get('nombre_icg-proalmex')
-    }
-    # nombre_bimbo → nombre_base  (para archivos Bimbo, comparación case-insensitive)
-    map_bimbo = {
-        str(s.get('nombre_bimbo', '')).strip().lower(): s.get('nombre_base', 'Desconocida')
-        for s in sucursales_db if s.get('nombre_bimbo')
-    }
+    # nombre_icg-proalmex / nombre_bimbo → nombre_base, comparación
+    # case-insensitive: 56 de 101 sucursales tienen su alias guardado en
+    # minúsculas en la BD ('cabada', 'acatlan', 'anton lizardo'...) mientras
+    # los encabezados de columna del Excel vienen en Type Case ('Cabada',
+    # 'Acatlan'...). Sin normalizar, la traducción fallaba en silencio y el
+    # nombre crudo del Excel quedaba tal cual — que casi nunca coincide con
+    # `nombre_base`, así que la sucursal salía con ID "N/A" en el reporte.
+    map_pedido = _mapa_nombre_sucursal(sucursales_db, 'nombre_icg-proalmex')
+    map_bimbo  = _mapa_nombre_sucursal(sucursales_db, 'nombre_bimbo')
+    # Lista blanca para LectorICG/LectorProalmex: sólo una columna cuyo
+    # nombre esté aquí se trata como sucursal (ver `_mapa_nombre_sucursal`
+    # y los lectores) — evita tener que adivinar cada columna de resumen
+    # nueva del Excel en una lista de exclusión.
+    sucursales_validas_pedido = set(map_pedido.keys())
     map_id_sucursal = {}
     for s in sucursales_db:
         nombre_base = s.get('nombre_base', 'Desconocida')
@@ -127,10 +142,11 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
 
     # ── 3. Leer y etiquetar cada archivo ────────────────────────────────────
     if archivos.get('icg'):
-        df_icg = LectorICG.leer_y_normalizar(archivos['icg'])
+        df_icg = LectorICG.leer_y_normalizar(archivos['icg'], sucursales_validas=sucursales_validas_pedido)
         if not df_icg.empty:
             df_icg['Proveedor'] = 'ICG'
-            df_icg['Sucursal']  = df_icg['Sucursal'].apply(clean_name).map(map_pedido).fillna(df_icg['Sucursal'])
+            sucursal_orig = df_icg['Sucursal'].apply(clean_name)
+            df_icg['Sucursal'] = sucursal_orig.str.lower().map(map_pedido).fillna(sucursal_orig)
             dfs_procesados.append(df_icg)
 
     if archivos.get('bimbo'):
@@ -174,10 +190,11 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
             dfs_procesados.append(df_bimbo)
 
     if archivos.get('proalmex'):
-        df_proalmex = LectorProalmex.leer_y_normalizar(archivos['proalmex'])
+        df_proalmex = LectorProalmex.leer_y_normalizar(archivos['proalmex'], sucursales_validas=sucursales_validas_pedido)
         if not df_proalmex.empty:
             df_proalmex['Proveedor'] = 'Proalmex'
-            df_proalmex['Sucursal']  = df_proalmex['Sucursal'].apply(clean_name).map(map_pedido).fillna(df_proalmex['Sucursal'])
+            sucursal_orig = df_proalmex['Sucursal'].apply(clean_name)
+            df_proalmex['Sucursal'] = sucursal_orig.str.lower().map(map_pedido).fillna(sucursal_orig)
 
             # Obtener peso unitario desde productos_proalmex usando (linea, tamano)
             def _peso_unitario_proalmex(row) -> float:
@@ -300,6 +317,28 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
 # CLIENTES MAYORISTAS
 # ══════════════════════════════════════════════════════════════════════════════
 
+# Excluir del ruteo a los clientes marcados como "Excluido" en Configuración
+# (columna EXTRACCIÓN). ENCENDIDO: es un control real del operador y apagarlo
+# dejaría un botón visible sin efecto, que es peor que excluir sin avisar —
+# el operador creería que funcionó.
+#
+# Lo que sí cambió: la exclusión ahora se REPORTA (cuántos clientes y cuántos kg
+# se dejaron fuera esa semana) en `advertencias.excluidos_*`, para que nunca sea
+# silenciosa. A hoy nadie lo ha usado: 0 clientes con activo=False.
+#
+# `activo` está normalizado a BIT genuinamente booleano (los 147 NULL se
+# rellenaron a True y la columna tiene DEFAULT 1): la comprobación `is False` y
+# un futuro `not activo` dan lo mismo, así que un refactor no puede excluir a
+# todos por accidente.
+#
+# OJO — no confundir con el "SUSPENDIDO" de la hoja MAYOREO: ése es estatus
+# comercial de SAE y NO predice si se entrega (18 pedidos suspendidos / 11
+# clientes / 2,509 kg SÍ se entregaron en 6 de 9 semanas, incluido Super de
+# Bodega Tuxtepec con 1,094 kg). Ese estatus no se importa ni filtra aquí.
+# PREGUNTA ABIERTA PARA LA EMPRESA: ¿qué significa SUSPENDIDO en su operación?
+EXCLUIR_CLIENTES_INACTIVOS = True
+
+
 def procesar_mayoristas(archivo) -> dict:
     """
     Lee el archivo Excel de Clientes Mayoristas, consolida el peso total
@@ -345,21 +384,23 @@ def procesar_mayoristas(archivo) -> dict:
                 continue
             cid = int(c.id_cliente)
             map_nombre[cid] = c.nombre
-            if c.activo is False:
+            if EXCLUIR_CLIENTES_INACTIVOS and c.activo is False:
                 excluidos.add(cid)
     except Exception as e:
         print(f"[procesar_mayoristas] Error al conectar con SQL Server: {e}")
         map_nombre = {}
-        excluidos  = set()
         excluidos  = set()
 
     # ── Construir resultado consolidado ─────────────────────────────────────
     consolidado = []
     codigos_total: set[int] = set()
     codigos_no_encontrados: set[int] = set()
+    excluidos_aplicados: dict = {}      # {codigo: kg dejados fuera}
     for _, row in df.iterrows():
         codigo = int(row['codigo_cliente'])
         if codigo in excluidos:
+            excluidos_aplicados[codigo] = (excluidos_aplicados.get(codigo, 0.0)
+                                           + float(row['peso_total_kg'] or 0))
             continue
         codigos_total.add(codigo)
         if codigo not in map_nombre:
@@ -375,11 +416,25 @@ def procesar_mayoristas(archivo) -> dict:
     # Ordenar por número de documento (referencia principal del pedido)
     consolidado.sort(key=lambda x: str(x.get('documento', '')))
 
+    if excluidos_aplicados:
+        # Nunca en silencio: el operador debe ver qué dejó fuera su decisión.
+        print("=" * 70)
+        print(f"[extraccion] {len(excluidos_aplicados)} cliente(s) EXCLUIDOS por "
+              f"configuración: {sum(excluidos_aplicados.values()):,.0f} kg fuera "
+              f"del ruteo esta semana.")
+        for cod, kg in sorted(excluidos_aplicados.items()):
+            print(f"    {cod} {map_nombre.get(cod, '')}: {kg:,.0f} kg")
+        print("=" * 70)
+
     return {
         'status':       'ok',
         'consolidado':  consolidado,
         'advertencias': {
             'codigos_no_encontrados':   sorted(codigos_no_encontrados),
             'total_codigos_mayoristas': len(codigos_total),
+            'excluidos_por_configuracion': [
+                {'codigo': c, 'nombre': map_nombre.get(c, ''), 'kg': round(kg, 1)}
+                for c, kg in sorted(excluidos_aplicados.items())],
+            'excluidos_kg': round(sum(excluidos_aplicados.values()), 1),
         },
     }

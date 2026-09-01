@@ -52,3 +52,34 @@ def test_no_excluye_sucursal_real_por_error():
     df = LectorProalmex.leer_y_normalizar(archivo)
 
     assert set(df["Sucursal"].values) == {"Tux Centro", "Jardines"}
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# `sucursales_validas` -- lista blanca en vez de lista negra. Hallado en
+# producción 2026-08-12 (mismo día, esta vez en ICG): columnas de resumen
+# del Excel se colaban como sucursales fantasma porque su nombre no calzaba
+# EXACTO ninguna entrada de la lista de exclusión -- el mismo patrón que ya
+# había pasado con 'INV. EN BODEGA' arriba. Una lista blanca no depende de
+# adivinar cada variante nueva.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def test_lista_blanca_excluye_columna_de_resumen_que_la_lista_negra_no_cubre():
+    headers = ["", "Descripción", "Tamaño", "Tux Centro", "Venta Lores Piezas"]
+    filas = [["", "Producto A", "Chico", 5, 168]]
+    archivo = _excel_bytes(headers, filas)
+    sucursales_validas = {"tux centro"}
+
+    df = LectorProalmex.leer_y_normalizar(archivo, sucursales_validas=sucursales_validas)
+
+    assert set(df["Sucursal"].values) == {"Tux Centro"}
+
+
+def test_lista_blanca_no_excluye_sucursal_real_por_error():
+    headers = ["", "Descripción", "Tamaño", "Tux Centro", "Jardines"]
+    filas = [["", "Producto A", "Chico", 5, 3]]
+    archivo = _excel_bytes(headers, filas)
+    sucursales_validas = {"tux centro", "jardines"}
+
+    df = LectorProalmex.leer_y_normalizar(archivo, sucursales_validas=sucursales_validas)
+
+    assert set(df["Sucursal"].values) == {"Tux Centro", "Jardines"}

@@ -896,6 +896,22 @@ async function procesarArchivoMayoristas(archivo) {
   }
 }
 
+function renderExcluidosBanner(advertencias) {
+  const cont = document.getElementById('excluidos-mayoristas');
+  if (!cont) return;
+  const lista = (advertencias && advertencias.excluidos_por_configuracion) || [];
+  if (!lista.length) { cont.style.display = 'none'; cont.innerHTML = ''; return; }
+  const kg = (advertencias.excluidos_kg || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 });
+  cont.style.display = 'block';
+  cont.className = 'ext-advertencia ext-advertencia--info';
+  cont.innerHTML =
+    `<strong>${lista.length} cliente(s) excluidos por configuración — ${kg} kg fuera del ruteo.</strong>` +
+    `<div style="margin-top:.35rem">` +
+    lista.map(c => `<div>${c.codigo} ${c.nombre || ''}: ${(c.kg || 0).toLocaleString('es-MX', { maximumFractionDigits: 0 })} kg</div>`).join('') +
+    `</div><div style="margin-top:.35rem;font-size:.9em">` +
+    `Marcados como <em>Excluido</em> en Configuración → Clientes mayoristas (columna EXTRACCIÓN).</div>`;
+}
+
 function renderMayoristasCargado() {
   const { nombre, consolidado, status, advertencias } = state.mayoristas;
 
@@ -906,8 +922,14 @@ function renderMayoristasCargado() {
   renderAdvertenciaBanner(
     'mayoristas',
     advertencias ? (advertencias.total_codigos_mayoristas || 0) : 0,
-    advertencias ? advertencias.codigos_no_encontrados        : []
+    advertencias ? advertencias.codigos_no_encontrados        : [],
+    { unidad: 'clientes', etiquetaFaltantes: 'Clientes mayoristas no registrados' }
   );
+
+  // Clientes dejados fuera por la columna EXTRACCIÓN de Configuración.
+  // Se muestra SIEMPRE que aplique: una exclusión silenciosa haría creer que
+  // esos kg se van a rutear cuando no.
+  renderExcluidosBanner(advertencias);
 
   const statusEl = document.getElementById('status-mayoristas');
   statusEl.className = `ext-perfil-status ${status === 'guardado' ? 'status-guardado' : 'status-cargado'}`;
@@ -1201,11 +1223,15 @@ function mostrarToast(msg, tipo = 'info') {
 
 /**
  * Pinta de forma persistente en la interfaz (no como notificación) el banner
- * "encontrados/total productos procesados" del perfil indicado, y si hay
- * elementos sin localizar agrega "Códigos o claves SAE no encontrados: …".
+ * "encontrados/total <unidad> procesados" del perfil indicado, y si hay
+ * elementos sin localizar agrega "<etiquetaFaltantes>: …".
  * perfil debe corresponder a un banner existente en el HTML (#advertencia-<perfil>).
+ *
+ * `opciones.unidad` / `opciones.etiquetaFaltantes`: por defecto habla de
+ * productos y claves SAE (ICG/Proalmex/Bimbo) -- Mayoristas los sobreescribe
+ * porque ahí "faltantes" son CLIENTES no registrados, no códigos de producto.
  */
-function renderAdvertenciaBanner(perfil, total, faltantes) {
+function renderAdvertenciaBanner(perfil, total, faltantes, opciones = {}) {
   const banner    = document.getElementById(`advertencia-${perfil}`);
   const resumenEl = document.getElementById(`advertencia-${perfil}-resumen`);
   const listaEl   = document.getElementById(`advertencia-${perfil}-lista`);
@@ -1216,15 +1242,16 @@ function renderAdvertenciaBanner(perfil, total, faltantes) {
     return;
   }
 
+  const { unidad = 'productos', etiquetaFaltantes = 'Códigos o claves SAE no encontrados' } = opciones;
   faltantes = faltantes || [];
   const encontrados     = total - faltantes.length;
   const tieneFaltantes  = faltantes.length > 0;
 
   banner.style.display = 'flex';
   banner.classList.toggle('ext-advertencia-banner--ok', !tieneFaltantes);
-  resumenEl.textContent = `${encontrados}/${total} productos procesados`;
+  resumenEl.textContent = `${encontrados}/${total} ${unidad} procesados`;
   listaEl.textContent   = tieneFaltantes
-    ? `Códigos o claves SAE no encontrados: ${faltantes.join(', ')}`
+    ? `${etiquetaFaltantes}: ${faltantes.join(', ')}`
     : '';
 
   const icon = banner.querySelector('[data-lucide]');

@@ -66,7 +66,21 @@ def _build_connection_url(app) -> str:
 def _engine_and_metadata() -> tuple[Engine, MetaData]:
     app = current_app._get_current_object()
     if "sql_engine" not in app.extensions:
-        engine   = create_engine(_build_connection_url(app), pool_pre_ping=True)
+        # autocommit=True al nivel del DBAPI (pyodbc, default False): sin esto,
+        # pool_pre_ping y metadata.reflect() abren una transacción implícita en
+        # la conexión física (SELECT bajo autobegin de SQLAlchemy) que nunca se
+        # confirma ni revierte — queda "open_transaction_count=1" en el server
+        # para siempre en esa conexión del pool, y cada request que la reutiliza
+        # (incluido get_db() con isolation_level=AUTOCOMMIT, que solo cambia
+        # cómo empiezan sentencias NUEVAS, no cierra una transacción ya abierta)
+        # sigue escribiendo dentro de esa misma transacción huérfana. Con el
+        # tiempo eso es lo que volvía lentísimo (7+ min) y luego tronaba con
+        # 500 el guardado en Modificación. Verificado con sys.dm_exec_sessions:
+        # sin este flag, reflect(bind=engine) por sí solo ya deja la conexión
+        # en open_transaction_count=1; con el flag, queda en 0. transaccion()
+        # (engine.begin()) sigue commiteando/revirtiendo real igual que antes.
+        engine   = create_engine(_build_connection_url(app), pool_pre_ping=True,
+                                  connect_args={"autocommit": True})
         metadata = MetaData()
         metadata.reflect(bind=engine)
         app.extensions["sql_engine"]   = engine
@@ -96,12 +110,24 @@ def get_db():
     Devuelve la Connection de SQLAlchemy del request actual.
 
     Se abre una sola vez por request (guardada en flask.g) y se libera al
-    pool en close_db(). Aislamiento AUTOCOMMIT: no hace falta llamar a
-    conn.commit() tras cada insert/update/delete.
+    pool en close_db(). Aislamiento AUTOCOMMIT (vía connect_args del engine,
+    ver _engine_and_metadata): no hace falta llamar a conn.commit() tras cada
+    insert/update/delete.
+
+    Ojo: NO fijar aquí `.execution_options(isolation_level="AUTOCOMMIT")` —
+    verificado con sys.dm_exec_sessions que, en esta combinación SQLAlchemy
+    2.0/pyodbc/mssql, pedir ese isolation_level a nivel de Connection sobre
+    una conexión que YA es autocommit por connect_args deja
+    open_transaction_count=1 (transacción huérfana, nunca commiteada) al
+    cerrar la conexión — se acumula una por cada conexión del pool que pasa
+    por aquí y es la causa raíz confirmada de que "Guardar y seguir" en
+    Modificación tardara minutos y terminara en 500. Con el autocommit ya
+    puesto en connect_args, este override es redundante y además el que
+    rompe el cierre limpio.
     """
     if "sql_connection" not in g:
         engine, _ = _engine_and_metadata()
-        g.sql_connection = engine.connect().execution_options(isolation_level="AUTOCOMMIT")
+        g.sql_connection = engine.connect()
     return g.sql_connection
 
 
