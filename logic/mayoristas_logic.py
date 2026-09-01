@@ -26,6 +26,9 @@ from logic.vrp_logic import capacidad_efectiva_kg
 
 OSRM_TABLE_TIMEOUT = 3  # local: falla rapido si no hay servidor, nunca bloquea la generacion de rutas
 
+MATRIZ_LAT_DEFAULT = 18.87329315661368
+MATRIZ_LON_DEFAULT = -96.9491574270346
+
 # Al resolver una sobrecarga de mayoristas, True = se expulsa al mayorista más
 # LEJANO del centroide de su ruta (conserva a los geográficamente afines);
 # False = comportamiento anterior (expulsa al más pesado).
@@ -89,6 +92,14 @@ def _insertar_pos_proxima(route: list, nuevo: dict, distancias_km: "list | None"
     Diaz por línea recta pero más cerca por carretera), así que cuando hay
     distancia real disponible debe ganar sobre la línea recta.
 
+    Nota: esta función solo puede insertar DESPUÉS de una parada existente
+    (nunca antes de la primera) -- para eso ver _pos_por_distancia_depot,
+    que ordena por distancia a la matriz en vez de por vecino más cercano
+    (bug real 2026-09-01: comparar la distancia del bloque a la matriz
+    contra su distancia DIRECTA a la parada más próxima nunca puede ganar
+    -- la distancia a la matriz es de toda la ruta, la directa es local y
+    casi siempre mucho menor).
+
     Empate (misma distancia a dos paradas): gana la de índice MAYOR (la
     más reciente en `route`), no la primera encontrada. Con `<` estricto,
     un mayorista empatado entre dos paradas ya insertadas de su mismo
@@ -121,6 +132,42 @@ def _insertar_pos_proxima(route: list, nuevo: dict, distancias_km: "list | None"
             best_dist = dist
             best_idx = i + 1   # insertar DESPUÉS de esta parada
     return best_idx
+
+
+def _pos_por_distancia_depot(depot_distancias_route: "list | None",
+                             distancia_depot_nuevo: "float | None") -> "int | None":
+    """
+    Índice (0-based) DESPUÉS del cual insertar un bloque cuya distancia
+    real por carretera a la matriz es `distancia_depot_nuevo`, para que
+    las paradas queden ordenadas por distancia CRECIENTE a la matriz --
+    el modelo real del usuario ("saliendo de la matriz hasta el punto más
+    lejano"). `depot_distancias_route` es una lista alineada con la ruta
+    actual (distancia de cada parada existente a la matriz, o None si no
+    se pudo calcular para esa parada en particular).
+
+    A diferencia de _insertar_pos_proxima (vecino más cercano por
+    distancia LOCAL), esto SÍ puede devolver 0 (insertar antes de la
+    primera parada) -- bug real 2026-09-01: San Lucas Ojitlan está más
+    cerca de la matriz por carretera que la primera sucursal de su ruta
+    ("Jalapa de Diaz 2", 198.4km vs 209.3km), pero comparar contra la
+    distancia DIRECTA Ojitlan→esa sucursal (21.6km, mucho menor) hacía que
+    el vecino más cercano siempre ganara -- nunca hay forma de que "toda
+    la ruta hasta la matriz" (~200km) sea menor que una distancia local
+    (~20km). Aquí se compara distancia-a-matriz contra distancia-a-matriz,
+    no contra distancia local.
+
+    Devuelve None si `distancia_depot_nuevo` o `depot_distancias_route` no
+    están disponibles -- el llamador debe caer a _insertar_pos_proxima.
+
+    Empate: gana el índice MAYOR (mismo criterio que _insertar_pos_proxima).
+    """
+    if distancia_depot_nuevo is None or depot_distancias_route is None:
+        return None
+    pos = 0
+    for i, d in enumerate(depot_distancias_route):
+        if d is not None and d <= distancia_depot_nuevo:
+            pos = i + 1
+    return pos
 
 
 def _agrupar_por_poblacion_y_ordenar(mayoristas: list, key_fn) -> list:
@@ -203,7 +250,7 @@ def _distancias_carretera_km(origen: tuple, destinos: list) -> "list | None":
 
 
 def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, construir_nodo,
-                                     calcular_distancias_km=None) -> None:
+                                     calcular_distancias_km=None, depot: "tuple | None" = None) -> None:
     """
     Inserta `mayoristas_ordenados` (YA agrupados por poblacion, p. ej. via
     _agrupar_por_poblacion_y_ordenar, o por venir ordenados por el `orden`
@@ -229,11 +276,40 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
     carretera real está más cerca. Si falla (excepción o None), cae a línea
     recta -- nunca bloquea la inserción por un problema de OSRM.
 
+    `depot`, si se da (lat, lon), habilita ordenar por distancia real a la
+    matriz (ver _pos_por_distancia_depot) en vez de por vecino más cercano
+    -- bug real 2026-09-01: San Lucas Ojitlan está más cerca de la matriz
+    por carretera que la primera sucursal de su ruta ("Jalapa de Diaz 2",
+    198.4km vs 209.3km), pero comparar contra la distancia DIRECTA de
+    Ojitlan a esa sucursal (21.6km, mucho menor) hacía que el vecino más
+    cercano siempre ganara -- nunca hay forma de que la distancia a TODA
+    la matriz (~200km) sea menor que una distancia local (~20km). Se
+    precalcula la distancia a la matriz de cada parada existente (una sola
+    consulta), y se extiende con la de cada bloque a medida que se
+    insertan, para que el bloque siguiente también se compare contra los
+    ya colocados. Si `calcular_distancias_km` falla o `depot` no se da,
+    cae a _insertar_pos_proxima (vecino más cercano) -- nunca bloquea la
+    inserción por un problema de OSRM.
+
     `construir_nodo(m)` arma el dict final a insertar para un mayorista
     `m` -- cada llamador ya tiene su propio formato de nodo, este helper
     no lo impone. Mayoristas sin poblacion (bloques de 1, ver
     _agrupar_por_poblacion_y_ordenar) se insertan igual que antes.
     """
+    depot_distancias = None
+    if calcular_distancias_km is not None and depot:
+        destinos_iniciales = []
+        for p in paradas:
+            lat_p = _to_float(p.get("latitud"))
+            lon_p = _to_float(p.get("longitud"))
+            destinos_iniciales.append((lat_p, lon_p) if lat_p is not None and lon_p is not None else None)
+        try:
+            depot_distancias = calcular_distancias_km(depot, destinos_iniciales)
+        except Exception as e:  # noqa: BLE001
+            print(f"[mayoristas] no se pudo calcular distancia de la matriz a las paradas, "
+                  f"se usa vecino más cercano: {type(e).__name__}: {e}")
+            depot_distancias = None
+
     i = 0
     n = len(mayoristas_ordenados)
     while i < n:
@@ -250,23 +326,35 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
                  if lats and lons else {})
 
         distancias_km = None
+        distancia_depot_km = None
         if calcular_distancias_km is not None and ancla:
             destinos = []
+            if depot:
+                destinos.append(depot)
             for p in paradas:
                 lat_p = _to_float(p.get("latitud"))
                 lon_p = _to_float(p.get("longitud"))
                 destinos.append((lat_p, lon_p) if lat_p is not None and lon_p is not None else None)
             try:
-                distancias_km = calcular_distancias_km(
+                distancias = calcular_distancias_km(
                     (ancla["latitud"], ancla["longitud"]), destinos)
             except Exception as e:  # noqa: BLE001
                 print(f"[mayoristas] calcular_distancias_km falló, se usa línea recta: "
                       f"{type(e).__name__}: {e}")
-                distancias_km = None
+                distancias = None
+            if distancias is not None:
+                if depot:
+                    distancia_depot_km, *distancias_km = distancias
+                else:
+                    distancias_km = distancias
 
-        pos = _insertar_pos_proxima(paradas, ancla, distancias_km=distancias_km)
+        pos = _pos_por_distancia_depot(depot_distancias, distancia_depot_km)
+        if pos is None:
+            pos = _insertar_pos_proxima(paradas, ancla, distancias_km=distancias_km)
 
         paradas[pos:pos] = [construir_nodo(m) for m in bloque]
+        if depot_distancias is not None:
+            depot_distancias[pos:pos] = [distancia_depot_km] * len(bloque)
         i = j
 
 
@@ -314,8 +402,8 @@ def _ordenar_sucursales_planificacion(sucursales: list) -> list:
 def _leer_depot(db) -> tuple:
     tabla = get_table("configuracion")
     cfg = db.execute(select(tabla)).mappings().first() or {}
-    lat = _to_float(cfg.get("matriz_lat")) or 18.87329315661368
-    lon = _to_float(cfg.get("matriz_lon")) or -96.9491574270346
+    lat = _to_float(cfg.get("matriz_lat")) or MATRIZ_LAT_DEFAULT
+    lon = _to_float(cfg.get("matriz_lon")) or MATRIZ_LON_DEFAULT
     return lat, lon
 
 
@@ -911,8 +999,10 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
         }
 
     paradas = list(sucs_nodos)
+    depot = (depot_lat, depot_lon) if depot_lat is not None and depot_lon is not None \
+        else (MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT)
     _insertar_mayoristas_en_bloques(paradas, mayoristas_ordenados, _nodo_mayorista,
-                                     calcular_distancias_km=calcular_distancias_km)
+                                     calcular_distancias_km=calcular_distancias_km, depot=depot)
 
     for m in mayoristas_sin:
         paradas.append({
@@ -1031,6 +1121,7 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
 
     historico_orden = _cargar_historico_mayoristas(str(logistica_id))
     cache_zonas = _construir_cache_zonas(db, rutas_sucursales)
+    depot = _leer_depot(db) if calcular_distancias_km is not None else None
 
     mayoristas_por_ruta: dict = {rid: [] for rid in rutas_index}
     sin_asignar: list = []
@@ -1102,7 +1193,7 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
             }
 
         _insertar_mayoristas_en_bloques(paradas, mays, _nodo_mayorista,
-                                         calcular_distancias_km=calcular_distancias_km)
+                                         calcular_distancias_km=calcular_distancias_km, depot=depot)
 
         # Asignar orden secuencial a la lista entrelazada
         for idx, p in enumerate(paradas, start=1):
@@ -1264,6 +1355,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list,
             t.c.unidad, t.c.dia, t.c.orden)).mappings())
     if not filas:
         return None
+    depot = _leer_depot(db) if calcular_distancias_km is not None else None
 
     ids = {f["id_cliente"] for f in filas}
     coords_may = _leer_coords_mayoristas(db, ids)
@@ -1342,7 +1434,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list,
             }
 
         _insertar_mayoristas_en_bloques(paradas, mayoristas_con_coords, _nodo_mayorista,
-                                         calcular_distancias_km=calcular_distancias_km)
+                                         calcular_distancias_km=calcular_distancias_km, depot=depot)
 
         for idx, p in enumerate(paradas, start=1):
             p["orden"] = idx

@@ -209,6 +209,119 @@ def test_insertar_pos_proxima_distancias_km_none_ignora_esa_parada():
     assert _insertar_pos_proxima(route, nuevo, distancias_km=[None, 5.0]) == 2
 
 
+def test_insertar_pos_proxima_depot_permite_insertar_antes_de_la_primera_parada():
+    # Bug real 2026-09-01 (version 1, no bastaba): comparar la distancia
+    # del bloque a la matriz contra su distancia DIRECTA a la parada mas
+    # proxima nunca puede ganar -- la distancia a la matriz es de toda la
+    # ruta (~200km) y la directa es local (~20km), asi que el vecino mas
+    # cercano siempre gana. Ver _pos_por_distancia_depot: compara
+    # distancia-a-matriz contra distancia-a-matriz, esa si funciona.
+    from logic.mayoristas_logic import _insertar_pos_proxima, _pos_por_distancia_depot
+    route = [
+        {"latitud": 0.0, "longitud": 5.0},
+        {"latitud": 0.0, "longitud": 10.0},
+    ]
+    nuevo = {"latitud": 0.0, "longitud": 1.0}
+    assert _insertar_pos_proxima(route, nuevo, distancias_km=[4.0, 9.0]) == 1
+
+    # Con distancia real a la matriz (no a la parada): la parada existente
+    # mide 209.3km de la matriz, el bloque nuevo solo 198.4km -> debe ir
+    # ANTES de esa parada (idx 0), aunque este a solo 4km de distancia local.
+    assert _pos_por_distancia_depot([209.3], 198.4) == 0
+    assert _pos_por_distancia_depot([150.0, 209.3], 198.4) == 1
+    assert _pos_por_distancia_depot(None, 198.4) is None
+    assert _pos_por_distancia_depot([209.3], None) is None
+
+
+def test_insertar_mayoristas_en_bloques_depot_ordena_por_distancia_real_a_la_matriz():
+    # Reproduccion del bug real: la sucursal "Jalapa de Diaz 2" mide 209.3km
+    # de la matriz por carretera; el bloque de San Lucas Ojitlan solo
+    # 198.4km -- debe insertarse ANTES de esa sucursal, aunque este mucho
+    # mas cerca de ella (21.6km) que de la matriz. Antes de este fix,
+    # comparar contra la distancia directa (21.6km) siempre hacia ganar al
+    # vecino mas cercano.
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+    depot = (0.0, 0.0)
+    paradas = [
+        {"tipo": "sucursal", "num_tienda": 1, "latitud": 0.0, "longitud": 10.0},
+    ]
+    bloque = [{"id_cliente": 1, "poblacion": "OJITLAN", "latitud": 0.0, "longitud": 9.0}]
+
+    def fake_distancias(origen, destinos):
+        if origen == depot:
+            # Precomputo inicial: matriz -> paradas existentes.
+            assert destinos == [(0.0, 10.0)]
+            return [209.3]
+        # Por bloque: ancla -> [depot] + paradas existentes.
+        assert destinos == [depot, (0.0, 10.0)]
+        return [198.4, 21.6]
+
+    _insertar_mayoristas_en_bloques(
+        paradas, bloque, lambda m: {"tipo": "mayorista", "id_cliente": m["id_cliente"]},
+        calcular_distancias_km=fake_distancias, depot=depot,
+    )
+    assert [p["tipo"] for p in paradas] == ["mayorista", "sucursal"]
+
+
+def test_insertar_mayoristas_en_bloques_depot_considera_bloques_ya_insertados():
+    # El segundo bloque debe compararse tambien contra la distancia a la
+    # matriz del bloque YA insertado (no solo contra las sucursales
+    # originales) -- si no, quedaria mal ubicado respecto a un bloque
+    # vecino que ya se movio antes de la primera sucursal.
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+
+    def _nodo(m):
+        return {"tipo": "mayorista", "id_cliente": m["id_cliente"],
+                "latitud": m["latitud"], "longitud": m["longitud"]}
+
+    depot = (0.0, 0.0)
+    paradas = [
+        {"tipo": "sucursal", "num_tienda": 1, "latitud": 0.0, "longitud": 10.0},
+    ]
+    mayoristas_ordenados = [
+        {"id_cliente": 1, "poblacion": "OJITLAN", "latitud": 0.0, "longitud": 9.0},
+        {"id_cliente": 2, "poblacion": "MEDIO", "latitud": 0.0, "longitud": 9.5},
+    ]
+
+    def fake_distancias(origen, destinos):
+        if origen == depot:
+            return [209.3]  # precomputo inicial: solo la sucursal
+        if origen == (0.0, 9.0):
+            # bloque OJITLAN (procesado primero): [depot, sucursal]
+            return [198.4, 21.6]
+        if origen == (0.0, 9.5):
+            # bloque MEDIO (procesado despues, ya existe OJITLAN insertado):
+            # [depot, sucursal, nodo OJITLAN]
+            return [203.0, 20.0, 5.0]
+        raise AssertionError(f"origen inesperado: {origen}, destinos: {destinos}")
+
+    _insertar_mayoristas_en_bloques(
+        paradas, mayoristas_ordenados, _nodo,
+        calcular_distancias_km=fake_distancias, depot=depot,
+    )
+    # Orden esperado por distancia creciente a la matriz:
+    # OJITLAN (198.4) < MEDIO (203.0) < sucursal (209.3)
+    assert [p.get("id_cliente") or p.get("num_tienda") for p in paradas] == [1, 2, 1]
+
+
+def test_insertar_mayoristas_en_bloques_sin_depot_no_cambia_comportamiento():
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+    paradas = [
+        {"tipo": "sucursal", "num_tienda": 1, "latitud": 0.0, "longitud": 10.0},
+    ]
+    bloque = [{"id_cliente": 1, "poblacion": "OJITLAN", "latitud": 0.0, "longitud": 9.0}]
+
+    def fake_distancias(origen, destinos):
+        assert len(destinos) == 1  # sin depot, no se agrega destino extra
+        return [50.0]
+
+    _insertar_mayoristas_en_bloques(
+        paradas, bloque, lambda m: {"tipo": "mayorista", "id_cliente": m["id_cliente"]},
+        calcular_distancias_km=fake_distancias,
+    )
+    assert [p["tipo"] for p in paradas] == ["sucursal", "mayorista"]
+
+
 def test_insertar_mayoristas_en_bloques_usa_calcular_distancias_km():
     from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
     paradas = [
@@ -291,11 +404,39 @@ def test_integrar_paradas_usa_calcular_distancias_km_si_se_provee():
     mayoristas = [{"id_cliente": 1, "poblacion": "X", "latitud": 0.0, "longitud": 1.0, "peso_kg": 5.0}]
 
     def fake_distancias(origen, destinos):
-        return [500.0, 5.0]  # invierte la linea recta: gana la sucursal B
+        # destinos = [depot, sucursal A, sucursal B]. Depot lejos (no debe
+        # ganar), y se invierte la linea recta entre A/B: gana B.
+        return [1000.0, 500.0, 5.0]
 
     paradas = _integrar_paradas(sucursales, mayoristas, calcular_distancias_km=fake_distancias)
     orden = [(p["tipo"], p.get("num_tienda") or p.get("id_cliente")) for p in paradas]
     assert orden == [("sucursal", 1), ("sucursal", 2), ("mayorista", 1)]
+
+
+def test_integrar_paradas_bloque_mas_cerca_del_depot_va_antes_de_la_primera_sucursal():
+    # Reproduccion del bug real 2026-09-01: en el PDF, "Jalapa de Diaz 2"
+    # (sucursal, SEC 1) seguia apareciendo antes que el mayorista de San
+    # Lucas Ojitlan (SEC 2), aun con distancia real por carretera entre
+    # mayoristas -- porque nada permitia insertar un bloque ANTES de la
+    # primera sucursal de la ruta.
+    from logic.mayoristas_logic import _integrar_paradas
+    sucursales = [
+        {"num_tienda": 1, "nombre_base": "Jalapa de Diaz 2", "latitud": 0.0, "longitud": 10.0, "orden": 1},
+    ]
+    mayoristas = [{"id_cliente": 1, "poblacion": "OJITLAN", "latitud": 0.0, "longitud": 9.0, "peso_kg": 5.0}]
+
+    depot = (0.0, 0.0)
+
+    def fake_distancias(origen, destinos):
+        if origen == depot:
+            return [209.3]  # precomputo: matriz -> sucursal
+        return [198.4, 21.6]  # bloque: [depot, sucursal] -- mas cerca de la matriz
+
+    paradas = _integrar_paradas(
+        sucursales, mayoristas, depot_lat=0.0, depot_lon=0.0,
+        calcular_distancias_km=fake_distancias,
+    )
+    assert [p["tipo"] for p in paradas] == ["mayorista", "sucursal"]
 
 
 def test_distancias_carretera_km_sin_destinos_con_coords_no_consulta(monkeypatch):
