@@ -233,6 +233,22 @@ def test_insertar_pos_proxima_depot_permite_insertar_antes_de_la_primera_parada(
     assert _pos_por_distancia_depot([209.3], None) is None
 
 
+def test_pos_por_distancia_depot_detecta_ruta_decreciente():
+    # Bug real 2026-09-02: T20 martes visita Tetela (65.9km de la matriz),
+    # Vicente Camalote (59.3km) y Acatlan de Perez Figueroa (51.9km) en
+    # orden DECRECIENTE de distancia a la matriz (no creciente, que era el
+    # unico sentido que _pos_por_distancia_depot sabia comparar). El
+    # mayorista AA1881_CASA PENA esta a 0.17km de Acatlan (51.75km de la
+    # matriz, incluso mas cerca que la propia Acatlan) y debia insertarse
+    # AL FINAL (idx 3, junto a Acatlan) -- pero como ninguna parada tenia
+    # distancia-a-matriz <= 51.75 (todas eran mayores), la version anterior
+    # devolvia pos=0: el mayorista quedaba ANTES de Tetela, en el extremo
+    # opuesto de la ruta real.
+    from logic.mayoristas_logic import _pos_por_distancia_depot
+    depot_distancias_route = [65.9, 59.3, 51.9]  # Tetela, Camalote, Acatlan
+    assert _pos_por_distancia_depot(depot_distancias_route, 51.75) == 3
+
+
 def test_insertar_mayoristas_en_bloques_depot_ordena_por_distancia_real_a_la_matriz():
     # Reproduccion del bug real: la sucursal "Jalapa de Diaz 2" mide 209.3km
     # de la matriz por carretera; el bloque de San Lucas Ojitlan solo
@@ -396,7 +412,7 @@ def test_distancias_carretera_km_none_si_falla_la_consulta(monkeypatch):
 
 
 def test_integrar_paradas_usa_calcular_distancias_km_si_se_provee():
-    from logic.mayoristas_logic import _integrar_paradas
+    from logic.mayoristas_logic import _integrar_paradas, MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT
     sucursales = [
         {"num_tienda": 1, "nombre_base": "A", "latitud": 0.0, "longitud": 0.0, "orden": 1},
         {"num_tienda": 2, "nombre_base": "B", "latitud": 0.0, "longitud": 10.0, "orden": 2},
@@ -404,6 +420,11 @@ def test_integrar_paradas_usa_calcular_distancias_km_si_se_provee():
     mayoristas = [{"id_cliente": 1, "poblacion": "X", "latitud": 0.0, "longitud": 1.0, "peso_kg": 5.0}]
 
     def fake_distancias(origen, destinos):
+        if origen == (MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT):
+            # Precomputo matriz->paradas: no disponible en esta prueba, que
+            # busca aislar el efecto de la distancia real LOCAL (no la
+            # orden por matriz) -- cae a _insertar_pos_proxima.
+            return None
         # destinos = [depot, sucursal A, sucursal B]. Depot lejos (no debe
         # ganar), y se invierte la linea recta entre A/B: gana B.
         return [1000.0, 500.0, 5.0]

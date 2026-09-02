@@ -156,6 +156,21 @@ def _pos_por_distancia_depot(depot_distancias_route: "list | None",
     (~20km). Aquí se compara distancia-a-matriz contra distancia-a-matriz,
     no contra distancia local.
 
+    No toda ruta sale de la matriz en orden CRECIENTE -- bug real
+    2026-09-02: la ruta de martes de T20 visita Tetela (65.9km de la
+    matriz), Vicente Camalote (59.3km) y Acatlán de Pérez Figueroa
+    (51.9km) en orden DECRECIENTE. El mayorista AA1881_CASA PEÑA está a
+    0.17km de Acatlán (prácticamente la misma parada) pero, por comparar
+    contra las tres paradas asumiendo siempre orden creciente, ninguna
+    tenía distancia-a-matriz <= la suya (51.75km, incluso menor que la de
+    Acatlán) y el bloque se insertaba en pos=0 -- ANTES de Tetela, en el
+    extremo opuesto de la ruta a donde en realidad pertenece. Se detecta
+    la tendencia real de `depot_distancias_route` (creciente o decreciente,
+    comparando su primer y último valor con dato) y se compara con el
+    operador correspondiente (`<=` si crece, `>=` si decrece) para que el
+    bloque quede del lado correcto sea cual sea el sentido real de esta
+    ruta en particular.
+
     Devuelve None si `distancia_depot_nuevo` o `depot_distancias_route` no
     están disponibles -- el llamador debe caer a _insertar_pos_proxima.
 
@@ -163,10 +178,18 @@ def _pos_por_distancia_depot(depot_distancias_route: "list | None",
     """
     if distancia_depot_nuevo is None or depot_distancias_route is None:
         return None
+    validos = [d for d in depot_distancias_route if d is not None]
+    descendente = len(validos) >= 2 and validos[-1] < validos[0]
     pos = 0
     for i, d in enumerate(depot_distancias_route):
-        if d is not None and d <= distancia_depot_nuevo:
-            pos = i + 1
+        if d is None:
+            continue
+        if descendente:
+            if d >= distancia_depot_nuevo:
+                pos = i + 1
+        else:
+            if d <= distancia_depot_nuevo:
+                pos = i + 1
     return pos
 
 
