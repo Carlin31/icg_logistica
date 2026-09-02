@@ -249,6 +249,46 @@ def test_pos_por_distancia_depot_detecta_ruta_decreciente():
     assert _pos_por_distancia_depot(depot_distancias_route, 51.75) == 3
 
 
+def test_insertar_mayoristas_en_bloques_punto_local_gana_a_distancia_matriz_ruidosa():
+    # Bug real 2026-09-02 (T20 jueves): BB4067_ABARROTES EL GUERO esta a
+    # 0.31km de Tlacojalpan por carretera (practicamente la misma parada),
+    # pero su distancia real A LA MATRIZ (162.6km) resulto ~1.5km MAYOR que
+    # la de Tlacojalpan (161.1km, la parada mas lejana de una ruta con forma
+    # de "bulto": Chacaltianguis 147/Tlacojalpan 161/Otatitlan 143/Papaloapan
+    # 138 -- ni creciente ni decreciente). Esa diferencia de ~1.5km sobre
+    # magnitudes de ~150km es ruido de snapping de OSRM a la red vial, no
+    # una senal real de que el mayorista va mas lejos que TODA la ruta.
+    # _pos_por_distancia_depot, al no hallar ninguna parada con
+    # distancia-a-matriz >= la del bloque, lo mandaba a pos=0 (antes de TODA
+    # la ruta) en vez de junto a Tlacojalpan. Fix: cuando la distancia LOCAL
+    # a una parada ya puesta es minuscula (< MISMO_PUNTO_KM), esa senal gana
+    # sobre la distancia a la matriz.
+    from logic.mayoristas_logic import _insertar_mayoristas_en_bloques
+    depot = (0.0, 0.0)
+    paradas = [
+        {"tipo": "sucursal", "num_tienda": 1, "latitud": 0.0, "longitud": 5.0},
+        {"tipo": "sucursal", "num_tienda": 2, "latitud": 0.0, "longitud": 9.0},
+    ]
+    bloque = [{"id_cliente": 1, "poblacion": "TLACOJALPAN", "latitud": 0.0, "longitud": 9.001}]
+
+    def fake_distancias(origen, destinos):
+        if origen == depot:
+            # Precomputo inicial: A muy lejos (200), B mas cerca (150) --
+            # tendencia decreciente.
+            assert destinos == [(0.0, 5.0), (0.0, 9.0)]
+            return [200.0, 150.0]
+        # Por bloque: ancla -> [depot, A, B]. El bloque mide 205 de la
+        # matriz (MAS que A, el mas lejano) pero esta a 0.11km de B.
+        assert destinos == [depot, (0.0, 5.0), (0.0, 9.0)]
+        return [205.0, 50.0, 0.11]
+
+    _insertar_mayoristas_en_bloques(
+        paradas, bloque, lambda m: {"tipo": "mayorista", "id_cliente": m["id_cliente"]},
+        calcular_distancias_km=fake_distancias, depot=depot,
+    )
+    assert [p["tipo"] for p in paradas] == ["sucursal", "sucursal", "mayorista"]
+
+
 def test_insertar_mayoristas_en_bloques_depot_ordena_por_distancia_real_a_la_matriz():
     # Reproduccion del bug real: la sucursal "Jalapa de Diaz 2" mide 209.3km
     # de la matriz por carretera; el bloque de San Lucas Ojitlan solo

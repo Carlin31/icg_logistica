@@ -34,6 +34,12 @@ MATRIZ_LON_DEFAULT = -96.9491574270346
 # False = comportamiento anterior (expulsa al más pesado).
 MAYORISTAS_GEOGRAFICO = True
 
+# Umbral (km, distancia real por carretera) bajo el cual un bloque se
+# considera "prácticamente la misma parada" que una ya puesta -- por debajo
+# de esto, la distancia LOCAL gana sobre la distancia a la matriz en
+# _insertar_mayoristas_en_bloques (ver bug real 2026-09-02, T20 jueves).
+MISMO_PUNTO_KM = 1.0
+
 
 def _id_valido(doc_id: str) -> "str | None":
     try:
@@ -371,7 +377,25 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
                 else:
                     distancias_km = distancias
 
-        pos = _pos_por_distancia_depot(depot_distancias, distancia_depot_km)
+        # Bug real 2026-09-02 (T20 jueves): BB4067_ABARROTES EL GUERO está a
+        # 0.31km de Tlacojalpan por carretera, pero su distancia A LA MATRIZ
+        # (162.6km) resultó ~1.5km MAYOR que la de Tlacojalpan (161.1km) --
+        # una diferencia menor que el ruido normal de snapping de OSRM a la
+        # red vial, no una señal real de que el bloque va más lejos que TODA
+        # la ruta. _pos_por_distancia_depot, al no hallar ninguna parada con
+        # distancia-a-matriz >= la del bloque, lo mandó a pos=0 (antes de
+        # TODA la ruta) en vez de junto a Tlacojalpan. Cuando la distancia
+        # LOCAL a una parada ya puesta es minúscula (prácticamente el mismo
+        # punto), esa señal es muchísimo más confiable que comparar
+        # magnitudes de ~150km entre sí -- gana sobre la distancia a la
+        # matriz, que ni siquiera se consulta en ese caso.
+        pos = None
+        if distancias_km is not None:
+            validas = [d for d in distancias_km if d is not None]
+            if validas and min(validas) < MISMO_PUNTO_KM:
+                pos = _insertar_pos_proxima(paradas, ancla, distancias_km=distancias_km)
+        if pos is None:
+            pos = _pos_por_distancia_depot(depot_distancias, distancia_depot_km)
         if pos is None:
             pos = _insertar_pos_proxima(paradas, ancla, distancias_km=distancias_km)
 
