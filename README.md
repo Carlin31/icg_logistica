@@ -270,6 +270,23 @@ por `confianza`** — le da la misma autoridad a una zona ALTA que a una BAJA
 (`<3` semanas o núcleo `<0.60`). Restaurarlo tal cual mueve 30 clientes de
 ruta; con filtro ALTA+MEDIA, 12; sólo ALTA, 1.
 
+**Pin de asignación de mayoristas:** `logic/grupo_fijo_mayoristas.py` (tabla
+`grupo_fijo_mayoristas`, creada por `scripts/crear_grupo_fijo_mayoristas.py` y
+cargada con `scripts/cargar_grupo_fijo_mayoristas.py` desde
+`datos/grupo_fijo_mayoristas.csv`) fija que un mayorista viaje con la ruta de
+un grupo concreto de la plantilla, sin importar cuál le quede más cerca esa
+semana. Es la alternativa segura a reactivar la capa de zona: **no toca**
+`plantilla_poblacion_zona`, `plantilla_zona_mayorista` ni los centroides de
+`centroides_desde_clientes()`, así que no puede cambiarle la ruta a ningún
+cliente que no esté en la tabla. Contrato todo-o-nada: el pin sólo manda si el
+grupo fijado tiene ruta esa semana (en el ConVRP se acepta únicamente la vía
+`NUCLEO` del resolver, y la fila de detalle queda marcada `via_destino =
+GRUPO_FIJO`); si ese grupo no viaja, el pin calla. Está conectado en los dos
+caminos que asignan: `enganchar_mayoristas_por_zona()` (ConVRP, el que corre
+de verdad cada semana) y `calcular_distribucion_mayoristas()`. No interviene
+en la resolución de sobrecupo: si la ruta se pasa de capacidad, el mayorista
+fijado puede ser reubicado como cualquier otro.
+
 El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
 `logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
 comportamiento es idéntico al motor de afinidad actual.

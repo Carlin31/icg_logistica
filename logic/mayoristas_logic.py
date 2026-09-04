@@ -23,6 +23,8 @@ from sqlalchemy import select, insert, delete
 from config import Config, es_semana_canonica
 from db import get_db, get_table
 from logic.ancla_mayoristas import obtener_anclas_mayoristas, posicion_ancla
+from logic.grupo_fijo_mayoristas import (obtener_grupo_fijo, rid_por_grupo,
+                                         ruta_fija, grupo_de_num_tienda_vigente)
 from logic.vrp_logic import capacidad_efectiva_kg
 
 OSRM_TABLE_TIMEOUT = 3  # local: falla rapido si no hay servidor, nunca bloquea la generacion de rutas
@@ -1197,10 +1199,19 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
     depot = _leer_depot(db) if calcular_distancias_km is not None else None
     anclas = obtener_anclas_mayoristas(db)
 
+    # Pines de asignacion cliente -> grupo (ver logic/grupo_fijo_mayoristas.py).
+    # Van ANTES de la zona y de la geografia, pero solo aplican al cliente
+    # fijado: no alteran el destino de ningun otro.
+    grupo_fijo = obtener_grupo_fijo(db)
+    rid_de_grupo = (rid_por_grupo(rutas_sucursales, grupo_de_num_tienda_vigente())
+                    if grupo_fijo else {})
+
     mayoristas_por_ruta: dict = {rid: [] for rid in rutas_index}
     sin_asignar: list = []
     for m in mayoristas:
-        ruta_id = _seleccionar_ruta_por_zona(m, cache_zonas) or _seleccionar_ruta(m, rutas_sucursales)
+        ruta_id = (ruta_fija(m, grupo_fijo, rid_de_grupo)
+                   or _seleccionar_ruta_por_zona(m, cache_zonas)
+                   or _seleccionar_ruta(m, rutas_sucursales))
         if not ruta_id:
             sin_asignar.append(dict(m))
             continue

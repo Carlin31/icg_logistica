@@ -232,6 +232,7 @@ def enganchar_mayoristas_por_zona(groups: dict, mayoristas: list, coords_rutas: 
     """
     from logic.enganche_zona import (resolver_zona_cliente, resolver_destino_enganche,
                                      centroides_desde_clientes)
+    from logic.grupo_fijo_mayoristas import obtener_grupo_fijo, _int as _int_cliente
     db = get_db()
     tz = get_table("plantilla_zona_mayorista")
     zonas = {str(r["zona"]): dict(r) for r in
@@ -250,6 +251,12 @@ def enganchar_mayoristas_por_zona(groups: dict, mayoristas: list, coords_rutas: 
     if coords_rutas is None:
         coords_rutas = {}
 
+    # Pines de asignacion (ver logic/grupo_fijo_mayoristas.py). Se leen aqui,
+    # NO se tocan `hist` ni `centroides`: un pin no puede cambiarle la ruta a
+    # ningun cliente que no este en la tabla. Ver el bug del 2026-09-04, en
+    # que activar una sola zona si se la cambio a 37 clientes ajenos.
+    grupo_fijo = obtener_grupo_fijo(db)
+
     por_ruta: dict = {}
     detalle: list = []
     for may in sorted(mayoristas, key=lambda m: str(m.get("id_cliente"))):
@@ -267,6 +274,21 @@ def enganchar_mayoristas_por_zona(groups: dict, mayoristas: list, coords_rutas: 
         d = resolver_destino_enganche(nuc, otros, rutas_por_grupo,
                                       may.get("latitud"), may.get("longitud"),
                                       coords_rutas)
+
+        # El pin manda, pero solo si el grupo fijado TIENE ruta esta semana:
+        # se acepta unicamente la via NUCLEO del resolver. Si ese grupo no
+        # viaja, el pin calla y el cliente sigue el camino normal -- nunca se
+        # le inventa un destino.
+        g_fijo = grupo_fijo.get(_int_cliente(may.get("id_cliente")))
+        if g_fijo is not None:
+            d_fijo = resolver_destino_enganche(g_fijo, [], rutas_por_grupo,
+                                               may.get("latitud"), may.get("longitud"),
+                                               coords_rutas)
+            if d_fijo.get("via") == "NUCLEO":
+                d = dict(d_fijo, via="GRUPO_FIJO",
+                         motivo=f"cliente fijado al grupo {g_fijo} "
+                                f"(grupo_fijo_mayoristas)")
+
         if d["destino"]:
             por_ruta.setdefault(d["destino"], []).append(may)
         detalle.append({
