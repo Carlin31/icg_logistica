@@ -226,6 +226,21 @@ ruta generada coincide con una regla, ese orden gana sobre el histórico y la
 geografía en `ordenar_paradas_por_historico()`; si la ruta mezcla sucursales
 ajenas a la regla, no se aplica ningún pin.
 
+**Ancla de mayoristas:** `logic/ancla_mayoristas.py` es el equivalente para
+mayoristas (tabla `ancla_mayoristas`, creada por
+`scripts/crear_ancla_mayoristas.py` y cargada vía
+`scripts/cargar_ancla_mayoristas.py` desde `datos/ancla_mayoristas.csv`):
+fija que un mayorista se visite **inmediatamente después de una sucursal
+concreta**, y gana sobre la ubicación geográfica que calcula
+`_insertar_mayoristas_en_bloques()` (distancia real a la matriz / vecino más
+cercano). Mismo contrato de todo-o-nada que el orden fijo: sólo aplica si
+todos los miembros del bloque de esa población están anclados a la misma
+sucursal y esa sucursal está en la ruta; si no, el bloque sigue el camino
+geográfico normal. Existe para decisiones de operación que contradicen a la
+geometría — p. ej. `AA1907_SUPER MAGUITO` (Paso de Boca) se visita después de
+Tlalixcoyan aunque por carretera esté más cerca de Piedras Negras (10.3 km
+vs 16.3 km) y más cerca de la matriz que Tlalixcoyan (102.8 vs 106.6 km).
+
 El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
 `logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
 comportamiento es idéntico al motor de afinidad actual.

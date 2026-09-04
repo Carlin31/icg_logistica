@@ -102,7 +102,7 @@ def test_integrar_paradas_agrupa_por_poblacion_sin_intercalar():
         {"id_cliente": i, "poblacion": pob, "latitud": 1.0, "longitud": 1.0, "peso_kg": 5.0}
         for i, pob in id_a_poblacion.items()
     ]
-    paradas = _integrar_paradas(sucursales, mayoristas)
+    paradas = _integrar_paradas(sucursales, mayoristas, anclas={})
     poblaciones = [id_a_poblacion[p["id_cliente"]] for p in paradas if p["tipo"] == "mayorista"]
     assert poblaciones in (
         ["JALAPA DE DIAZ", "JALAPA DE DIAZ", "OJITLAN", "OJITLAN"],
@@ -160,7 +160,7 @@ def test_integrar_paradas_no_parte_bloques_con_datos_reales_jalapa_ojitlan():
         for id_cl, pob, lat, lon in datos
     ]
 
-    paradas = _integrar_paradas(sucursales, mayoristas)
+    paradas = _integrar_paradas(sucursales, mayoristas, anclas={})
     poblaciones = [id_a_poblacion[p["id_cliente"]] for p in paradas if p["tipo"] == "mayorista"]
 
     # Cada poblacion debe aparecer como un solo tramo contiguo (no partida
@@ -469,7 +469,7 @@ def test_integrar_paradas_usa_calcular_distancias_km_si_se_provee():
         # ganar), y se invierte la linea recta entre A/B: gana B.
         return [1000.0, 500.0, 5.0]
 
-    paradas = _integrar_paradas(sucursales, mayoristas, calcular_distancias_km=fake_distancias)
+    paradas = _integrar_paradas(sucursales, mayoristas, calcular_distancias_km=fake_distancias, anclas={})
     orden = [(p["tipo"], p.get("num_tienda") or p.get("id_cliente")) for p in paradas]
     assert orden == [("sucursal", 1), ("sucursal", 2), ("mayorista", 1)]
 
@@ -495,7 +495,7 @@ def test_integrar_paradas_bloque_mas_cerca_del_depot_va_antes_de_la_primera_sucu
 
     paradas = _integrar_paradas(
         sucursales, mayoristas, depot_lat=0.0, depot_lon=0.0,
-        calcular_distancias_km=fake_distancias,
+        calcular_distancias_km=fake_distancias, anclas={},
     )
     assert [p["tipo"] for p in paradas] == ["mayorista", "sucursal"]
 

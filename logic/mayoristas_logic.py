@@ -22,6 +22,7 @@ from sqlalchemy import select, insert, delete
 
 from config import Config, es_semana_canonica
 from db import get_db, get_table
+from logic.ancla_mayoristas import obtener_anclas_mayoristas, posicion_ancla
 from logic.vrp_logic import capacidad_efectiva_kg
 
 OSRM_TABLE_TIMEOUT = 3  # local: falla rapido si no hay servidor, nunca bloquea la generacion de rutas
@@ -279,7 +280,8 @@ def _distancias_carretera_km(origen: tuple, destinos: list) -> "list | None":
 
 
 def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, construir_nodo,
-                                     calcular_distancias_km=None, depot: "tuple | None" = None) -> None:
+                                     calcular_distancias_km=None, depot: "tuple | None" = None,
+                                     anclas: "dict | None" = None) -> None:
     """
     Inserta `mayoristas_ordenados` (YA agrupados por poblacion, p. ej. via
     _agrupar_por_poblacion_y_ordenar, o por venir ordenados por el `orden`
@@ -320,6 +322,17 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
     cae a _insertar_pos_proxima (vecino más cercano) -- nunca bloquea la
     inserción por un problema de OSRM.
 
+    `anclas`, si se da, es {id_cliente: num_tienda} (ver
+    logic/ancla_mayoristas.py): un bloque cuyos miembros esten TODOS
+    anclados a la MISMA sucursal, y esa sucursal este en la ruta, se
+    inserta inmediatamente despues de ella y no se consulta ninguna
+    distancia para el -- el ancla es una decision de operacion que gana
+    sobre la geometria (caso real 2026-09-04: AA1907_SUPER MAGUITO va
+    despues de Tlalixcoyan aunque por carretera este mas cerca de Piedras
+    Negras). Su hueco en `depot_distancias` queda en None: no se midio, y
+    _pos_por_distancia_depot ya ignora los None al ubicar los bloques
+    siguientes.
+
     `construir_nodo(m)` arma el dict final a insertar para un mayorista
     `m` -- cada llamador ya tiene su propio formato de nodo, este helper
     no lo impone. Mayoristas sin poblacion (bloques de 1, ver
@@ -348,6 +361,16 @@ def _insertar_mayoristas_en_bloques(paradas: list, mayoristas_ordenados: list, c
             while j < n and (mayoristas_ordenados[j].get("poblacion") or "").strip() == pob:
                 j += 1
         bloque = mayoristas_ordenados[i:j]
+
+        # El ancla (decision de operacion) gana sobre la geometria y evita
+        # incluso medir: si aplica, ya sabemos donde va el bloque.
+        pos_anclada = posicion_ancla(paradas, bloque, anclas)
+        if pos_anclada is not None:
+            paradas[pos_anclada:pos_anclada] = [construir_nodo(m) for m in bloque]
+            if depot_distancias is not None:
+                depot_distancias[pos_anclada:pos_anclada] = [None] * len(bloque)
+            i = j
+            continue
 
         lats = [v for v in (_to_float(m.get("latitud")) for m in bloque) if v is not None]
         lons = [v for v in (_to_float(m.get("longitud")) for m in bloque) if v is not None]
@@ -997,7 +1020,7 @@ def _persistir_historico_mayoristas(logistica_id: str, rutas_info: dict, mayoris
 
 def _integrar_paradas(sucursales: list, mayoristas: list,
                       depot_lat: float = None, depot_lon: float = None,
-                      calcular_distancias_km=None) -> list:
+                      calcular_distancias_km=None, anclas: "dict | None" = None) -> list:
     """
     Combina sucursales y mayoristas en una secuencia unificada ordenada por proximidad.
 
@@ -1048,8 +1071,11 @@ def _integrar_paradas(sucursales: list, mayoristas: list,
     paradas = list(sucs_nodos)
     depot = (depot_lat, depot_lon) if depot_lat is not None and depot_lon is not None \
         else (MATRIZ_LAT_DEFAULT, MATRIZ_LON_DEFAULT)
+    if anclas is None:
+        anclas = obtener_anclas_mayoristas()
     _insertar_mayoristas_en_bloques(paradas, mayoristas_ordenados, _nodo_mayorista,
-                                     calcular_distancias_km=calcular_distancias_km, depot=depot)
+                                     calcular_distancias_km=calcular_distancias_km, depot=depot,
+                                     anclas=anclas)
 
     for m in mayoristas_sin:
         paradas.append({
@@ -1169,6 +1195,7 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
     historico_orden = _cargar_historico_mayoristas(str(logistica_id))
     cache_zonas = _construir_cache_zonas(db, rutas_sucursales)
     depot = _leer_depot(db) if calcular_distancias_km is not None else None
+    anclas = obtener_anclas_mayoristas(db)
 
     mayoristas_por_ruta: dict = {rid: [] for rid in rutas_index}
     sin_asignar: list = []
@@ -1240,7 +1267,8 @@ def calcular_distribucion_mayoristas(logistica_id: str, rutas: "list | None" = N
             }
 
         _insertar_mayoristas_en_bloques(paradas, mays, _nodo_mayorista,
-                                         calcular_distancias_km=calcular_distancias_km, depot=depot)
+                                         calcular_distancias_km=calcular_distancias_km, depot=depot,
+                                         anclas=anclas)
 
         # Asignar orden secuencial a la lista entrelazada
         for idx, p in enumerate(paradas, start=1):
@@ -1403,6 +1431,7 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list,
     if not filas:
         return None
     depot = _leer_depot(db) if calcular_distancias_km is not None else None
+    anclas = obtener_anclas_mayoristas(db)
 
     ids = {f["id_cliente"] for f in filas}
     coords_may = _leer_coords_mayoristas(db, ids)
@@ -1481,7 +1510,8 @@ def obtener_mayoristas_guardados(logistica_id: str, rutas: list,
             }
 
         _insertar_mayoristas_en_bloques(paradas, mayoristas_con_coords, _nodo_mayorista,
-                                         calcular_distancias_km=calcular_distancias_km, depot=depot)
+                                         calcular_distancias_km=calcular_distancias_km, depot=depot,
+                                         anclas=anclas)
 
         for idx, p in enumerate(paradas, start=1):
             p["orden"] = idx
