@@ -241,7 +241,7 @@ geometría — p. ej. `AA1907_SUPER MAGUITO` (Paso de Boca) se visita después d
 Tlalixcoyan aunque por carretera esté más cerca de Piedras Negras (10.3 km
 vs 16.3 km) y más cerca de la matriz que Tlalixcoyan (102.8 vs 106.6 km).
 
-**Enganche de mayoristas por zona — parcialmente inactivo:** la capa
+**Enganche de mayoristas por zona — INACTIVO, y es todo-o-nada:** la capa
 `plantilla_poblacion_zona` → `plantilla_zona_mayorista.grupo_nucleo` (que hace
 que un mayorista se pegue a la ruta con la que su población viaja
 históricamente, y no a la que le quede más cerca en línea recta esa semana)
@@ -251,16 +251,24 @@ cargaron sin el CSV de poblaciones, y `cargar_plantilla_desde_excel()` pone
 `plantilla_poblacion_zona` se quedó con 0 filas vigentes y ninguna zona vigente
 conserva `grupo_nucleo`. Con eso `_construir_cache_zonas()` devuelve `None`
 siempre y el 100 % de los mayoristas se engancha por geografía
-(`via_zona = FALLBACK` en todas las filas de `convrp_mayoristas`).
+(`via_zona = FALLBACK` en las 155 filas).
 
-Restaurarla entera mueve 30 clientes de ruta, varios con evidencia débil
-(`pct_nucleo` 0.35–0.73), y desharía arreglos ya validados. Por eso se
-reactivó **sólo la zona JALAPA DE DIAZ** vía
-`scripts/anclar_zona_jalapa_de_diaz.py` (núcleo grupo 7, `pct_nucleo` 1.00,
-5 semanas, confianza ALTA): sus 3 poblaciones quedan vigentes y el resto sigue
-cayendo a geografía, sin ningún otro cambio. Ojo al restaurar más zonas:
-`_construir_cache_zonas()` **no filtra por `confianza`** — le da la misma
-autoridad a una zona ALTA que a una BAJA (`<3` semanas o núcleo `<0.60`).
+**No se puede reactivar una zona sola.** `convrp_integracion.py` arma los
+centroides con `centroides_desde_clientes(clientes, hist)` — un centroide por
+zona ACTIVADA — y `enganche_zona.resolver_zona_cliente()` engancha por
+GEOGRAFIA a la zona activada más cercana dentro de `MAX_KM_ENGANCHE` (60 km).
+Con una sola zona activada, esa zona se vuelve la más cercana para media
+región: medido el 2026-09-04, activar sólo JALAPA DE DIAZ pasó a 37 clientes
+ajenos de `FALLBACK` a `GEOGRAFIA → JALAPA DE DIAZ` (p. ej. CASA PEÑA, de
+Acatlán, a 52.5 km), los amontonó a los 50 en la ruta del grupo 7 y la
+sobrecarga expulsó a los mayoristas de Jalapa reales hacia Tuxtepec, Tres
+Valles e Isla. Activar una zona es **peor** que no activar ninguna: o se
+restaura el diccionario completo o se deja apagado.
+
+Ojo también al restaurarlo completo: `_construir_cache_zonas()` **no filtra
+por `confianza`** — le da la misma autoridad a una zona ALTA que a una BAJA
+(`<3` semanas o núcleo `<0.60`). Restaurarlo tal cual mueve 30 clientes de
+ruta; con filtro ALTA+MEDIA, 12; sólo ALTA, 1.
 
 El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
 `logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
