@@ -12,7 +12,7 @@ from datetime import datetime
 
 from bson import ObjectId
 from bson.errors import InvalidId
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from reportlab.lib.pagesizes import LETTER, portrait
 from reportlab.lib import colors
@@ -96,6 +96,115 @@ def _id_valido(doc_id: str) -> "str | None":
 
 
 # ── Helpers de párrafo ────────────────────────────────────────
+class SnapshotDesactualizado(RuntimeError):
+    """
+    La Modificacion guardada asigna mayoristas a rutas distintas de las que
+    dice el motor, sin que ningun override manual lo justifique: imprimirla
+    mostraria rutas que el motor ya reemplazo.
+
+    Se distingue del resto de errores para que el router pueda responder 409
+    (conflicto de estado, no falla) con un mensaje accionable.
+    """
+
+
+def _snapshot_incoherente(db, oid, rutas: list) -> list:
+    """
+    Mayoristas que en la Modificacion guardada estan en una ruta distinta a la
+    que dice el motor, sin override manual que lo explique. Lista vacia = el
+    snapshot concuerda con el motor.
+
+    Por que NO se compara por fecha (era mi primer intento y no sirve): el
+    caso real medido guardo la Modificacion a las 12:00:17, DESPUES de que el
+    motor corriera a las 11:58:02 -- lo viejo no era el guardado sino la
+    CARGA de la pestana, que ocurrio antes de las 11:58 y por lo tanto trajo
+    el reparto pre-motor. Un `guardado_en < generado_en` nunca habria
+    disparado. Hay que mirar el DATO, no el reloj.
+
+    Un movimiento deliberado del planeador (quitar/agregar un mayorista de una
+    ruta) queda registrado en `asignaciones_mayoristas_overrides`, asi que esos
+    clientes se excluyen: mover a mano es legitimo y no debe bloquear el PDF.
+    Lo que se detecta es la discrepancia que NADIE pidio.
+
+    Degradacion segura: sin corrida del motor guardada, o ante cualquier fallo
+    de lectura, devuelve [] (no bloquea). El objetivo es no imprimir datos
+    viejos EN SILENCIO, no convertirse en un obstaculo nuevo.
+    """
+    from logic.mayoristas_logic import _vrpaf_id
+    try:
+        t_may = get_table("convrp_mayoristas")
+        filas = list(db.execute(select(t_may.c.unidad, t_may.c.dia, t_may.c.id_cliente,
+                                       t_may.c.nombre)
+                                .where(t_may.c.logistica_id == str(oid))).mappings())
+        if not filas:
+            return []          # el motor no dejo corrida: nada contra que comparar
+        segun_motor = {int(f["id_cliente"]): _vrpaf_id(f["unidad"], f["dia"])
+                       for f in filas if f["id_cliente"] is not None}
+        nombres = {int(f["id_cliente"]): f["nombre"] for f in filas
+                   if f["id_cliente"] is not None}
+
+        # Un override puede venir por id_cliente (int, legacy) o por documento
+        # (str). Se resuelven las dos formas: perder un override haria pasar
+        # por "incoherente" un movimiento que el planeador si pidio.
+        doc_a_id = _id_cliente_por_documento(db, oid)
+        t_ov = get_table("asignaciones_mayoristas_overrides")
+        movidos_a_mano = set()
+        for r in db.execute(select(t_ov.c.clave).where(t_ov.c.logistica_id == oid)):
+            clave = str(r.clave)
+            if clave.lstrip("-").isdigit():
+                movidos_a_mano.add(int(clave))
+            elif clave in doc_a_id:
+                movidos_a_mano.add(doc_a_id[clave])
+    except Exception as e:  # noqa: BLE001
+        print(f"[pdf] no se pudo verificar la coherencia del snapshot: "
+              f"{type(e).__name__}: {e}")
+        return []
+
+    discrepancias = []
+    for ruta in rutas or []:
+        ruta_key = ruta.get("id")
+        for m in (ruta.get("mayoristas") or []):
+            try:
+                idc = int(m.get("id_cliente"))
+            except (TypeError, ValueError):
+                continue
+            esperado = segun_motor.get(idc)
+            if esperado is None or esperado == ruta_key:
+                continue
+            if idc in movidos_a_mano:
+                continue       # el planeador lo movio a proposito
+            discrepancias.append({
+                "id_cliente": idc,
+                "nombre": m.get("nombre") or nombres.get(idc) or "",
+                "en_snapshot": ruta_key,
+                "segun_motor": esperado,
+            })
+    return discrepancias
+
+
+def _id_cliente_por_documento(db, oid) -> dict:
+    """{documento: id_cliente} desde `extraccion.mayoristas`; {} si no se puede."""
+    try:
+        tabla = get_table("extraccion")
+        fila = db.execute(
+            select(tabla.c.mayoristas).where(tabla.c.logistica_id == oid)).mappings().first()
+        if not (fila and fila["mayoristas"]):
+            return {}
+        salida = {}
+        for m in json.loads(fila["mayoristas"]) or []:
+            doc = m.get("documento")
+            codigo = m.get("codigo") or m.get("id_cliente")
+            if not doc or codigo is None:
+                continue
+            try:
+                salida[str(doc)] = int(str(codigo).split(".")[0])
+            except (TypeError, ValueError):
+                continue
+        return salida
+    except Exception as e:  # noqa: BLE001
+        print(f"[pdf] no se pudo leer documento->id_cliente: {type(e).__name__}: {e}")
+        return {}
+
+
 def _p(txt, sz=SZ_DAT, bold=False, color=colors.black, align=TA_LEFT, italic=False):
     fn = ("Helvetica-Bold" if bold else
           "Helvetica-Oblique" if italic else "Helvetica")
@@ -718,6 +827,23 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     if not rutas:
         mod_doc = obtener_modificacion_previa(oid)
         rutas = mod_doc.get("rutas_confirmadas", []) if mod_doc else []
+        # El snapshot manda sobre el motor, asi que un snapshot viejo imprime
+        # rutas que el motor ya reemplazo. Antes esto pasaba callado; ahora se
+        # corta con un mensaje que dice exactamente que hacer.
+        if rutas:
+            malos = _snapshot_incoherente(db, oid, rutas)
+            if malos:
+                detalle = "; ".join(
+                    f"{m['nombre']} (cliente {m['id_cliente']}) está en "
+                    f"{m['en_snapshot']} y el motor lo puso en {m['segun_motor']}"
+                    for m in malos[:5])
+                extra = f" y {len(malos) - 5} más" if len(malos) > 5 else ""
+                raise SnapshotDesactualizado(
+                    f"La Modificación guardada no coincide con la última corrida del "
+                    f"motor: {detalle}{extra}. Nadie pidió esos cambios, así que el "
+                    f"snapshot quedó viejo (la pestaña se cargó antes de que corriera "
+                    f"el motor). Abre Modificación, recarga la página (Ctrl+F5) y "
+                    f"vuelve a guardar antes de generar el PDF.")
 
     # ── 2. Fallback a asignaciones si no hay modificaciones ───────
     if not rutas:

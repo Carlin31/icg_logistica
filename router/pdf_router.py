@@ -12,7 +12,7 @@ Endpoints:
   POST /cancelar-autorizacion   → Retira la autorización (borra entregas asociadas)
 """
 from flask import Blueprint, render_template, send_file, jsonify, session, redirect, url_for
-from logic.pdf_logic import generar_pdf
+from logic.pdf_logic import generar_pdf, SnapshotDesactualizado
 from logic.conductor_logic import (
     obtener_estado_autorizacion,
     autorizar_rutas,
@@ -73,6 +73,10 @@ def generar():
 
     try:
         ruta_archivo = generar_pdf(logistica)
+    except SnapshotDesactualizado as e:
+        # 409: no es una falla, es un conflicto de estado que el usuario
+        # resuelve recargando Modificación y volviendo a guardar.
+        return jsonify({"status": "error", "mensaje": str(e)}), 409
     except FileNotFoundError as e:
         return jsonify({"status": "error", "mensaje": str(e)}), 404
     except Exception as e:

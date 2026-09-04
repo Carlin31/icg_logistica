@@ -287,6 +287,20 @@ de verdad cada semana) y `calcular_distribucion_mayoristas()`. No interviene
 en la resolución de sobrecupo: si la ruta se pasa de capacidad, el mayorista
 fijado puede ser reubicado como cualquier otro.
 
+**Guardia de snapshot en el PDF:** `generar_pdf()` prefiere la Modificación
+guardada sobre la asignación. Si la pestaña de Modificación se carga **antes**
+de que el motor termine y se guarda después, el snapshot conserva el reparto
+pre-motor y el PDF lo imprimía en silencio — la pantalla mostraba lo correcto y
+el PDF lo viejo (ocurrió tres veces entre el 2026-08-28 y el 2026-09-04). Ahora
+`_snapshot_incoherente()` compara a qué ruta quedó cada mayorista en el snapshot
+contra `convrp_mayoristas`, y si hay diferencias que ningún override manual
+justifica lanza `SnapshotDesactualizado`; el router responde **409** con el
+cliente y las dos rutas implicadas. Ojo: **no** sirve comparar `guardado_en <
+generado_en` — en el caso real la Modificación se guardó *después* del motor; lo
+viejo era la carga de la pestaña, no el guardado. Se compara el dato, no el
+reloj. Degrada seguro: sin corrida del motor guardada, o ante cualquier fallo de
+lectura, no bloquea.
+
 El motor ConVRP vive tras el interruptor `CONVRP_ACTIVO` de
 `logic/historico_logic.py`, **apagado por omisión**: con el flag en `False` el
 comportamiento es idéntico al motor de afinidad actual.
