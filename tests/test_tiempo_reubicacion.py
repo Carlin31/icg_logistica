@@ -753,3 +753,133 @@ def test_regresion_amatitlan_prefiere_vehiculo_dominante_sobre_uno_de_una_semana
     # cumple cupo+tiempo, se elige ahi, no en T 25.
     assert 100 in [s["num_tienda"] for s in f350_1_jueves["sucursales"]]
     assert [s["num_tienda"] for s in t25_jueves["sucursales"]] == []
+
+
+# ── Pin de asignacion cliente -> grupo (grupo_fijo_mayoristas) ────────
+#
+# Caso real 2026-09-07, logistica del 24 al 28 de agosto: la ruta T 17_1 /
+# JUEVES (Jalapa de Diaz) cerraba a las 20:39 contra un limite de 20:00, y
+# Fase B "resolvia" el desborde mandando su ULTIMA parada -- BB4145 FARMA
+# PRONTO JALAPA (cliente 555), fijado al grupo 7 por
+# `grupo_fijo_mayoristas` -- a T 23 / JUEVES, una ruta de Tuxtepec que no
+# lleva ninguna sucursal del grupo 7 y que pasa a 43 km del cliente. El pin
+# se aplicaba al asignar y Fase B lo deshacia al generar el PDF, asi que el
+# error solo se veia en el PDF y volvia despues de cada correccion.
+
+def _grupos_pin():
+    """Grupo 1 = sucursal 1. DEST esta en unidades_afines pero NO lleva
+    ninguna sucursal del grupo 1: es el destino que el pin debe vetar."""
+    return [{"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [1],
+             "unidades_afines": "DEST:3", "dias_admisibles": ["MARTES"],
+             "dia_preferido": "MARTES"}]
+
+
+def _origen_con_mayorista_tarde():
+    return {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 1, "nombre": "Ancla", "orden": 1, "peso_kg": 50,
+             "latitud": 0.49, "longitud": 0.49},
+        ],
+        "mayoristas": [
+            {"id_cliente": 7, "documento": "BB1", "nombre": "Mayorista lejano",
+             "orden": 2, "peso_kg": 30, "latitud": 0.5, "longitud": 0.5},
+        ],
+    }
+
+
+def test_pin_deja_al_mayorista_donde_viaja_su_grupo_fijado(monkeypatch):
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    origen = _origen_con_mayorista_tarde()
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    # Cliente 7 fijado al grupo 1, que viaja en ORIGEN: no se mueve aunque
+    # llegue fuera de horario -- se queda marcado, como cualquier parada sin
+    # destino valido.
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), _grupos_pin(),
+                                      consultar_osrm_fn=None, grupo_fijo={7: 1})
+
+    assert movio is False
+    assert [m["id_cliente"] for m in origen["mayoristas"]] == [7]
+    assert destino["mayoristas"] == []
+
+
+def test_sin_pin_el_mayorista_se_sigue_moviendo(monkeypatch):
+    # Guarda de regresion: el pin solo puede tocar a los clientes que estan
+    # en la tabla. Otro cliente fijado no debe cambiarle el destino a este.
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    origen = _origen_con_mayorista_tarde()
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), _grupos_pin(),
+                                      consultar_osrm_fn=None, grupo_fijo={999: 1})
+
+    assert movio is True
+    assert [m["id_cliente"] for m in destino["mayoristas"]] == [7]
+
+
+def test_pin_calla_si_el_grupo_fijado_no_viaja_esta_semana(monkeypatch):
+    # Contrato todo-o-nada, igual que `grupo_fijo_mayoristas.ruta_fija`: si
+    # el grupo fijado no tiene ruta, el cliente sigue el camino normal --
+    # nunca se le inventa un destino ni se le congela por un pin inaplicable.
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    origen = _origen_con_mayorista_tarde()
+    destino = _ruta_vacia("DEST", "martes", "DEST")
+    rutas = [origen, destino]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), _grupos_pin(),
+                                      consultar_osrm_fn=None, grupo_fijo={7: 99})
+
+    assert movio is True
+    assert [m["id_cliente"] for m in destino["mayoristas"]] == [7]
+
+
+def test_pin_restringe_el_destino_a_la_ruta_del_grupo_fijado(monkeypatch):
+    # El mayorista NO esta en la ruta de su grupo fijado: el pin no lo
+    # congela, lo redirige. Solo la candidata que lleva al grupo 1 es
+    # destino valido, aunque las dos esten en unidades_afines.
+    import logic.tiempo_reubicacion as tr
+    monkeypatch.setattr(tr, "TIEMPO_REUBICACION_ACTIVA", True)
+    grupos = [
+        {"grupo": 1, "rigidez": "FLEXIBLE", "sucursales": [1],
+         "unidades_afines": "SINGRUPO:5 | CONGRUPO:1", "dias_admisibles": ["MARTES"],
+         "dia_preferido": "MARTES"},
+        # El ancla geografica del mayorista en la ruta origen es la sucursal
+        # 2 (grupo 2), no la 1: por eso el mayorista arranca fuera de la
+        # ruta de su grupo fijado.
+        {"grupo": 2, "rigidez": "FLEXIBLE", "sucursales": [2],
+         "unidades_afines": "SINGRUPO:5 | CONGRUPO:1", "dias_admisibles": ["MARTES"],
+         "dia_preferido": "MARTES"},
+    ]
+    origen = {
+        "id": "ORIGEN", "dia": "martes", "vehiculo_abrev": "ORIGEN",
+        "capacidad_ton": 3.5, "peso_kg": 0, "pct_utilizacion": 0.0,
+        "sucursales": [
+            {"num_tienda": 2, "nombre": "Ancla", "orden": 1, "peso_kg": 50,
+             "latitud": 0.49, "longitud": 0.49},
+        ],
+        "mayoristas": [
+            {"id_cliente": 7, "documento": "BB1", "nombre": "Mayorista lejano",
+             "orden": 2, "peso_kg": 30, "latitud": 0.5, "longitud": 0.5},
+        ],
+    }
+    sin_grupo = _ruta_vacia("SIN", "martes", "SINGRUPO")   # dominante (5/6)
+    con_grupo = _ruta_vacia("CON", "martes", "CONGRUPO")   # minoritaria (1/6)
+    con_grupo["sucursales"] = [
+        {"num_tienda": 1, "nombre": "Del grupo 1", "orden": 1, "peso_kg": 10,
+         "latitud": 0.02, "longitud": 0.02},
+    ]
+    rutas = [origen, sin_grupo, con_grupo]
+
+    movio = resolver_fuera_de_horario(rutas, _cfg_cierre_08_30(), grupos,
+                                      consultar_osrm_fn=None, grupo_fijo={7: 1})
+
+    assert movio is True
+    assert sin_grupo["mayoristas"] == []
+    assert [m["id_cliente"] for m in con_grupo["mayoristas"]] == [7]

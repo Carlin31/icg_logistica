@@ -28,6 +28,7 @@ from logic.mayoristas_logic import (calcular_distribucion_mayoristas, _insertar_
                                      obtener_mayoristas_guardados, _distancias_carretera_km)
 from logic.modificacion_logic import obtener_modificacion_previa, guardar_modificacion
 from logic.plantilla_canonica import obtener_grupos
+from logic.grupo_fijo_mayoristas import obtener_grupo_fijo
 from logic.groq_logic import generar_nombre_poblacion
 from logic.logistica_tiempo import TIEMPO_ENTREGA_ESTRICTO
 from logic.tiempo_reubicacion import evaluar_ruta_completa, resolver_fuera_de_horario, _recalcular_peso_ruta
@@ -927,8 +928,9 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     if cfg_tiempo and not rutas_inyectadas:
         try:
             grupos = obtener_grupos()
-            movio_algo = resolver_fuera_de_horario(rutas, cfg_tiempo, grupos,
-                                                    consultar_osrm_fn=consultar_osrm)
+            movio_algo = resolver_fuera_de_horario(
+                rutas, cfg_tiempo, grupos, consultar_osrm_fn=consultar_osrm,
+                grupo_fijo=obtener_grupo_fijo(db))
             if movio_algo:
                 payload = {
                     "fecha_modificacion": (mod_doc.get("fecha_modificacion") if mod_doc else None)

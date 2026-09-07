@@ -265,6 +265,77 @@ def _rutas_candidatas_por_grupo(grupo: dict, rutas: list, ruta_origen_id) -> lis
     return candidatas
 
 
+def _num(valor) -> "int | None":
+    """Numero de grupo como int, o None. La plantilla y la tabla de pines
+    pueden traerlo como int, str o Decimal segun el driver -- comparar sin
+    normalizar hace que un pin valido no encuentre a su grupo."""
+    try:
+        return int(str(valor).split(".")[0])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
+def _lleva_grupo(ruta: dict, numero_grupo, indice_grupos: dict) -> bool:
+    """True si `ruta` visita alguna sucursal del grupo `numero_grupo`."""
+    objetivo = _num(numero_grupo)
+    if objetivo is None:
+        return False
+    for s in ruta.get("sucursales", []):
+        nt = _num(s.get("num_tienda"))
+        if nt is None:
+            continue
+        g = indice_grupos.get(nt)
+        if g is not None and _num(g.get("grupo")) == objetivo:
+            return True
+    return False
+
+
+def _candidatas_segun_pin(candidatas: list, rutas: list, ruta_origen: dict,
+                          parada: dict, tipo: str, grupo_fijo: dict,
+                          indice_grupos: dict) -> list:
+    """
+    Recorta `candidatas` para respetar el pin de asignacion cliente -> grupo
+    de `logic/grupo_fijo_mayoristas.py` ("este cliente viaja con la ruta de
+    este grupo de la plantilla"). Devuelve:
+
+      - `candidatas` intacta si la parada no es un mayorista con pin, o si
+        el grupo fijado no viaja esta semana (mismo contrato todo-o-nada que
+        `grupo_fijo_mayoristas.ruta_fija`: sin ruta para ese grupo el pin
+        calla, no inventa ni congela un destino);
+      - `[]` si la ruta ORIGEN ya lleva al grupo fijado -- el mayorista ya
+        esta donde el pin manda y Fase B no debe sacarlo de ahi. Se queda
+        marcado FUERA DE HORARIO, igual que cualquier parada sin destino
+        valido;
+      - solo las candidatas que llevan al grupo fijado, si el mayorista
+        arranco en otra ruta -- ahi el pin no lo congela, lo redirige.
+
+    Por que hace falta (caso real 2026-09-07): sin este recorte,
+    `_grupo_para` ancla el mayorista al grupo correcto pero
+    `_rutas_candidatas_por_grupo` acepta CUALQUIER vehiculo de
+    `unidades_afines` del grupo, tenga o no una sucursal de ese grupo esta
+    semana. Asi es como BB4145 FARMA PRONTO JALAPA (fijado al grupo 7)
+    terminaba en la ruta de Tuxtepec de T 23 -- un camion que aparece una
+    sola vez en las unidades_afines del grupo 7 y que esa semana no pasaba
+    ni cerca de Jalapa de Diaz.
+    """
+    if tipo != "mayorista" or not grupo_fijo:
+        return candidatas
+    idc = _num(parada.get("id_cliente"))
+    if idc is None:
+        return candidatas
+    fijado = _num(grupo_fijo.get(idc))
+    if fijado is None:
+        return candidatas
+
+    ids_con_grupo = {r.get("id") for r in rutas
+                     if _lleva_grupo(r, fijado, indice_grupos)}
+    if not ids_con_grupo:
+        return candidatas                      # el grupo fijado no viaja
+    if ruta_origen.get("id") in ids_con_grupo:
+        return []                              # ya esta donde el pin manda
+    return [r for r in candidatas if r.get("id") in ids_con_grupo]
+
+
 def _simular_insercion_conjunto(ruta: dict, conjunto: list, tipo: str) -> dict:
     """Copia profunda de `ruta` con TODAS las paradas de `conjunto` insertadas
     y el peso recalculado — para evaluar el efecto de mover un grupo
@@ -315,7 +386,8 @@ def _menos_mala_grupo(candidatas: list, conjunto: list, tipo: str,
 
 def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
                               umbral_pct: float = UMBRAL_PCT_DESTINO,
-                              consultar_osrm_fn=None) -> bool:
+                              consultar_osrm_fn=None,
+                              grupo_fijo: "dict | None" = None) -> bool:
     """
     Reubica, mutando `rutas` in-place, toda parada FUERA DE HORARIO hacia
     otra ruta real de esta semana con respaldo histórico sólido (grupo de
@@ -333,6 +405,11 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
              pct_utilizacion, sucursales:[...], mayoristas:[...]}, ...] —
            misma forma que arma pdf_logic.generar_pdf().
     grupos: plantilla_canonica.obtener_grupos().
+    grupo_fijo: {id_cliente: numero_grupo} de `grupo_fijo_mayoristas.
+           obtener_grupo_fijo()`. Lo INYECTA quien llama, para no meter BD
+           en este modulo. Un mayorista con pin nunca sale de la ruta que
+           lleva a su grupo fijado (ver `_candidatas_segun_pin`); sin pines
+           el comportamiento es exactamente el de antes.
     """
     if not (TIEMPO_REUBICACION_ACTIVA and cfg_tiempo and cfg_tiempo.get("activo")):
         return False
@@ -360,6 +437,10 @@ def resolver_fuera_de_horario(rutas: list, cfg_tiempo: dict, grupos: list,
             conjunto = _conjunto_a_mover(grupo, ruta, parada, tipo)
             candidatas = _rutas_candidatas_por_grupo(
                 grupo, rutas, ruta.get("id"))
+            # Un mayorista con pin de grupo no se mueve fuera de la ruta de
+            # su grupo fijado, aunque el destino cumpla cupo y horario.
+            candidatas = _candidatas_segun_pin(
+                candidatas, rutas, ruta, parada, tipo, grupo_fijo, indice_grupos)
             peso_extra = sum(float(p.get("peso_kg") or 0) for p in conjunto)
 
             destino = _mejor_candidata_grupo(candidatas, conjunto, tipo, peso_extra,
