@@ -115,12 +115,26 @@ def test_regresion_orden_fijo_cosamaloapan_carrillo_amatitlan(app_ctx):
     assert aplicar_orden_fijo(miembros, orden_fijo) == [4, 27, 75, 86, 49, 100]
 
 
-def test_regresion_orden_fijo_tuxtepec_f350_2(app_ctx):
+def test_regresion_orden_fijo_zona5_tuxtepec_centro(app_ctx):
+    # Grupo 5 (Tuxtepec 1-6, "Centro"): orden real dado por los jefes de
+    # prácticas el 2026-09-14 (ver scripts/dividir_zona5_tuxtepec_dos_grupos.py).
     from db import get_db
     from logic.orden_fijo_paradas import obtener_orden_fijo
 
     orden_fijo = obtener_orden_fijo(get_db())
     if 2 not in orden_fijo:
-        pytest.skip("regla tuxtepec_f350_2 no está cargada todavía")
-    miembros = [{"sid": s} for s in [15, 54, 7, 55, 74, 31, 2]]  # orden mezclado a propósito
-    assert aplicar_orden_fijo(miembros, orden_fijo) == [2, 31, 74, 55, 7, 54, 15]
+        pytest.skip("regla zona_5 no está cargada todavía")
+    miembros = [{"sid": s} for s in [74, 2, 7, 102, 55, 31]]  # orden mezclado a propósito
+    assert aplicar_orden_fijo(miembros, orden_fijo) == [2, 31, 102, 74, 55, 7]
+
+
+def test_regresion_orden_fijo_zona25_tuxtepec_oriente(app_ctx):
+    # Grupo 25 (Tuxtepec 7-11, "Hidalgo/oriente"): mismo pedido de los jefes.
+    from db import get_db
+    from logic.orden_fijo_paradas import obtener_orden_fijo
+
+    orden_fijo = obtener_orden_fijo(get_db())
+    if 54 not in orden_fijo:
+        pytest.skip("regla zona_25 no está cargada todavía")
+    miembros = [{"sid": s} for s in [38, 15, 54, 57, 46]]  # orden mezclado a propósito
+    assert aplicar_orden_fijo(miembros, orden_fijo) == [54, 46, 15, 57, 38]

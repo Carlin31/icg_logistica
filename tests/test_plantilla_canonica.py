@@ -199,9 +199,11 @@ def test_roundtrip_lectura_bd(app_ctx):
     grupos = obtener_grupos()
     # Zona 11 (Tierra Blanca) paso de 3 grupos a 2 el 2026-08-31 (ver
     # scripts/dividir_zona11_dos_grupos.py): 28 - 1 = 27 grupos vigentes.
-    assert len(grupos) == 27
+    # Zona 5 (Tuxtepec) paso de 3 grupos a 2 el 2026-09-14 (ver
+    # scripts/dividir_zona5_tuxtepec_dos_grupos.py): 27 - 1 = 26 grupos vigentes.
+    assert len(grupos) == 26
     assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 18
-    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 9
+    assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 8
     # zona: 24 zonas de negocio distintas, todo grupo tiene una asignada
     assert len({g["zona"] for g in grupos}) == 24
     assert all(g["zona"] is not None for g in grupos)
@@ -215,16 +217,19 @@ def test_roundtrip_lectura_bd(app_ctx):
         assert len(g["sucursales"]) <= limite, \
             f"grupo {g['grupo']} (zona {g['zona']}) tiene {len(g['sucursales'])} sucursales"
     # zona 5 (Tuxtepec) y zona 11 (Tierra Blanca): confirmar que quedaron
-    # partidas en varios grupos y que sus totales son los esperados (10 y 8).
+    # partidas en varios grupos y que sus totales son los esperados (11 y 8).
     # Zona 11 paso de 3 grupos a 2 el 2026-08-31 (dividir_zona11_dos_grupos.py).
+    # Zona 5 paso de 3 grupos a 2 el 2026-09-14 (dividir_zona5_tuxtepec_dos_grupos.py);
+    # el total subio de 10 a 11 porque se agrego la sucursal 102 (18 de Marzo),
+    # que no estaba asignada a ningun grupo antes.
     por_zona = {}
     for g in grupos:
         por_zona.setdefault(g["zona"], []).append(g["grupo"])
-    assert len(por_zona[5]) == 3
+    assert len(por_zona[5]) == 2
     assert len(por_zona[11]) == 2
     total_zona5 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 5)
     total_zona11 = sum(len(g["sucursales"]) for g in grupos if g["zona"] == 11)
-    assert total_zona5 == 10
+    assert total_zona5 == 11
     assert total_zona11 == 8
     # grupo_de_sucursal round-trip sobre un miembro real
     algun = next(g for g in grupos if g["sucursales"])
