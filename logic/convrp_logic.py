@@ -554,7 +554,8 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
             def _ordenar(candidatos, af=af):
                 return sorted(
                     candidatos,
-                    key=lambda u: (_num(vehiculos_cap.get(u)),
+                    key=lambda u: (_num(vehiculos_vol.get(u)),
+                                   _num(vehiculos_cap.get(u)),
                                    -sum(_num(pedidos.get(s))
                                         for s in _sids_de_ruta(asign, u, dia)),
                                    -_num(af.get(u)), str(u)))

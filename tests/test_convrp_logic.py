@@ -1687,3 +1687,32 @@ def test_volumen_grupo_ignora_sucursales_sin_dato_de_volumen():
     a = {"miembros": [1, 2]}
     volumenes = {1: 3.0}     # sucursal 2 sin dato
     assert _volumen_grupo(a, volumenes) == 3.0
+
+
+def test_selecciona_por_volumen_aunque_el_peso_diga_lo_contrario():
+    # A tiene menos capacidad de PESO (ganaría hoy); B tiene menos capacidad
+    # de VOLUMEN (debe ganar con la nueva regla). Ambas le alcanzan al grupo
+    # en las dos dimensiones -- no es un caso de "solo una cabe".
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 400, 2: 400}          # 800 kg: cabe en A (1000) y en B (5000)
+    volumenes = {1: 4, 2: 4}            # 8 m3: cabe en A (50) y en B (10)
+    caps = {"A": 1000, "B": 5000}
+    vols = {"A": 50, "B": 10}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, volumenes, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert ("B", "LUNES") in groups, \
+        "debio elegir B (menor volumen), no A (menor peso, criterio viejo)"
+    assert ("A", "LUNES") not in groups
+
+
+def test_empate_en_volumen_desempata_por_peso():
+    # A y B EMPATADOS en volumen (30): el peso sigue siendo el desempate.
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None)]
+    pedidos = {1: 400, 2: 400}          # 800 kg
+    volumenes = {1: 10, 2: 10}          # 20 m3: cabe en ambas (30, 30)
+    caps = {"A": 1000, "B": 5000}
+    vols = {"A": 30, "B": 30}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, volumenes, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert ("A", "LUNES") in groups, \
+        "con volumen empatado, debe ganar el menor peso (A)"
