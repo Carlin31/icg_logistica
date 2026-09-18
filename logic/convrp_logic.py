@@ -9,22 +9,26 @@ reoptimiza donde la demanda de la semana no cabe.
 Modelo (decisiones fijas del negocio):
   - El GRUPO son las sucursales del grupo canónico CON PEDIDO esa semana, no el
     roster completo: un rígido de 6 con demanda en 4 viaja de 4.
-  - La UNIDAD se elige por PESO: cada grupo, sin excepción y sin preferencia,
-    toma entre las unidades no excluidas y compatibles la de MENOR capacidad
-    que le alcanza, desempatando por CONSOLIDACIÓN (la que ya lleva carga ese
-    día) y luego por nombre. `unidad_ref` / `unidades_afines` / `unidad_forzada`
-    son vestigiales: se guardan y se propagan, pero ya no se leen para decidir
-    unidad. `unidades_excluidas` es la única prohibición dura -- ninguna
-    palanca puede violarla, ni siquiera en el último recurso.
+  - La UNIDAD se elige por VOLUMEN, luego por PESO (decisión de negocio
+    2026-09-18: con productos livianos pero voluminosos, el peso dejó de ser
+    buen indicador de si algo cabe): cada grupo, sin excepción y sin
+    preferencia, toma entre las unidades no excluidas y compatibles la de
+    MENOR volumen que le alcanza, desempatando por MENOR PESO cuando el
+    volumen empata, luego por CONSOLIDACIÓN (la que ya lleva carga ese día) y
+    luego por nombre. El peso sigue siendo límite duro -- nunca se manda a un
+    grupo más peso del que el camión aguanta. `unidad_ref` / `unidades_afines`
+    / `unidad_forzada` son vestigiales: se guardan y se propagan, pero ya no
+    se leen para decidir unidad. `unidades_excluidas` es la única prohibición
+    dura -- ninguna palanca puede violarla, ni siquiera en el último recurso.
   - El DÍA es atributo del GRUPO (se mueve en bloque completo, nunca parcial) y
     sólo dentro de sus `dias_admisibles`; fuera de ese conjunto no se mueve.
   - Rigidez de COMPOSICIÓN y flexibilidad de DÍA son dimensiones independientes:
     un rígido puede cambiar de día si su conjunto admisible lo permite.
 
 Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
-    1) asignación de UNIDAD por peso dentro del mismo día (sin preferencia
-       que mover: cada grupo elige directo la unidad no excluida que le
-       alcanza, ver arriba)
+    1) asignación de UNIDAD por volumen (luego peso) dentro del mismo día
+       (sin preferencia que mover: cada grupo elige directo la unidad no
+       excluida que le alcanza, ver arriba)
     2) mover de DÍA dentro de los admisibles
     3) PARTIR el grupo — último recurso, determinista y siempre registrado.
        Excepción: un RIGIDO que sólo viola TIEMPO (nunca si también viola
@@ -347,10 +351,10 @@ def _asignar_exclusivos(asign, pedidos, volumenes, coords, vehiculos_cap,
     Para cada uno (orden determinista: `grupo` ascendente), prueba TODOS
     sus `dias_admisibles` (preferido primero) y en cada uno busca la unidad
     VACÍA (sin ningún otro grupo asignado ese día -- ni siquiera de otro
-    exclusivo ya procesado) de menor capacidad que lo admita sin violar
+    exclusivo ya procesado) de menor volumen que lo admita sin violar
     restricciones. Entre las combinaciones encontradas en sus distintos
-    días, se queda con la de MENOR capacidad de camión; empate por orden de
-    `dias_admisibles`, luego por nombre de unidad.
+    días, se queda con la de MENOR volumen; empate por MENOR PESO, luego por
+    orden de `dias_admisibles`, luego por nombre de unidad.
 
     Si ningún día ofrece una unidad vacía viable (p. ej. un rígido de un
     solo día sin ninguna unidad libre que le alcance), cae al mismo
@@ -415,16 +419,17 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                       vehiculos_cap, vehiculos_vol, cfg):
     """
     Reparte los grupos de cada día entre las unidades: una sola pasada por
-    peso descendente (first-fit decreasing). Cada grupo elige, entre las
-    unidades NO excluidas (`unidades_excluidas` del grupo) y compatibles por
-    coocurrencia que le alcanzan, la de MENOR capacidad -- nunca manda un
-    grupo chico a una unidad grande de más si una chica ya le alcanza --
-    desempatando por CONSOLIDACIÓN (la que ya lleva carga ese día, para no
-    abrir un viaje nuevo: en el histórico un viaje lleva ~1.4 grupos, no 1.0),
-    luego por AFINIDAD HISTÓRICA (`cfg["afinidad_unidad"]`: cuántas semanas
-    ese grupo cayó en esa unidad -- sólo decide cuando capacidad y
-    consolidación ya quedaron empatadas entre dos o más candidatos) y por
-    último por nombre.
+    volumen descendente, con peso descendente como desempate (first-fit
+    decreasing; decisión de negocio 2026-09-18 -- ver módulo). Cada grupo
+    elige, entre las unidades NO excluidas (`unidades_excluidas` del grupo) y
+    compatibles por coocurrencia que le alcanzan, la de MENOR volumen --
+    nunca manda un grupo chico a una unidad grande de más si una chica ya le
+    alcanza -- desempatando por MENOR PESO cuando el volumen empata, luego
+    por CONSOLIDACIÓN (la que ya lleva carga ese día, para no abrir un viaje
+    nuevo: en el histórico un viaje lleva ~1.4 grupos, no 1.0), luego por
+    AFINIDAD HISTÓRICA (`cfg["afinidad_unidad"]`: cuántas semanas ese grupo
+    cayó en esa unidad -- sólo decide cuando volumen, peso y consolidación ya
+    quedaron empatados entre dos o más candidatos) y por último por nombre.
 
     No hay preferencia de unidad: todo grupo pasa por el mismo criterio,
     sin importar `unidad_ref` (vestigial, ya no se lee para decidir) ni
