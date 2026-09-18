@@ -1742,3 +1742,20 @@ def test_reserva_de_afinidad_predice_por_volumen_no_por_peso():
         "grupo 2 debe terminar en X (menor volumen): la afinidad no debe torcer lo que en la realidad decide el volumen"
     assert sorted(m["sid"] for m in groups[("Y", "LUNES")]) == [1, 2], \
         "grupo 1 (procesa primero por tener mas volumen, sin afinidad) debe ceder X porque quedo reservada para el grupo 2 pendiente"
+
+
+def test_exclusivo_elige_por_volumen_aunque_el_peso_diga_lo_contrario():
+    # Mismo caso que test_selecciona_por_volumen_aunque_el_peso_diga_lo_contrario
+    # pero para un grupo exclusivo (pasa por _asignar_exclusivos, no por
+    # _asignar_unidades).
+    plantilla = [_grupo(1, "FLEXIBLE", "JUEVES", [1, 2], unidad_ref=None)]
+    plantilla[0]["exclusivo"] = True
+    pedidos = {1: 400, 2: 400}          # 800 kg: cabe en A (1000) y en B (5000)
+    volumenes = {1: 4, 2: 4}            # 8 m3: cabe en A (50) y en B (10)
+    caps = {"A": 1000, "B": 5000}
+    vols = {"A": 50, "B": 10}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, volumenes, COORDS, plantilla, caps, vols, _sin_tiempo())
+    assert sorted(m["sid"] for m in groups[("B", "JUEVES")]) == [1, 2], \
+        "el grupo exclusivo debio elegir B (menor volumen), no A (menor peso)"
+    assert ("A", "JUEVES") not in groups or not groups[("A", "JUEVES")]

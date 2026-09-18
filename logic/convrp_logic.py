@@ -364,23 +364,26 @@ def _asignar_exclusivos(asign, pedidos, volumenes, coords, vehiculos_cap,
     excepciones: list = []
     for gid in sorted(g for g in asign if asign[g].get("exclusivo")):
         a = asign[gid]
-        mejor = None   # (capacidad, idx_dia_admisible, unidad, dia)
+        mejor = None   # (volumen, capacidad, idx_dia_admisible, unidad, dia)
         for idx, dia in enumerate(a["dias_admisibles"]):
             candidatas = sorted(
                 (u for u in vehiculos_cap if not _excluida(a, u)
                  and _respeta_exclusividad(asign, a, u, dia)),
-                key=lambda u: (_num(vehiculos_cap.get(u)), str(u)))
+                key=lambda u: (_num(vehiculos_vol.get(u)),
+                               _num(vehiculos_cap.get(u)), str(u)))
             for unidad in candidatas:
                 if _restriccion_violada(sorted(a["miembros"]), unidad, pedidos,
                                         volumenes, coords, vehiculos_cap,
                                         vehiculos_vol, cfg, dia=dia) is None:
-                    opcion = (_num(vehiculos_cap.get(unidad)), idx, unidad, dia)
+                    opcion = (_num(vehiculos_vol.get(unidad)),
+                              _num(vehiculos_cap.get(unidad)), idx, unidad, dia)
                     if mejor is None or opcion < mejor:
                         mejor = opcion
-                    break   # candidatas ya viene ordenada por capacidad: la
-                            # primera viable de este día es la más chica
+                    break   # candidatas ya viene ordenada por volumen (y
+                            # peso como desempate): la primera viable de
+                            # este dia es la mas chica
         if mejor is not None:
-            _, _, unidad, dia = mejor
+            _, _, _, unidad, dia = mejor
             a["dia"] = dia
             a["unidad"] = unidad
             continue
