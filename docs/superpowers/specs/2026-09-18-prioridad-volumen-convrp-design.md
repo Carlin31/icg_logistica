@@ -1,7 +1,7 @@
 # Diseño: prioridad por volumen (antes que peso) en la asignación de unidad de ConVRP
 
 **Fecha:** 2026-09-18
-**Estado:** Aprobado (diseño) — pendiente plan de implementación.
+**Estado:** Implementado (2026-09-18) — ver plan `docs/superpowers/plans/2026-09-18-prioridad-volumen-convrp.md`.
 **Módulos:** `logic/convrp_logic.py` (motor activo en producción).
 
 ## 1. Problema
