@@ -1730,7 +1730,7 @@ def test_reserva_de_afinidad_predice_por_volumen_no_por_peso():
         _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
         _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
     ]
-    pedidos = {1: 200, 2: 200, 3: 250, 4: 250}      # peso irrelevante: sobra en ambas
+    pedidos = {1: 300, 2: 300, 3: 250, 4: 250}      # grupo1=600kg > grupo2=500kg (tambien por peso)
     volumenes = {1: 5, 2: 5, 3: 4, 4: 4}            # grupo1 vol=10 (procesa primero), grupo2 vol=8
     caps = {"X": 3000, "Y": 3000}                   # EMPATADAS en peso
     vols = {"X": 12, "Y": 25}                       # X mas chica en volumen

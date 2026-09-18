@@ -536,8 +536,8 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                     # toque su turno a g2 (eso depende de decisiones que
                     # todavía no pasan), así que ignora el desempate por
                     # consolidación de la decisión real -- si ninguna de las
-                    # unidades con afinidad le alcanza sola por peso, usa el
-                    # dato completo tal cual, sin poder predecir mejor.
+                    # unidades con afinidad le alcanza sola por volumen, usa
+                    # el dato completo tal cual, sin poder predecir mejor.
                     vol2 = _volumen_grupo(a2, volumenes)
                     elegibles = {u: v for u, v in af2_usable.items()
                                  if _num(vehiculos_vol.get(u)) >= vol2}
