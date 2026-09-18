@@ -262,6 +262,10 @@ def _kg_grupo(a, pedidos):
     return sum(_num(pedidos.get(s)) for s in a["miembros"])
 
 
+def _volumen_grupo(a, volumenes):
+    return sum(_num(volumenes.get(s)) for s in a["miembros"])
+
+
 def _espacio_libre(unidad, dia, asign, pedidos, vehiculos_cap, cfg) -> float:
     """Capacidad restante de `unidad` en `dia`: capacidad total menos lo ya
     cargado ese día (kg Lores + kg de mayoristas ya anclados). Usado por el

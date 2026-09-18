@@ -1673,3 +1673,17 @@ def test_particion_con_orden_fijo_de_regla_mixta_cae_a_peso():
     part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
     assert part["sucursales_separadas"] == [10]
     assert not any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)
+
+
+def test_volumen_grupo_suma_el_volumen_de_los_miembros():
+    from logic.convrp_logic import _volumen_grupo
+    a = {"miembros": [1, 2, 3]}
+    volumenes = {1: 2.5, 2: 1.0, 3: 0.5}
+    assert _volumen_grupo(a, volumenes) == 4.0
+
+
+def test_volumen_grupo_ignora_sucursales_sin_dato_de_volumen():
+    from logic.convrp_logic import _volumen_grupo
+    a = {"miembros": [1, 2]}
+    volumenes = {1: 3.0}     # sucursal 2 sin dato
+    assert _volumen_grupo(a, volumenes) == 3.0
