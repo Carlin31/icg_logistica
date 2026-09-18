@@ -478,9 +478,11 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
     coocurrencia = cfg.get("coocurrencia_grupos")
     tope_maximo = max(vehiculos_cap.values(), default=0)
     for dia in sorted(por_dia, key=_orden_dia):
-        # los grupos más pesados primero (first-fit decreasing), desempate por id
+        # los grupos mas voluminosos primero (first-fit decreasing),
+        # desempate por peso descendente y luego por id.
         gids = sorted(por_dia[dia],
-                      key=lambda g: (-_kg_grupo(asign[g], pedidos), g))
+                      key=lambda g: (-_volumen_grupo(asign[g], volumenes),
+                                     -_kg_grupo(asign[g], pedidos), g))
 
         for idx, gid in enumerate(gids):
             a = asign[gid]
@@ -536,12 +538,13 @@ def _asignar_unidades(asign, pedidos, volumenes, coords,
                     # consolidación de la decisión real -- si ninguna de las
                     # unidades con afinidad le alcanza sola por peso, usa el
                     # dato completo tal cual, sin poder predecir mejor.
-                    kg2 = _kg_grupo(a2, pedidos)
+                    vol2 = _volumen_grupo(a2, volumenes)
                     elegibles = {u: v for u, v in af2_usable.items()
-                                 if _num(vehiculos_cap.get(u)) >= kg2}
+                                 if _num(vehiculos_vol.get(u)) >= vol2}
                     elegibles = elegibles or af2_usable
                     claim = min(elegibles, key=lambda u: (
-                        _num(vehiculos_cap.get(u)), -af2_usable[u], u))
+                        _num(vehiculos_vol.get(u)), _num(vehiculos_cap.get(u)),
+                        -af2_usable[u], u))
                     # Estrictamente mayor a proposito: un empate NO reserva
                     # (ver docstring "RESERVA DE AFINIDAD" -- si el grupo
                     # actual tiene el mismo reclamo, no hay razon para que

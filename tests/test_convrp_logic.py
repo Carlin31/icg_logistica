@@ -1716,3 +1716,29 @@ def test_empate_en_volumen_desempata_por_peso():
         pedidos, volumenes, COORDS, plantilla, caps, vols, _sin_tiempo())
     assert ("A", "LUNES") in groups, \
         "con volumen empatado, debe ganar el menor peso (A)"
+
+
+def test_reserva_de_afinidad_predice_por_volumen_no_por_peso():
+    # X e Y estan EMPATADAS en peso (3000 cada una) pero X tiene menos
+    # volumen (12) que Y (25). Grupo 2 (pendiente, procesa despues por tener
+    # menos volumen) tiene mas afinidad a Y (9) que a X (3) -- pero la
+    # decision real (Task 2) manda por volumen, asi que grupo 2 en realidad
+    # terminaria en X pase lo que pase con la afinidad. La reserva debe
+    # predecir X (no Y) para no reservarle a grupo 2 un camion que no va a
+    # usar y dejar a grupo 1 sin motivo real para ceder X.
+    plantilla = [
+        _grupo(1, "FLEXIBLE", "LUNES", [1, 2], unidad_ref=None),
+        _grupo(2, "FLEXIBLE", "LUNES", [3, 4], unidad_ref=None),
+    ]
+    pedidos = {1: 200, 2: 200, 3: 250, 4: 250}      # peso irrelevante: sobra en ambas
+    volumenes = {1: 5, 2: 5, 3: 4, 4: 4}            # grupo1 vol=10 (procesa primero), grupo2 vol=8
+    caps = {"X": 3000, "Y": 3000}                   # EMPATADAS en peso
+    vols = {"X": 12, "Y": 25}                       # X mas chica en volumen
+    cfg = dict(cfg_por_defecto(), chequear_tiempo=False,
+               afinidad_unidad={2: {"X": 3, "Y": 9}})   # mas afinidad a Y, la GRANDE
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, volumenes, COORDS, plantilla, caps, vols, cfg)
+    assert sorted(m["sid"] for m in groups[("X", "LUNES")]) == [3, 4], \
+        "grupo 2 debe terminar en X (menor volumen): la afinidad no debe torcer lo que en la realidad decide el volumen"
+    assert sorted(m["sid"] for m in groups[("Y", "LUNES")]) == [1, 2], \
+        "grupo 1 (procesa primero por tener mas volumen, sin afinidad) debe ceder X porque quedo reservada para el grupo 2 pendiente"
