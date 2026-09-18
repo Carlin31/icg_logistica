@@ -1119,6 +1119,13 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     # (reporte, secuencia, detalle_por_dia, persistencia) se reutilizan sin
     # cambios. Degradación segura: ante cualquier error se sigue con el motor
     # actual, que es el default mientras el flag esté apagado.
+    #
+    # orden_fijo se carga aquí (una sola vez por corrida, ver docstring de
+    # obtener_orden_fijo) porque Palanca 3 de ConVRP (partir por sobrecupo)
+    # también lo necesita -- para pelar desde el final de la secuencia en vez
+    # de por peso -- y esa decisión se toma antes del paso 7, donde antes era
+    # la única consumidora.
+    orden_fijo = obtener_orden_fijo(db)
     convrp_groups = None
     convrp_excepciones: list = []
     convrp_meta: dict = {}
@@ -1151,11 +1158,13 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
                 (convrp_groups, convrp_mayoristas_por_ruta, convrp_excepciones,
                  convrp_mayoristas_detalle, convrp_meta) = construir_rutas_con_mayoristas(
                     pedidos_dict, volumenes_dict, coords_dict,
-                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot, lista_mayoristas)
+                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot, lista_mayoristas,
+                    orden_fijo=orden_fijo)
             else:
                 convrp_groups, convrp_excepciones, convrp_meta = construir_groups_convrp(
                     pedidos_dict, volumenes_dict, coords_dict,
-                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot)
+                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot,
+                    orden_fijo=orden_fijo)
             guardar_excepciones_convrp(oid, convrp_excepciones)
             print(f"[convrp] plantilla v{convrp_meta.get('version_plantilla')}: "
                   f"{convrp_meta.get('viajes')} viajes, "
@@ -1297,8 +1306,6 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
 
     rows: list = []
     report_rows: list = []
-
-    orden_fijo = obtener_orden_fijo(db)
 
     for (veh, dia), miembros in sorted(groups.items()):
         total_kg = sum(pedidos_dict.get(m["sid"], 0) for m in miembros)

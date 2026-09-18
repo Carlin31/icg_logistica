@@ -32,6 +32,13 @@ Orden de palancas ante sobrecupo (de evidencia más débil a más fuerte):
        rutas de muchas paradas chicas (decisión de negocio 2026-08-27);
        queda con la composición intacta y un aviso visible
        (AVISO_TIEMPO_RIGIDO_NO_PARTIDO) en vez de fragmentarse en silencio.
+       Qué se pela: si TODAS las sucursales del grupo pertenecen a la misma
+       regla de `orden_fijo_paradas` (parámetro `orden_fijo`), se pela desde
+       el FINAL de esa secuencia -- se conserva el prefijo intacto, nunca
+       sucursales sueltas de en medio (decisión de negocio 2026-09-14: la
+       secuencia de visita de la zona gana sobre el peso). Si no aplica esa
+       regla (falta algún miembro, o el grupo mezcla más de una), se pela por
+       PESO/VOLUMEN descendente como antes, desempatando por num_tienda.
     4) CONSOLIDAR solitarias — ninguna ruta se queda con una sola sucursal
        pudiendo sumarse a una activa compatible con cupo
     5) RELLENAR capacidad libre — grupos ya desviados regresan a su unidad/día
@@ -52,6 +59,7 @@ poder distinguir después alivio real de alivio fantasma — el modelo de tiempo
 sobrestima en rutas de muchas paradas chicas (ver nota de calibración).
 """
 from logic.logistica_tiempo import evaluar_ruta_por_tiempo
+from logic.orden_fijo_paradas import aplicar_orden_fijo
 
 DIAS_ORDEN = ["LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES", "SABADO", "DOMINGO"]
 
@@ -824,12 +832,18 @@ def _rellenar_capacidad_libre(asign, pedidos, volumenes, coords, vehiculos_cap,
 def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dict,
                                      plantilla: list, vehiculos_cap: dict,
                                      vehiculos_vol: dict, cfg: dict = None,
-                                     kg_mayoristas: dict = None):
+                                     kg_mayoristas: dict = None,
+                                     orden_fijo: dict = None):
     """
     Construye las rutas de la semana AJUSTANDO la plantilla canónica.
 
     plantilla : [{grupo, rigidez, dia|dia_preferido, unidad_ref, sucursales,
                   dias_admisibles}]
+    orden_fijo : {num_tienda: (nombre_regla, posicion)}, de
+                 `orden_fijo_paradas.obtener_orden_fijo` -- opcional. Cuando
+                 TODAS las sucursales de un grupo que hay que partir por
+                 sobrecupo (Palanca 3) pertenecen a la misma regla, el pelado
+                 sigue esa secuencia en vez del peso (ver más abajo).
     Retorna (groups, excepciones):
       groups      : {(vehiculo, dia): [{"sid","seq"}]}  — mismo formato que
                     consume el resto del motor (reporte, secuencia, PDF).
@@ -948,10 +962,20 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
                               f"-- revisar a mano si hace falta.",
                 })
                 break
-            metrica = volumenes if restr == "VOLUMEN" else pedidos
-            # pelar primero lo que más reduce el sobrecupo; desempate por
-            # num_tienda ascendente (nunca "la que caiga primero")
-            orden = sorted(a["miembros"], key=lambda s: (-_num(metrica.get(s)), s))
+            secuencia = aplicar_orden_fijo(
+                [{"sid": s} for s in a["miembros"]], orden_fijo) if orden_fijo else None
+            if secuencia:
+                # el grupo entero pertenece a una sola regla de orden_fijo:
+                # la secuencia de visita gana sobre el peso -- se pela desde
+                # el FINAL (se conserva el prefijo intacto), nunca sucursales
+                # sueltas de en medio (decisión de negocio 2026-09-14, ver
+                # docstring del módulo y de orden_fijo_paradas.py).
+                orden = list(reversed(secuencia))
+            else:
+                metrica = volumenes if restr == "VOLUMEN" else pedidos
+                # pelar primero lo que más reduce el sobrecupo; desempate por
+                # num_tienda ascendente (nunca "la que caiga primero")
+                orden = sorted(a["miembros"], key=lambda s: (-_num(metrica.get(s)), s))
             separadas: list = []
             # Se registra TODA restricción que ató durante el pelado: si el
             # pelado siguió por TIEMPO (modelo conocido como sobreestimado en

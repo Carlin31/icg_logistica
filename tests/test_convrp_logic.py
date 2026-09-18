@@ -1603,4 +1603,73 @@ def test_exclusivo_que_no_cabe_en_ninguna_unidad_va_a_la_de_mas_espacio_libre():
         _sin_tiempo())
     assert ("GRANDE", "LUNES") in groups, \
         "debe caer en GRANDE, la unidad vacia con mas espacio libre"
+
+
+# ══ 9. Partición respeta la secuencia de orden_fijo (no pela por peso) ═════
+# Bug reportado 2026-09-14: al partir por sobrecupo, el motor pelaba la(s)
+# sucursal(es) que más redujeran el sobrecupo por PESO, sin importar su
+# posición en la secuencia de visita de la zona -- podía sacar la primera
+# parada (o la primera Y la última) y dejar un tramo intermedio inconexo.
+# Decisión de negocio: si TODA la ruta pertenece a una sola regla de
+# orden_fijo_paradas, se pela desde el FINAL de esa secuencia (se conserva
+# el prefijo intacto), nunca por peso.
+def test_particion_con_orden_fijo_pela_desde_el_final_no_por_peso():
+    # sid 10 es el más pesado (900) y va PRIMERO en la secuencia; con el
+    # criterio viejo (peso) se habría pelado el 10, rompiendo el prefijo.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [10, 20, 30, 40], unidad_ref="V1",
+                        dias_admisibles=["LUNES"])]
+    pedidos = {10: 900, 20: 200, 30: 200, 40: 200}          # 1500 > cap 1000
+    orden_fijo = {10: ("zona_1", 1), 20: ("zona_1", 2),
+                  30: ("zona_1", 3), 40: ("zona_1", 4)}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000}, {"V1": 99},
+        _sin_tiempo(), orden_fijo=orden_fijo)
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    # se conserva el prefijo (10, el primero de la secuencia); se pela el
+    # tramo final contiguo (20, 30, 40), no el más pesado
+    assert part["sucursales_restantes"] == [10]
+    assert part["sucursales_separadas"] == [20, 30, 40]
+
+
+def test_particion_sin_orden_fijo_sigue_pelando_por_peso():
+    # Mismo escenario, sin orden_fijo: se mantiene el comportamiento previo
+    # (pela lo que más pesa) -- el parámetro es opcional y no cambia nada
+    # cuando no hay secuencia canónica que aplicar.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [10, 20, 30, 40], unidad_ref="V1",
+                        dias_admisibles=["LUNES"])]
+    pedidos = {10: 900, 20: 200, 30: 200, 40: 200}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000}, {"V1": 99}, _sin_tiempo())
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    assert part["sucursales_separadas"] == [10]
+
+
+def test_particion_con_orden_fijo_incompleto_cae_a_peso():
+    # orden_fijo no cubre TODAS las sucursales del grupo (falta la 40): no se
+    # puede confiar en la secuencia, mismo contrato todo-o-nada que
+    # aplicar_orden_fijo -- cae al criterio de peso de siempre.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [10, 20, 30, 40], unidad_ref="V1",
+                        dias_admisibles=["LUNES"])]
+    pedidos = {10: 900, 20: 200, 30: 200, 40: 200}
+    orden_fijo = {10: ("zona_1", 1), 20: ("zona_1", 2), 30: ("zona_1", 3)}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000}, {"V1": 99},
+        _sin_tiempo(), orden_fijo=orden_fijo)
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    assert part["sucursales_separadas"] == [10]
+
+
+def test_particion_con_orden_fijo_de_regla_mixta_cae_a_peso():
+    # Las sucursales del grupo pertenecen a DOS reglas distintas de
+    # orden_fijo: tampoco hay una secuencia única confiable -- cae a peso.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [10, 20, 30, 40], unidad_ref="V1",
+                        dias_admisibles=["LUNES"])]
+    pedidos = {10: 900, 20: 200, 30: 200, 40: 200}
+    orden_fijo = {10: ("zona_1", 1), 20: ("zona_1", 2),
+                  30: ("zona_9", 1), 40: ("zona_9", 2)}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, {"V1": 1000}, {"V1": 99},
+        _sin_tiempo(), orden_fijo=orden_fijo)
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    assert part["sucursales_separadas"] == [10]
     assert not any(e["tipo"] == "SIN_UNIDAD_DISPONIBLE" for e in exc)

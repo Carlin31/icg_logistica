@@ -87,7 +87,8 @@ def _coocurrencia_de_bd(plantilla: list) -> dict:
 def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
                             coords_dict: dict, vehiculos_cap: dict,
                             vehiculos_vol: dict, depot: tuple,
-                            kg_mayoristas: dict = None):
+                            kg_mayoristas: dict = None,
+                            orden_fijo: dict = None):
     """
     Carga la plantilla canónica vigente y arma las rutas de la semana.
 
@@ -95,6 +96,11 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
     sucursales: entra a las restricciones del motor, para que el sobrecupo que
     provoca el enganche por zona dispare las palancas (unidad → día → partir) en
     vez de aparecer al pintar el PDF con la ruta al 148 %.
+
+    `orden_fijo` ({num_tienda: (nombre_regla, posicion)}) se propaga tal cual
+    a `construir_groups_desde_plantilla` -- si no se pasa, se lee aquí mismo
+    (única fuente de verdad para la corrida; el llamador puede inyectar el ya
+    cargado para no repetir la lectura de la tabla, ver `generar_rutas_vrp_afinidad`).
 
     NO persiste nada: corre en memoria. Devuelve (groups, excepciones, meta).
     `groups` tiene el mismo formato que produce el motor de afinidad
@@ -110,6 +116,9 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
     if not plantilla:
         raise ValueError("No hay plantilla canónica vigente. "
                          "Corre scripts/cargar_plantilla.py primero.")
+    if orden_fijo is None:
+        from logic.orden_fijo_paradas import obtener_orden_fijo
+        orden_fijo = obtener_orden_fijo(get_db())
     cfg = dict(cfg_por_defecto(), depot=depot,
                horarios_por_dia=horarios_por_dia(),
                # el peso decide el nivel de camion; afinidad_unidad sólo
@@ -120,7 +129,7 @@ def construir_groups_convrp(pedidos_dict: dict, volumenes_dict: dict,
     groups, excepciones = construir_groups_desde_plantilla(
         pedidos_dict, volumenes_dict or {}, coords_dict, plantilla,
         vehiculos_cap, vehiculos_vol or {}, cfg,
-        kg_mayoristas=kg_mayoristas or {})
+        kg_mayoristas=kg_mayoristas or {}, orden_fijo=orden_fijo)
     meta = {
         "version_plantilla": version_vigente(),
         "grupos_plantilla": len(plantilla),
@@ -370,7 +379,8 @@ def _elegir_mejor_pasada(historial: list) -> int:
 def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
                                    vehiculos_cap: dict, vehiculos_vol: dict,
                                    depot: tuple, mayoristas: list,
-                                   max_pasadas: int = 4):
+                                   max_pasadas: int = 4,
+                                   orden_fijo: dict = None):
     """
     Rutas de la semana con la carga de mayoristas DENTRO del motor.
 
@@ -391,6 +401,9 @@ def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
     Devuelve (groups, por_ruta, excepciones, detalle, meta). No persiste nada.
     """
     from logic.enganche_zona import reubicar_mayoristas_por_cupo
+    if orden_fijo is None:
+        from logic.orden_fijo_paradas import obtener_orden_fijo
+        orden_fijo = obtener_orden_fijo(get_db())
     kg_may: dict = {}
     groups, por_ruta, detalle, meta = {}, {}, [], {}
     excepciones: list = []
@@ -400,7 +413,7 @@ def construir_rutas_con_mayoristas(pedidos: dict, volumenes: dict, coords: dict,
     for pasada in range(1, int(max_pasadas) + 1):
         groups, excepciones, meta = construir_groups_convrp(
             pedidos, volumenes, coords, vehiculos_cap, vehiculos_vol, depot,
-            kg_mayoristas=kg_may)
+            kg_mayoristas=kg_may, orden_fijo=orden_fijo)
         coords_rutas = _centroides_de_rutas(groups, coords)
         por_ruta, detalle = enganchar_mayoristas_por_zona(
             groups, mayoristas, coords_rutas)
