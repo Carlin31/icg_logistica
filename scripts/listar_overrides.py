@@ -14,6 +14,12 @@ que otras reglas ya tocan ese mismo grupo/zona -- asi como paso el bug de
 `_vigente_restaurada` y el de zona 23 orden_fijo invertido, donde un cambio
 no sabia que pisaba un parche anterior.
 
+Tambien muestra el historial de overrides_auditoria (motivo/quien/cuando)
+para lo que se haya aplicado con scripts/admin_overrides.py -- los
+overrides mas viejos, aplicados por los scripts de un solo uso de antes de
+que existiera la auditoria, no tienen entrada ahi (mismo criterio que
+migrar_auditoria_historico.py: sin registro no es lo mismo que sin motivo).
+
 No escribe nada en la base.
 
 Uso:
@@ -36,6 +42,7 @@ from sqlalchemy import select
 
 from db import get_db, get_table
 from app import create_app
+from logic.overrides_admin import historial as historial_overrides
 
 
 def _nombres_sucursales(db, num_tiendas):
@@ -125,6 +132,20 @@ def mostrar_grupo(db, grupos_por_numero, grupo):
             or anclas_grupo or pines_grupo or dia_override
             or (zona is not None and any(gg.get("zona") == zona for n, gg in grupos_por_numero.items() if n != grupo))):
         print("(sin overrides puntuales activos sobre este grupo)")
+
+    claves = {f"grupo:{grupo}"}
+    claves.update(f"regla:{r}" for r in {f["nombre_regla"] for f in of_grupo})
+    claves.update(f"cliente:{idc}" for idc in ids_mayoristas)
+
+    eventos = [ev for clave in claves for ev in historial_overrides(clave=clave, db=db)]
+    if eventos:
+        eventos.sort(key=lambda ev: ev["aplicado_en"], reverse=True)
+        print("Historial (overrides_auditoria):")
+        for ev in eventos:
+            fecha = ev["aplicado_en"].strftime("%Y-%m-%d %H:%M")
+            quien = f" [{ev['aplicado_por']}]" if ev.get("aplicado_por") else ""
+            print(f"   {fecha}  {ev['tipo']:<20} {ev['clave']:<14} "
+                  f"{ev['valor_anterior']} -> {ev['valor_nuevo']}  ({ev['motivo']}){quien}")
 
 
 def main():
