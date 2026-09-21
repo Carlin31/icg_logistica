@@ -430,6 +430,32 @@ def test_pedazo_partido_prefiere_dia_alterno_con_unidad_mas_chica():
     assert part["destino_unidad"] == "CHICA"
 
 
+def test_lo_que_queda_tras_partir_baja_a_unidad_mas_chica_si_cabe_mismo_dia():
+    # Caso real (grupo 27/Tierra Blanca, semana 7-11 sept 2026): F 350 está
+    # excluido para Tierra Blanca (regla de negocio, nunca la usa), así que
+    # el grupo se parte por PESO sobre K 20; la sucursal pesada se va a otra
+    # unidad, pero "lo que queda" (ya achicado) se quedaba clavado en la
+    # unidad ORIGINAL -- elegida para el peso del grupo COMPLETO -- aunque
+    # ahora cupiera en una más chica libre el mismo día. Debe bajar de unidad
+    # sin cambiar de día (Tierra Blanca sólo admite LUNES).
+    plantilla = [_grupo(1, "FLEXIBLE", "LUNES", [1, 2, 3, 4], unidad_ref="MEDIANA",
+                        dias_admisibles=["LUNES"])]
+    plantilla[0]["unidades_excluidas"] = ["GRANDE"]
+    pedidos = {1: 1200, 2: 487, 3: 444, 4: 531}   # total 2662 > cap MEDIANA 2500
+    caps = {"MEDIANA": 2500, "CHICA1": 1549, "CHICA2": 1549, "GRANDE": 3900}
+    vols = {"MEDIANA": 99, "CHICA1": 99, "CHICA2": 99, "GRANDE": 99}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo())
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    assert part["sucursales_separadas"] == [1]            # la más pesada (1200 kg)
+    assert part["sucursales_restantes"] == [2, 3, 4]       # 1462 kg
+    assert part["destino_unidad"] == "CHICA1"               # el pedazo separado
+    assert ("CHICA2", "LUNES") in groups, \
+        "lo que queda (1,462 kg) cabía en CHICA2 (1,549 kg) y debió bajar, no quedarse en MEDIANA"
+    assert sorted(m["sid"] for m in groups[("CHICA2", "LUNES")]) == [2, 3, 4]
+    assert ("MEDIANA", "LUNES") not in groups
+
+
 def test_particion_registra_toda_restriccion_que_ato_durante_el_pelado():
     # El modelo de TIEMPO sobrestima en rutas de muchas paradas chicas. Si el
     # pelado continúa por TIEMPO aunque la restricción inicial fuera PESO, la

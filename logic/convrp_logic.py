@@ -1069,6 +1069,20 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             if destino is None:
                 break                      # sin destino: no seguir partiendo
 
+            # Lo que queda (ya achicado) se eligió una unidad para el peso
+            # del grupo COMPLETO -- nadie la revisa de nuevo tras el pelado.
+            # Si ahora cabe en una más chica libre el MISMO día, baja --
+            # nunca cambia de día (día es decisión de negocio ya resuelta
+            # antes de partir, ver Palanca 2). Caso real: grupo 27/Tierra
+            # Blanca, semana 7-11 sept 2026: "lo que queda" se quedaba en
+            # K 20 (2.5t) pudiendo bajar a un 1.5t libre ese lunes.
+            mejor_restante = _unidad_alternativa(asign, a, pedidos, volumenes,
+                                                 coords, vehiculos_cap,
+                                                 vehiculos_vol, cfg)
+            if (mejor_restante and
+                    _num(vehiculos_cap.get(mejor_restante)) < _num(vehiculos_cap.get(unidad))):
+                a["unidad"] = mejor_restante
+
     # ── 3b. Palanca 4: ninguna ruta se queda con una sola sucursal, salvo
     #      que ya esté al límite de su capacidad (peso Lores + mayoristas). ──
     excepciones += _consolidar_solitarios(asign, pedidos, volumenes, coords,
