@@ -403,6 +403,33 @@ def test_grupo_mas_pesado_que_toda_unidad_se_parte_minimamente():
     assert any(sorted(m["sid"] for m in ms) == [4, 5] for ms in groups.values())
 
 
+def test_pedazo_partido_prefiere_dia_alterno_con_unidad_mas_chica():
+    # Caso real (Covarrubias/grupo 22, semana 7-11 sept 2026): un RIGIDO se
+    # parte por PESO y el pedazo separado (chico) debe reubicarse. El mismo
+    # día sólo queda libre una unidad MUCHO más grande (MEDIANA); un día
+    # admisible alterno tiene la unidad CHICA completamente libre. Debe
+    # preferir el día alterno con la unidad chica -- no conformarse con la
+    # primera unidad que quepa el mismo día sólo porque es "la palanca más
+    # débil" cuando el resultado es un camión sobredimensionado.
+    plantilla = [_grupo(1, "RIGIDO", "LUNES", [1, 2, 3], unidad_ref="GRANDE",
+                        dias_admisibles=["LUNES", "MARTES"]),
+                 _grupo(2, "FLEXIBLE", "LUNES", [10], unidad_ref="CHICA",
+                        dias_admisibles=["LUNES"])]
+    pedidos = {1: 1500, 2: 1500, 3: 900,   # grupo 1: 3900 > cap 3800
+               10: 700}                     # ocupa CHICA en LUNES
+    caps = {"GRANDE": 3800, "MEDIANA": 2500, "CHICA": 1000}
+    vols = {"GRANDE": 99, "MEDIANA": 99, "CHICA": 99}
+    orden_fijo = {1: ("r22", 1), 2: ("r22", 2), 3: ("r22", 3)}
+    groups, exc = construir_groups_desde_plantilla(
+        pedidos, {}, COORDS, plantilla, caps, vols, _sin_tiempo(),
+        orden_fijo=orden_fijo)
+    part = [e for e in exc if e["tipo"] == "PARTIDO_CAPACIDAD"][0]
+    assert part["sucursales_separadas"] == [3]           # última del orden_fijo
+    assert part["destino_dia"] == "MARTES", \
+        "debió cambiar de día para usar la unidad chica, no quedarse el mismo día en una grande"
+    assert part["destino_unidad"] == "CHICA"
+
+
 def test_particion_registra_toda_restriccion_que_ato_durante_el_pelado():
     # El modelo de TIEMPO sobrestima en rutas de muchas paradas chicas. Si el
     # pelado continúa por TIEMPO aunque la restricción inicial fuera PESO, la

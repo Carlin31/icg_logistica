@@ -1022,14 +1022,26 @@ def construir_groups_desde_plantilla(pedidos: dict, volumenes: dict, coords: dic
             destino_u = _unidad_alternativa(asign, sub, pedidos, volumenes,
                                             coords, vehiculos_cap,
                                             vehiculos_vol, cfg)
-            destino = None
+            alt = _dia_alternativo(asign, sub, pedidos, volumenes, coords,
+                                   vehiculos_cap, vehiculos_vol, cfg)
+            # Entre "misma unidad de día distinto" y "otra unidad del mismo
+            # día", gana la de MENOR capacidad -- el pedazo separado es chico
+            # por definición y no debe conformarse con una unidad mucho más
+            # grande el mismo día sólo porque esa palanca se probó primero,
+            # habiendo un día admisible con una unidad chica libre (caso real:
+            # Covarrubias/grupo 22, semana 7-11 sept 2026). Empate en
+            # capacidad: gana el mismo día (menos disrupción); si tampoco,
+            # por nombre de unidad, determinista.
+            opciones = []
             if destino_u:
-                destino = (destino_u, dia)
-            else:
-                alt = _dia_alternativo(asign, sub, pedidos, volumenes, coords,
-                                       vehiculos_cap, vehiculos_vol, cfg)
-                if alt:
-                    destino = (alt[1], alt[0])
+                opciones.append((destino_u, dia))
+            if alt:
+                opciones.append((alt[1], alt[0]))
+            destino = None
+            if opciones:
+                opciones.sort(key=lambda o: (_num(vehiculos_cap.get(o[0])),
+                                             0 if o[1] == dia else 1, str(o[0])))
+                destino = opciones[0]
             clave = max(asign) + 1
             asign[clave] = dict(
                 grupo=a["grupo"], rigidez=a["rigidez"],
