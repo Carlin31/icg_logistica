@@ -208,12 +208,15 @@ def test_roundtrip_lectura_bd(app_ctx):
     assert len({g["zona"] for g in grupos}) == 24
     assert all(g["zona"] is not None for g in grupos)
     # limite de 6 sucursales por RUTA (grupo), salvo el grupo 22 (excepcion
-    # de negocio confirmada: 8 sucursales en una sola ruta). Zonas 5 y 11 SI
-    # suman mas de 6 en total, pero repartidas en varios grupos/sub-rutas
-    # (eso es justamente el punto del diseño), asi que el limite se checa
-    # por grupo, no por zona.
+    # de negocio confirmada: 9 sucursales en una sola ruta -- eran 8 hasta
+    # que se agrego San Andres 4/103 el 2026-09-21, sucursal que se habia
+    # dado de alta el 2026-09-09 pero nunca se asigno a ningun grupo, ver
+    # scripts/agregar_san_andres4_grupo22.py). Zonas 5 y 11 SI suman mas de
+    # 6 en total, pero repartidas en varios grupos/sub-rutas (eso es
+    # justamente el punto del diseño), asi que el limite se checa por
+    # grupo, no por zona.
     for g in grupos:
-        limite = 8 if g["grupo"] == 22 else 6
+        limite = 9 if g["grupo"] == 22 else 6
         assert len(g["sucursales"]) <= limite, \
             f"grupo {g['grupo']} (zona {g['zona']}) tiene {len(g['sucursales'])} sucursales"
     # zona 5 (Tuxtepec) y zona 11 (Tierra Blanca): confirmar que quedaron
