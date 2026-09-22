@@ -1,0 +1,102 @@
+﻿no_sucursal,num_tienda,nombre_excel,nombre_bd,lat_excel,lon_excel,lat_bd,lon_bd,dist_m,flag,estado_revision
+1,1,Tiendas Lores Tierra Blanca Centro,Tierra Blanca 1,18.4479028,-96.3583565,18.448761,-96.3580946,99,,ok
+2,2,Tiendas Lores Tux Centro,Tuxtepec 1 (Centro),18.0834118,-96.1256385,18.0843494,-96.1253104,110,,ok
+3,4,Tiendas Lores Cosamaloapan,Cosamaloapan 1,18.3649469,-95.7951104,18.3652124,-95.7951968,31,,ok
+4,3,Tiendas Lores Isla centro,Cd. Isla 1,18.0279596,-95.5294926,18.0592632,-95.5291176,3481,REVISAR_COORD,revisado_ok
+5,5,Tiendas Lores Loma Bonita,Loma Bonita 1,18.1071795,-95.8809042,18.1073209,-95.8809429,16,,ok
+6,7,Tiendas Lores Bulevar,Tuxtepec 2 (Bulevar),18.0863454,-96.1350072,18.087564,-96.1349773,136,,ok
+7,6,Tiendas Lores Ferrocarril,Tres Valles 1 (Ferrocarril),18.2405445,-96.1335864,18.2406602,-96.1335484,13,,ok
+8,8,Tiendas Lores Veracruz,Veracruz 1,19.1915807,-96.1353987,19.1949637,-96.1369203,409,,ok
+9,9,TIENDAS LORES TEZONAPA,Tezonapa,18.6028701,-96.6860622,18.6031446,-96.6860622,31,,ok
+10,10,Tiendas Lores Flores Magón,Tres Valles 2 (Flores Magón),18.2397161,-96.1365144,18.2399504,-96.1365359,26,,ok
+11,11,Tiendas Lores Playa Vicente,Playa Vicente,17.8305051,-95.8140229,17.83074,-95.8140336,26,,ok
+12,12,Tiendas Lores Villa Azueta,Villa Azueta,18.0749249,-95.7059603,18.0751187,-95.7060139,22,,ok
+13,13,Tiendas Lores Rodriguez Clara,Juan Rodríguez Clara,17.9914802,-95.4013898,17.9915924,-95.4014864,16,,ok
+14,14,Tiendas Lores Temascal,Temascal,18.2424003,-96.4002097,18.2426754,-96.400317,33,,ok
+15,15,Tiendas Lores Prolongación Independencia,Tuxtepec 3 (Independencia),18.0841672,-96.141059,18.084261,-96.1411627,15,,ok
+16,16,Tiendas Lores Lerdo,Lerdo de Tejada,18.6322481,-95.5205236,18.6323701,-95.5205665,14,,ok
+17,17,Tiendas Lores Yanga,Yanga,18.8340625,-96.7988742,18.834296,-96.7989278,27,,ok
+18,18,Tiendas Lores Papaloapan,Papaloapan,18.160292,-96.0943735,18.1604143,-96.094513,20,,ok
+19,19,Tiendas Lores Valle Nacional,San Juan Bautista Valle Nacional,17.7746466,-96.3075943,17.7747181,-96.3075943,8,,ok
+20,20,Tiendas Lores Vicente Camalote,Vicente Camalote,18.5106078,-96.5361903,18.5107807,-96.5362225,20,,ok
+21,21,Tiendas Lores Alvarado,Alvarado,18.7692639,-95.7609341,18.7693452,-95.7609502,9,,ok
+22,22,Tiendas Lores Cabada,Ángel R. Cabada,18.596792,-95.443629,18.5969954,-95.443629,23,,ok
+23,23,Tiendas Lores Tetela,Tetela,18.5058109,-96.4583323,18.5060958,-96.4583752,32,,ok
+24,24,Tiendas Lores Tierra Blanca 2,Tierra Blanca 2,18.4533107,-96.349987,18.4535549,-96.3499763,27,,ok
+25,25,Tienda Lores Independencia (Sucursal 3),Tierra Blanca 3,18.4570026,-96.3650391,18.4572876,-96.3648674,36,,ok
+26,26,Tiendas Lores Potrero,Potrero,18.8906388,-96.8012121,18.8909433,-96.8013087,35,,ok
+27,27,Tiendas Lores Cosamaloapan 2,Cosamaloapan 2,18.3682069,-95.7897762,18.3684606,-95.789804,28,,ok
+28,28,Tiendas Lores Ignacio,Ignacio de llave,18.723169,-95.9870553,18.7233519,-95.9869266,24,,ok
+29,29,Tienda Lores Piedras Negras,Piedras Negras,18.7702281,-96.1706895,18.7703906,-96.1704964,27,,ok
+30,30,Tienda Lores Tlalixcoyan,Tlalixcoyan,18.8018343,-96.0630107,18.8020679,-96.0630536,26,,ok
+31,31,Tiendas Lores Hidalgo,Tuxtepec 4 (Hidalgo),18.0831913,-96.1188031,18.0833647,-96.1187924,19,,ok
+32,32,"Tiendas Lores (Santiago Tuxtla, Centro)",Santiago Tuxtla 1,18.4647393,-95.3008051,18.4648561,-95.300933,19,,ok
+33,33,Tiendas Lores Chiltepec,Chiltepec,17.9465723,-96.1722835,17.9467181,-96.1720304,31,,ok
+34,34,Tiendas Lores Paso del Macho,Paso del Macho,18.971851,-96.7222364,18.9720133,-96.7222793,19,,ok
+35,35,Tiendas Lores Jalapa de Díaz,San Felipe Jalapa de Díaz,18.0712166,-96.5367122,18.071176,-96.5368948,20,,ok
+36,36,Tiendas Lores Tierra Blanca 4,Tierra Blanca 4,18.4443539,-96.3596916,18.4448801,-96.359897,62,,ok
+37,37,Tiendas Lores Loma Bonita 2,Loma Bonita 2,18.1111741,-95.8795439,18.1113998,-95.8795267,25,,ok
+38,38,Tiendas Lores 23 de Nov,Tuxtepec 5 (23 Nov),18.0646921,-96.145035,18.0664873,-96.1457216,212,,ok
+39,39,Tienda Lores Catemaco,Catemaco,18.4181259,-95.112453,18.4184313,-95.1124852,34,,ok
+40,40,Tiendas Lores Cardel,Jose Cardel,19.3701526,-96.374554,19.3703955,-96.374672,30,,ok
+41,41,Tiendas Lores Purga,Purga,19.0975502,-96.3343439,19.0977023,-96.3342581,19,,ok
+42,42,Tiendas Lores María Lombardo,María Lombardo de Caso,17.4481544,-95.4281636,17.4484103,-95.4282065,29,,ok
+43,43,Tiendas Lores Emilio Carranza,Emilio Carranza,19.9685641,-96.6113136,19.9687658,-96.61126,23,,ok
+44,44,Tiendas Lores Vega de Alatorre,Vega de Alatorre,20.0284096,-96.6453224,20.0285003,-96.645376,12,,ok
+45,45,Tiendas Lores Covarrubias,Juan Díaz Covarrubias,18.1563828,-95.1850972,18.1565561,-95.1849792,23,,ok
+46,46,Tiendas Lores Tuxtepec 20 de Nov ll,Tuxtepec 6 (20 Nov),18.0836006,-96.129828,18.0856059,-96.1299992,224,,ok
+47,47,Tiendas Lores Los Naranjos,Los Naranjos,18.3535805,-96.1667646,18.3537434,-96.1667539,18,,ok
+48,48,Tiendas Lores Palma Sola,Palma Sola,19.7719073,-96.4323102,19.7721799,-96.4324175,32,,ok
+49,49,Tiendas Lores Carlos A. Carrillo,Carlos A. Carrillo,18.3730527,-95.7459909,18.37333,-95.7460439,31,,ok
+50,50,Tienda Lores Ixhuatlan del Café,Ixhuatlán del Café,19.0514182,-96.9823613,19.05155,-96.9824042,15,,ok
+51,51,Tiendas Lores Coscomatepec,Coscomatepec,19.0740516,-97.0496015,19.0742949,-97.0496444,27,,ok
+52,52,Tienda Lores Actopan,Actopan,19.5057466,-96.6207218,19.505878,-96.6207325,15,,ok
+53,53,Tienda Lores Rinconada,Rinconada,19.3531836,-96.5641629,19.3534729,-96.5642079,33,,ok
+54,54,Tiendas Lores Jardines del Arroyo,Jardines del Arroyo,18.0856706,-96.151151,18.0859154,-96.1511939,28,,ok
+55,55,Tiendas Lores Hacienda Real,Tuxtepec 7 (Hacienda),18.1097722,-96.1413724,18.1110433,-96.1418813,151,,ok
+56,56,Tiendas Lores Monte Blanco,Monte Blanco,18.9645171,-97.0167354,18.9647707,-97.0165745,33,,ok
+57,57,Tiendas Lores Las Limas,Tuxtepec 8 (Las Limas),18.0683676,-96.1240904,18.0695934,-96.1240052,137,,ok
+58,58,Tiendas Lores Acatlán,Acatlán de Pérez Figueroa,18.5376568,-96.6066995,18.5377585,-96.6067532,13,,ok
+59,59,Tiendas Lores Omealca,Omealca,18.7475991,-96.7874389,18.747721,-96.7874711,14,,ok
+60,60,Tiendas Lores Soledad de Doblado,Soledad de Doblado,19.0451577,-96.4239236,19.0454112,-96.4240416,31,,ok
+61,61,Tiendas Lores Cempoala,Cempoala,19.4451833,-96.4069441,19.4453452,-96.406987,19,,ok
+62,62,Tiendas Lores El Tejar,El Tejar,19.078515,-96.1591093,19.0786265,-96.1590235,15,,ok
+63,63,Tiendas Lores Tierra Blanca 5,Tierra Blanca 5,18.4396254,-96.3455651,18.4401985,-96.3455259,64,,ok
+64,64,Tiendas Lores Chacaltianguis,Chacaltianguis,18.3042143,-95.8431901,18.3044893,-95.8430292,35,,ok
+65,65,TIENDAS LORES TLACOJALPAN,Tlacojalpan,18.2310292,-95.9471641,18.2312228,-95.9471748,22,,ok
+66,66,Tiendas Lores Antón Lizardo,Antón Lizardo,19.0599667,-95.9880344,19.0602506,-95.9880022,32,,ok
+67,67,Tiendas Lores Sotavento,Sotavento,19.134389,-96.1800302,19.134612,-96.1799444,26,,ok
+68,68,TIENDAS LORES TLACOTALPAN,Tlacotalpan,18.6115821,-95.6580445,18.6118871,-95.6580445,34,,ok
+69,69,Tienda Lores Seguro Social,Tres Valles 3 (Seguro Social),18.236272,-96.1418701,18.2363739,-96.1418916,12,,ok
+70,70,Tiendas Lores Otatitlán,Otatitlán,18.1770994,-96.0359862,18.1773033,-96.0359862,23,,ok
+71,71,Tienda Lores Oasis,Veracruz 3 (Facc. Oasis),19.2023687,-96.2204937,19.2026321,-96.2205044,29,,ok
+72,72,Tiendas Lores Amapolas,Veracruz 4 (Col. Amapolas),19.1535358,-96.1974449,19.1537892,-96.1975307,30,,ok
+73,73,Tiendas Lores Isla 2,Cd. Isla 2,18.031307,-95.5243374,18.0316359,-95.5242757,37,,ok
+74,74,Tiendas Lores San Bartolo,San Bartolo,18.0954218,-96.1115668,18.0957813,-96.1119978,61,,ok
+75,75,Tiendas Lores Cosamaloapan 3,Cosamaloapan 3,18.3666044,-95.8001942,18.3671241,-95.8000809,59,,ok
+76,76,Tiendas Lores Tierra Blanca 7,Tierra Blanca 7,18.4403498,-96.3623863,18.4413269,-96.3623434,109,,ok
+77,77,Tiendas Lores Tierra Blanca 6,Tierra Blanca 6,18.4505549,-96.3674482,18.4510434,-96.3673838,55,,ok
+78,78,"Tiendas Lores (Santiago Tuxtla, Pedregal)",Santiago Tuxtla 2,18.4589484,-95.3062107,18.4592842,-95.3062107,37,,ok
+79,79,Tiendas Lores Las abejas,Tres Valles 4 (Las Abejas),18.2434161,-96.1263758,18.2437116,-96.1264402,34,,ok
+80,80,Tiendas Lores Tolome,Tolome,19.2675008,-96.3903151,19.267754,-96.3904224,30,,ok
+81,81,Tiendas Lores El Carrizal,Carrizal,19.3620981,-96.6584089,19.3622195,-96.6583982,14,,ok
+82,82,Tiendas Lores Úrsulo Galván,Úrsulo Galvan,19.3993347,-96.3606981,19.3994865,-96.3606552,17,,ok
+83,83,Tiendas Lores Paso de Ovejas,Paso de Ovejas,19.282427,-96.4409038,19.2826903,-96.4409896,31,,ok
+84,84,Tiendas Lores Amatlán,Amatlán,18.8506118,-96.9144553,18.8508555,-96.9144768,27,,ok
+85,85,Tiendas Lores Isla Suc. 3,Isla 3,18.0236809,-95.5292083,18.023943,-95.5292646,30,,ok
+86,86,Tiendas Lores Carlos A. Carrillo 2,Carlos A. Carrillo 2,18.3707476,-95.7588856,18.3710734,-95.7587354,40,,ok
+87,87,Tiendas Lores Jamapa,Jamapa,19.0403628,-96.2401878,19.0405453,-96.2402307,21,,ok
+88,88,Tiendas Lores Lerdo 2,Lerdo de Tejada 2,18.6290641,-95.5138015,18.6292734,-95.5138152,23,,ok
+89,89,Tiendas Lores Gabino Barreda,Gabino Barreda,18.1783018,-96.0913399,18.1783099,-96.0911979,15,,ok
+90,90,Tienda Lores San Andrés Tuxtla,San Andrés 1,18.4467646,-95.215943,18.4829267,-95.2196189,4040,REVISAR_COORD,revisado_ok
+91,92,Tiendas Lores Rodriguez Clara 2,Rodriguez 2,17.9981987,-95.3992495,17.9984844,-95.3993782,35,,ok
+92,91,Tiendas lores San Andres Suc.2,San Andrés 2,18.4352819,-95.2168384,18.4357071,-95.2168838,48,,ok
+93,93,Tiendas Lores Playa Vicente Suc. 2,Playa Vicente 2,17.8309844,-95.8201343,17.8312704,-95.8202416,34,,ok
+94,94,Tiendas Lores Puente Jula,Puente Jula,19.1994264,-96.3459923,19.1996392,-96.3460245,24,,ok
+95,95,Tiendas Lores Chocamán,Chocamán,19.012872,-97.0288467,19.012943,-97.0289004,10,,ok
+96,96,Tiendas Lores Catemaco 2,Catemaco 2,18.42053,-95.10498,18.4207539,-95.1050122,25,,ok
+97,97,Tiendas Lores Jalapa de Díaz 2,Jalapa de Díaz 2,18.0736124,-96.5369678,18.0738993,-96.5370343,33,,ok
+98,98,Tiendas Lores Sihuapan,San Andres 3,18.4350018,-95.1764181,18.4351341,-95.1763752,15,,ok
+99,99,Tiendas lores Tejería,Tejería,19.1643603,-96.2215827,19.1669547,-96.2205528,308,,ok
+100,100,Tiendas Lores Amatitlán,Amatitlán,18.4342256,-95.7337754,18.4343783,-95.7336788,20,,ok
+101,101,"Tiendas Lores Tierra Blanca 8 ""Gran Apertura 14 de Febrero""",Tierra Blanca 8,18.4454283,-96.3464795,18.4458711,-96.3466791,54,,ok

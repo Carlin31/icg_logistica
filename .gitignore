@@ -54,6 +54,10 @@ tmp/
 *.csv
 *.json.bak
 
+# datos/ = fuente de carga/parches de plantilla (no exports temporales):
+# necesarios para reconstruir el proyecto en un equipo nuevo.
+!datos/*.csv
+
 # ── Archivos de base de datos locales ─────────────────────────
 *.db
 *.sqlite
