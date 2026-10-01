@@ -201,22 +201,25 @@ def test_roundtrip_lectura_bd(app_ctx):
     # scripts/dividir_zona11_dos_grupos.py): 28 - 1 = 27 grupos vigentes.
     # Zona 5 (Tuxtepec) paso de 3 grupos a 2 el 2026-09-14 (ver
     # scripts/dividir_zona5_tuxtepec_dos_grupos.py): 27 - 1 = 26 grupos vigentes.
-    assert len(grupos) == 26
-    assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 18
+    # Zona 22 se partio el 2026-10-01 (ver scripts/dividir_zona22_santiago.py):
+    # Santiago Tuxtla 1 y 2 pasaron al grupo 29 (zona 25, RIGIDO) -> 27 grupos.
+    assert len(grupos) == 27
+    assert sum(1 for g in grupos if g["rigidez"] == "RIGIDO") == 19
     assert sum(1 for g in grupos if g["rigidez"] == "FLEXIBLE") == 8
-    # zona: 24 zonas de negocio distintas, todo grupo tiene una asignada
-    assert len({g["zona"] for g in grupos}) == 24
+    # zona: 25 zonas de negocio distintas (24 + la zona 25 de Santiago Tuxtla,
+    # 2026-10-01), todo grupo tiene una asignada
+    assert len({g["zona"] for g in grupos}) == 25
     assert all(g["zona"] is not None for g in grupos)
     # limite de 6 sucursales por RUTA (grupo), salvo el grupo 22 (excepcion
-    # de negocio confirmada: 9 sucursales en una sola ruta -- eran 8 hasta
-    # que se agrego San Andres 4/103 el 2026-09-21, sucursal que se habia
-    # dado de alta el 2026-09-09 pero nunca se asigno a ningun grupo, ver
+    # de negocio confirmada: 9 sucursales en una sola ruta hasta que Santiago
+    # Tuxtla 1 y 2 se separaron al grupo 29 el 2026-10-01 -> 7; eran 8 hasta
+    # que se agrego San Andres 4/103 el 2026-09-21, ver
     # scripts/agregar_san_andres4_grupo22.py). Zonas 5 y 11 SI suman mas de
     # 6 en total, pero repartidas en varios grupos/sub-rutas (eso es
     # justamente el punto del diseño), asi que el limite se checa por
     # grupo, no por zona.
     for g in grupos:
-        limite = 9 if g["grupo"] == 22 else 6
+        limite = 7 if g["grupo"] == 22 else 6
         assert len(g["sucursales"]) <= limite, \
             f"grupo {g['grupo']} (zona {g['zona']}) tiene {len(g['sucursales'])} sucursales"
     # zona 5 (Tuxtepec) y zona 11 (Tierra Blanca): confirmar que quedaron
