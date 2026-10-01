@@ -1108,7 +1108,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     # ── 4. Vehículos (CAP-4: camiones 3.5t tienen tope fijo de 3.9t) ────────────
     # obtener_capacidades_vehiculos() aplica capacidad_efectiva_kg() que implementa
     # esta regla: cualquier vehículo 3500-4000 kg nominal → límite efectivo = 3900 kg.
-    vehiculos_cap  = obtener_capacidades_vehiculos()
+    vehiculos_cap  = obtener_capacidades_vehiculos(solo_activos=True)
     info_vehiculos = obtener_info_vehiculos()
     if not vehiculos_cap:
         return {"status": "error", "mensaje": "No hay vehículos activos con capacidad configurada."}
@@ -1158,12 +1158,12 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
                 (convrp_groups, convrp_mayoristas_por_ruta, convrp_excepciones,
                  convrp_mayoristas_detalle, convrp_meta) = construir_rutas_con_mayoristas(
                     pedidos_dict, volumenes_dict, coords_dict,
-                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot, lista_mayoristas,
+                    vehiculos_cap, obtener_volumenes_vehiculos(solo_activos=True), _depot, lista_mayoristas,
                     orden_fijo=orden_fijo)
             else:
                 convrp_groups, convrp_excepciones, convrp_meta = construir_groups_convrp(
                     pedidos_dict, volumenes_dict, coords_dict,
-                    vehiculos_cap, obtener_volumenes_vehiculos(), _depot,
+                    vehiculos_cap, obtener_volumenes_vehiculos(solo_activos=True), _depot,
                     orden_fijo=orden_fijo)
             guardar_excepciones_convrp(oid, convrp_excepciones)
             print(f"[convrp] plantilla v{convrp_meta.get('version_plantilla')}: "
@@ -1278,7 +1278,7 @@ def generar_rutas_vrp_afinidad(logistica_id: str, lambda_afinidad: float = 0.5) 
     # conservan las rutas sin rebalancear.
     if REBALANCEO_GEOGRAFICO and convrp_groups is None:
         try:
-            vehiculos_vol = obtener_volumenes_vehiculos()
+            vehiculos_vol = obtener_volumenes_vehiculos(solo_activos=True)
             _sin_vol = [v for v in vehiculos_cap if v not in vehiculos_vol]
             if _sin_vol:
                 print(f"[rebalanceo_geografico] sin volumen configurado "

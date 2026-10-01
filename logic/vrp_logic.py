@@ -175,12 +175,16 @@ def _insertar_pos_proxima(ordenados: list, sid, coord_fn) -> int:
 
 # ── Lectura de datos de MongoDB ────────────────────────────────────────────────
 
-def obtener_capacidades_vehiculos() -> dict:
+def obtener_capacidades_vehiculos(solo_activos: bool = False) -> dict:
     """
-    Lee capacidades de vehículos desde SQL Server (TODOS, sin filtrar por
-    `activo` -- así era también en el Mongo original, a diferencia de
-    obtener_placas_por_abrev()/obtener_info_vehiculos() que sí filtran; se
-    preserva esa asimetría tal cual).
+    Lee capacidades de vehículos desde SQL Server (por defecto TODOS, sin
+    filtrar por `activo` -- así era también en el Mongo original, a
+    diferencia de obtener_placas_por_abrev()/obtener_info_vehiculos() que sí
+    filtran; se preserva esa asimetría para calibraciones/fidelidad/catálogo,
+    que necesitan la flota histórica completa).
+
+    `solo_activos=True` es para la GENERACIÓN EN VIVO de rutas: un camión
+    fuera de servicio (p. ej. KANGOO) nunca debe recibir una ruta.
     Retorna: {abreviatura: capacidad_kg (int)} — ya con las reglas CAP-4 y
     CAP-1.5 aplicadas (tope fijo de 3900 kg para vehículos de 3.5-4 t; tope
     de 1549 kg para vehículos de 1.5 t; 100 % nominal para el resto).
@@ -190,6 +194,8 @@ def obtener_capacidades_vehiculos() -> dict:
         tabla = get_table("vehiculos")
         caps  = {}
         for v in db.execute(select(tabla)).mappings():
+            if solo_activos and not v.get("activo"):
+                continue
             abrev   = (v.get("abreviatura") or v.get("descripcion") or "").strip()
             cap_ton = float(v.get("capacidad_toneladas") or 0)
             if abrev and cap_ton > 0:
@@ -199,9 +205,10 @@ def obtener_capacidades_vehiculos() -> dict:
         return {}
 
 
-def obtener_volumenes_vehiculos() -> dict:
+def obtener_volumenes_vehiculos(solo_activos: bool = False) -> dict:
     """
-    Lee el volumen (m³) de cada vehículo desde SQL Server.
+    Lee el volumen (m³) de cada vehículo desde SQL Server (`solo_activos`:
+    ver obtener_capacidades_vehiculos).
     Retorna: {abreviatura: volumen_m3 (float)} — solo vehículos con volumen > 0.
     Espejo de obtener_capacidades_vehiculos() pero para el límite volumétrico.
     """
@@ -210,6 +217,8 @@ def obtener_volumenes_vehiculos() -> dict:
         tabla = get_table("vehiculos")
         vols  = {}
         for v in db.execute(select(tabla)).mappings():
+            if solo_activos and not v.get("activo"):
+                continue
             abrev = (v.get("abreviatura") or v.get("descripcion") or "").strip()
             vol   = float(v.get("volumen_m3") or 0)
             if abrev and vol > 0:

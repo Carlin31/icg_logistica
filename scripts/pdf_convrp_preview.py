@@ -47,8 +47,8 @@ def main():
                 "lon": (float(s["longitud"]) if s.get("longitud") is not None else None)}
         coords = {k: (v["lat"], v["lon"]) for k, v in suc.items() if v["lat"] is not None}
 
-        caps = obtener_capacidades_vehiculos()
-        vols = obtener_volumenes_vehiculos()
+        caps = obtener_capacidades_vehiculos(solo_activos=True)
+        vols = obtener_volumenes_vehiculos(solo_activos=True)
         info_veh = obtener_info_vehiculos()
 
         # ── demanda real de la semana (histórico confirmado) ──
