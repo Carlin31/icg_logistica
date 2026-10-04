@@ -46,6 +46,11 @@
                 <i data-lucide="download" class="pdf-icon" aria-hidden="true"></i>
                 <span>Descargar PDF</span>
             </button>
+            <!-- Aparece solo cuando ya hay un PDF generado (ver generarPDF en pdf.js) -->
+            <button id="btn-excel" class="btn btn-descargar" style="display:none;">
+                <i data-lucide="file-spreadsheet" class="pdf-icon" aria-hidden="true"></i>
+                <span>Descargar Excel</span>
+            </button>
         </div>
 
         <div id="mensaje-error" class="alerta-error" style="display:none;"></div>

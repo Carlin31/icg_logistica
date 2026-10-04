@@ -11,6 +11,12 @@ const MSG_PDF = {
     "Aplicando formato al documento…",
     "Finalizando el reporte…",
   ],
+  excel: [
+    "Generando Excel…",
+    "Leyendo las tablas del PDF…",
+    "Armando los bloques por vehículo…",
+    "Aplicando formato al Excel…",
+  ],
 };
 
 const ESTADO_AUTORIZACION_INFO = {
@@ -21,6 +27,7 @@ const ESTADO_AUTORIZACION_INFO = {
 
 // Almacena el blob URL del último PDF generado para su descarga posterior
 let _blobUrl   = null;
+let _blob      = null;   // el mismo PDF, para reenviarlo al servidor y convertirlo a Excel
 let _filename  = "reporte_pesos.pdf";
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -31,6 +38,7 @@ async function inicializar() {
   await cargarLogisticaActiva();
   document.getElementById('btn-generar')?.addEventListener('click', generarPDF);
   document.getElementById('btn-descargar')?.addEventListener('click', descargarPDF);
+  document.getElementById('btn-excel')?.addEventListener('click', descargarExcel);
   document.getElementById('btn-autorizar')?.addEventListener('click', autorizarRutas);
   document.getElementById('btn-cancelar-autorizacion')?.addEventListener('click', abrirModalCancelarAutorizacion);
   document.getElementById('modal-cancelar-no')?.addEventListener('click', cerrarModalCancelarAutorizacion);
@@ -67,6 +75,7 @@ async function cargarLogisticaActiva() {
 async function generarPDF() {
   const btnGen      = document.getElementById('btn-generar');
   const btnDesc     = document.getElementById('btn-descargar');
+  const btnExcel    = document.getElementById('btn-excel');
   const errDiv      = document.getElementById('mensaje-error');
   const zonaPreview = document.getElementById('zona-preview');
 
@@ -74,6 +83,8 @@ async function generarPDF() {
   errDiv.style.display  = 'none';
   errDiv.textContent    = '';
   zonaPreview.style.display = 'none';
+  btnExcel.style.display    = 'none';   // el Excel solo existe a partir de un PDF ya generado
+  _blob = null;
 
   // Liberar blob URL previo para no acumular memoria
   if (_blobUrl) { URL.revokeObjectURL(_blobUrl); _blobUrl = null; }
@@ -107,6 +118,7 @@ async function generarPDF() {
 
     // Crear URL del blob para previsualización y descarga
     const blob = await res.blob();
+    _blob      = blob;
     _blobUrl   = URL.createObjectURL(blob);
 
     Loader.hide();
@@ -119,6 +131,7 @@ async function generarPDF() {
 
     // Habilitar descarga
     btnDesc.disabled = false;
+    btnExcel.style.display = '';
 
   } catch (err) {
     Loader.hide();
@@ -142,6 +155,55 @@ function descargarPDF() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+}
+
+// ── Descargar el Excel (el servidor convierte el PDF ya generado) ──
+async function descargarExcel() {
+  if (!_blob) return;
+  const btn    = document.getElementById('btn-excel');
+  const errDiv = document.getElementById('mensaje-error');
+
+  errDiv.style.display = 'none';
+  errDiv.textContent   = '';
+  btn.disabled = true;
+  Loader.show('Generando Excel', MSG_PDF.excel);
+
+  try {
+    const form = new FormData();
+    form.append('pdf', _blob, _filename);
+    const res = await fetch('/pdf/generar-excel', { method: 'POST', body: form });
+
+    if (!res.ok) {
+      let mensaje = `Error ${res.status}`;
+      try { const json = await res.json(); mensaje = json.mensaje ?? mensaje; } catch (_) {}
+      throw new Error(mensaje);
+    }
+
+    const disposition = res.headers.get('Content-Disposition') ?? '';
+    const match       = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';\n]+)/i);
+    const nombre      = match ? decodeURIComponent(match[1])
+                              : _filename.replace(/\.pdf$/i, '.xlsx');
+
+    const urlXlsx = URL.createObjectURL(await res.blob());
+    const a       = document.createElement('a');
+    a.href        = urlXlsx;
+    a.download    = nombre;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(urlXlsx);
+  } catch (err) {
+    errDiv.innerHTML = '<i data-lucide="circle-x" class="pdf-icon" aria-hidden="true"></i><span></span>';
+    errDiv.querySelector('span').textContent = err.message;
+    if (window.lucide?.createIcons) {
+      window.lucide.createIcons({ attrs: { class: 'pdf-icon' } });
+    }
+    errDiv.style.display = '';
+    console.error('Error al generar Excel:', err);
+  } finally {
+    Loader.hide();
+    btn.disabled = false;
+  }
 }
 
 // ── Autorización de rutas ──────────────────────────────────────
