@@ -6,13 +6,17 @@ rutas hacia el portal del Conductor.
 Endpoints:
   GET  /                      → Vista de la sección (pdf/index.html)
   POST /generar                → Genera y descarga el reporte PDF de la logística activa
+  POST /generar-excel          → Convierte el PDF generado (enviado por el navegador) a Excel
   GET  /estado-autorizacion    → Estado de autorización de la logística activa
   POST /autorizar               → Autoriza TODAS las rutas de la logística activa
   GET  /entregas-resumen        → # de entregas registradas (para advertir antes de cancelar)
   POST /cancelar-autorizacion   → Retira la autorización (borra entregas asociadas)
 """
-from flask import Blueprint, render_template, send_file, jsonify, session, redirect, url_for
+from io import BytesIO
+
+from flask import Blueprint, render_template, request, send_file, jsonify, session, redirect, url_for
 from logic.pdf_logic import generar_pdf, SnapshotDesactualizado
+from logic.excel_logic import pdf_a_excel
 from logic.conductor_logic import (
     obtener_estado_autorizacion,
     autorizar_rutas,
@@ -21,6 +25,9 @@ from logic.conductor_logic import (
 )
 
 pdf_bp = Blueprint('pdf', __name__)
+
+MAX_PDF_BYTES = 10 * 1024 * 1024   # el PDF real pesa ~15 KB; 10 MB es holgura de sobra
+MIMETYPE_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 def _logistica_activa() -> dict | None:
@@ -88,6 +95,42 @@ def generar():
         as_attachment=True,
         download_name=nombre_descarga,
         mimetype="application/pdf",
+    )
+
+
+@pdf_bp.route('/generar-excel', methods=['POST'])
+def generar_excel():
+    """
+    Convierte a Excel el PDF que el navegador ya generó y tiene en la vista
+    previa (campo multipart `pdf`). El Excel sale del mismo PDF que ve el
+    usuario; no se consulta la BD ni se guarda nada en el servidor.
+    """
+    logistica = _logistica_activa()
+    if not logistica:
+        return jsonify({"status": "error", "mensaje": "No hay ninguna logística activa."}), 400
+
+    archivo = request.files.get("pdf")
+    if archivo is None:
+        return jsonify({"status": "error", "mensaje": "No se recibió el PDF."}), 400
+
+    contenido = archivo.read(MAX_PDF_BYTES + 1)
+    if len(contenido) > MAX_PDF_BYTES:
+        return jsonify({"status": "error", "mensaje": "El PDF es demasiado grande."}), 400
+    if not contenido.startswith(b"%PDF"):
+        return jsonify({"status": "error", "mensaje": "El archivo recibido no es un PDF."}), 400
+
+    try:
+        xlsx = pdf_a_excel(contenido)
+    except ValueError as e:
+        return jsonify({"status": "error", "mensaje": str(e)}), 422
+    except Exception as e:
+        return jsonify({"status": "error", "mensaje": f"Error al generar el Excel: {e}"}), 500
+
+    return send_file(
+        BytesIO(xlsx),
+        as_attachment=True,
+        download_name=f"{logistica['nombre'].replace(' ', '_')}.xlsx",
+        mimetype=MIMETYPE_XLSX,
     )
 
 
