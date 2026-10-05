@@ -294,12 +294,19 @@ def _formatear_docs_agrupados(docs: list) -> str:
 
     parts = [first]
     for doc in docs[1:]:
-        if pfx and doc.upper().startswith(pfx):
-            num_part = doc[len(pfx):]
+        # `doc` puede venir ya comprimido por cliente ('BB4490/91', ver
+        # _agrupar_documentos_por_cliente): solo su primer folio es completo,
+        # los demas ya son colas de 2 digitos y se conservan tal cual. Tomar
+        # los ultimos 2 digitos de TODO el texto perdia los folios de enmedio
+        # (BB4490/91 -> '91', BB4494/95/96/97 -> '97').
+        cabeza, *colas = doc.split("/")
+        if pfx and cabeza.upper().startswith(pfx):
+            num_part = cabeza[len(pfx):]
             digits   = re.sub(r'\D', '', num_part)
-            parts.append(digits[-2:] if len(digits) >= 2 else (digits or doc))
+            parts.append(digits[-2:] if len(digits) >= 2 else (digits or cabeza))
         else:
-            parts.append(doc)
+            parts.append(cabeza)
+        parts.extend(colas)
     return "/".join(parts)
 
 

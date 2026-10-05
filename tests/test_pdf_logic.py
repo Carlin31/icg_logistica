@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from logic.pdf_logic import (
     _agrupar_documentos_por_cliente,
     _backfill_documento,
+    _formatear_docs_agrupados,
 )
 
 
@@ -56,3 +57,27 @@ def test_backfill_documento_cliente_sin_mapa_deja_vacio_no_falla():
     mayoristas = [{"id_cliente": 5, "nombre": "Y"}]
     _backfill_documento(mayoristas, {})
     assert mayoristas[0]["documento"] == ""
+
+
+def test_formatear_docs_agrupados_no_pierde_folios_de_cliente_ya_comprimido():
+    # Caso real 2026-10-05 (F 350_2 martes, Tuxtepec): _agrupar_documentos_por_cliente
+    # entrega un texto ya comprimido por cliente ('BB4490/91', 'BB4494/95/96/97') y
+    # al juntar clientes en una sola parada se volvia a comprimir tomando solo los
+    # ultimos 2 digitos de TODO el texto: salia 'BB4488/89/91/97' y los folios
+    # 4490, 4494, 4495 y 4496 desaparecian de la etiqueta (aunque su peso si sumaba).
+    docs = ["BB4494/95/96/97", "BB4490/91", "BB4488/89"]
+    assert _formatear_docs_agrupados(docs) == "BB4488/89/90/91/94/95/96/97"
+
+
+def test_formatear_docs_agrupados_mezcla_comprimidos_y_sueltos():
+    docs = ["BB4490/91", "BB4492"]
+    assert _formatear_docs_agrupados(docs) == "BB4490/91/92"
+
+
+def test_formatear_docs_agrupados_comprimido_de_otro_prefijo_conserva_su_prefijo():
+    docs = ["AA2107", "BB4490/91"]
+    assert _formatear_docs_agrupados(docs) == "AA2107/BB4490/91"
+
+
+def test_formatear_docs_agrupados_sueltos_siguen_igual():
+    assert _formatear_docs_agrupados(["BB2874", "BB2872", "BB2873"]) == "BB2872/73/74"
