@@ -18,12 +18,14 @@ La tabla es append-only: nunca se actualiza ni se borra una fila, aunque
 """
 from datetime import datetime
 
-from sqlalchemy import select, insert, update
+from sqlalchemy import select, insert, update, func
 
 from db import get_db, get_table, transaccion
 
+DIAS_VALIDOS = ("LUNES", "MARTES", "MIERCOLES", "JUEVES", "VIERNES")
+
 TIPOS_VALIDOS = {
-    "dia_preferido", "afinidad", "unidades_excluidas",
+    "dia_preferido", "dia_admisible", "afinidad", "unidades_excluidas",
     "orden_fijo", "ancla_mayorista", "grupo_fijo_mayorista", "zona_partida",
 }
 
@@ -139,6 +141,53 @@ def fijar_dia_preferido(grupo: int, dia: str, motivo: str,
             tgd.c.grupo == grupo, tgd.c.vigente == True, tgd.c.dia == dia
         ).values(es_canonico=True))
         registrar_override("dia_preferido", f"grupo:{grupo}", actual, dia,
+                            motivo, aplicado_por, conn=conn)
+    return resultado
+
+
+def agregar_dia_admisible(grupo: int, dia: str, motivo: str,
+                           aplicado_por: str = None, dry_run: bool = False) -> dict:
+    """
+    Agrega `dia` a los dias admisibles de `grupo` (INSERT en
+    plantilla_grupo_dia). Es la operacion que fijar_dia_preferido no hace:
+    ahi `dia` ya debe ser admisible.
+
+    La fila nueva NO es el dia preferido (es_canonico=False) y va AL FINAL
+    del orden (`orden` = maximo + 1): el motor usa el dia preferido y solo
+    cae a los demas admisibles como respaldo, asi que agregar uno asi no
+    cambia por si solo ninguna asignacion. Para que el grupo realmente se
+    mueva a ese dia hay que fijarlo despues como preferido con
+    fijar_dia_preferido. Mismo patron que scripts/mover_dia_preferido_grupo_17*.py.
+    """
+    dia = (dia or "").strip().upper()
+    if dia not in DIAS_VALIDOS:
+        raise ValueError(f"dia invalido: {dia!r} (validos: {list(DIAS_VALIDOS)})")
+
+    db = get_db()
+    tgd = get_table("plantilla_grupo_dia")
+    filas = db.execute(
+        select(tgd).where(tgd.c.grupo == grupo, tgd.c.vigente == True)
+    ).mappings().all()
+    if not filas:
+        raise ValueError(f"grupo {grupo} no tiene dias admisibles en la plantilla vigente")
+
+    antes = [f["dia"] for f in sorted(filas, key=lambda f: f["orden"] if f["orden"] is not None else 99)]
+    despues = antes + [dia]
+    resultado = dict(grupo=grupo, antes=antes, despues=despues)
+    if dia in antes:
+        resultado["despues"] = antes
+        resultado["sin_cambios"] = True
+        return resultado
+    if dry_run:
+        return resultado
+
+    version_nueva = (db.execute(select(func.max(tgd.c.version))).scalar() or 0) + 1
+    orden_nuevo = max((f["orden"] for f in filas if f["orden"] is not None), default=0) + 1
+    with transaccion() as conn:
+        conn.execute(insert(tgd).values(
+            version=version_nueva, grupo=grupo, dia=dia, es_canonico=False,
+            orden=orden_nuevo, vigente_desde=datetime.now().isoformat(), vigente=True))
+        registrar_override("dia_admisible", f"grupo:{grupo}", "|".join(antes), "|".join(despues),
                             motivo, aplicado_por, conn=conn)
     return resultado
 

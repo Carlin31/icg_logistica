@@ -13,6 +13,7 @@ es para el PROXIMO override.
 
 Uso:
     python scripts/admin_overrides.py dia-preferido --grupo 20 --dia VIERNES --motivo "..."
+    python scripts/admin_overrides.py dia-admisible --grupo 13 --dia LUNES --motivo "..."
     python scripts/admin_overrides.py afinidad --grupo 27 --unidades "T 25:5 | T 23:4" --motivo "..."
     python scripts/admin_overrides.py unidades-excluidas --grupo 27 --unidades "F 350_1,F 350_2,F 350_3" --motivo "..."
     python scripts/admin_overrides.py ancla-mayorista --cliente 501 --sucursal 30 --motivo "..."
@@ -55,6 +56,13 @@ def cmd_dia_preferido(args):
     from logic.overrides_admin import fijar_dia_preferido
     r = fijar_dia_preferido(args.grupo, args.dia, motivo=args.motivo,
                              aplicado_por=_quien(args), dry_run=args.dry_run)
+    _mostrar(r, args.dry_run)
+
+
+def cmd_dia_admisible(args):
+    from logic.overrides_admin import agregar_dia_admisible
+    r = agregar_dia_admisible(args.grupo, args.dia, motivo=args.motivo,
+                               aplicado_por=_quien(args), dry_run=args.dry_run)
     _mostrar(r, args.dry_run)
 
 
@@ -113,6 +121,11 @@ def main():
     p.add_argument("--grupo", type=int, required=True)
     p.add_argument("--dia", required=True)
     _comunes(p); p.set_defaults(func=cmd_dia_preferido)
+
+    p = sub.add_parser("dia-admisible", help="agrega un dia admisible a un grupo (NO lo vuelve preferido)")
+    p.add_argument("--grupo", type=int, required=True)
+    p.add_argument("--dia", required=True)
+    _comunes(p); p.set_defaults(func=cmd_dia_admisible)
 
     p = sub.add_parser("afinidad", help="fija unidades_afines de un grupo")
     p.add_argument("--grupo", type=int, required=True)

@@ -190,6 +190,67 @@ def test_fijar_dia_preferido_dry_run_no_escribe(grupo_sintetico):
     assert historial(clave=f"grupo:{GRUPO_TEST}") == []
 
 
+def _dias_vigentes(grupo):
+    from db import get_table, get_db
+    from sqlalchemy import select
+    tgd = get_table("plantilla_grupo_dia")
+    filas = get_db().execute(
+        select(tgd).where(tgd.c.grupo == grupo, tgd.c.vigente == True)
+    ).mappings().all()
+    return {f["dia"]: dict(f) for f in filas}
+
+
+def test_agregar_dia_admisible_inserta_al_final_sin_tocar_el_preferido(grupo_sintetico):
+    from logic.overrides_admin import agregar_dia_admisible, historial
+
+    resultado = agregar_dia_admisible(GRUPO_TEST, "JUEVES", motivo="prueba TDD")
+    assert resultado == {"grupo": GRUPO_TEST,
+                         "antes": ["LUNES", "MARTES"],
+                         "despues": ["LUNES", "MARTES", "JUEVES"]}
+
+    filas = _dias_vigentes(GRUPO_TEST)
+    assert set(filas) == {"LUNES", "MARTES", "JUEVES"}
+    assert not filas["JUEVES"]["es_canonico"]       # solo admisible, NO preferido
+    assert filas["JUEVES"]["orden"] == 3            # al final: no altera desempates por orden
+    assert filas["LUNES"]["es_canonico"]            # el preferido sigue siendo LUNES
+
+    hist = historial(clave=f"grupo:{GRUPO_TEST}")
+    assert len(hist) == 1
+    assert hist[0]["tipo"] == "dia_admisible"
+    assert hist[0]["valor_anterior"] == "LUNES|MARTES"
+    assert hist[0]["valor_nuevo"] == "LUNES|MARTES|JUEVES"
+
+
+def test_agregar_dia_admisible_ya_admitido_no_cambia_nada(grupo_sintetico):
+    from logic.overrides_admin import agregar_dia_admisible, historial
+
+    resultado = agregar_dia_admisible(GRUPO_TEST, "MARTES", motivo="prueba TDD")
+    assert resultado["sin_cambios"] is True
+    assert set(_dias_vigentes(GRUPO_TEST)) == {"LUNES", "MARTES"}
+    assert historial(clave=f"grupo:{GRUPO_TEST}") == []
+
+
+def test_agregar_dia_admisible_dry_run_no_escribe(grupo_sintetico):
+    from logic.overrides_admin import agregar_dia_admisible, historial
+
+    resultado = agregar_dia_admisible(GRUPO_TEST, "JUEVES", motivo="prueba TDD", dry_run=True)
+    assert resultado["despues"] == ["LUNES", "MARTES", "JUEVES"]
+    assert set(_dias_vigentes(GRUPO_TEST)) == {"LUNES", "MARTES"}
+    assert historial(clave=f"grupo:{GRUPO_TEST}") == []
+
+
+def test_agregar_dia_admisible_rechaza_dia_invalido(grupo_sintetico):
+    from logic.overrides_admin import agregar_dia_admisible
+    with pytest.raises(ValueError, match="dia"):
+        agregar_dia_admisible(GRUPO_TEST, "SABADO", motivo="prueba TDD")
+
+
+def test_agregar_dia_admisible_rechaza_grupo_inexistente(app_ctx):
+    from logic.overrides_admin import agregar_dia_admisible
+    with pytest.raises(ValueError, match="no tiene"):
+        agregar_dia_admisible(999902, "LUNES", motivo="prueba TDD")
+
+
 def test_fijar_afinidad_actualiza_y_registra_auditoria(grupo_sintetico):
     from db import get_table, get_db
     from sqlalchemy import select
