@@ -8,7 +8,9 @@ filtrada por logistica_id proveniente de la sesión Flask.
 import json
 import os
 import re
+from collections import Counter
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -441,6 +443,11 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
     for ruta in rutas_ord:
         dia      = ruta.get("dia", "").lower()
         dia_lbl  = ABREV_DIA.get(dia, dia.upper())
+        # Chofer distinto al del encabezado (ver _agrupar_rutas_por_vehiculo):
+        # se anota bajo el día para que el camión siga en una sola tabla.
+        chofer_dia = (ruta.get("_chofer_dia") or "").strip()
+        dia_txt = (f"{dia_lbl}<br/>({xml_escape(chofer_dia)})"
+                   if chofer_dia and veh_chofer and chofer_dia != veh_chofer else dia_lbl)
         peso_ruta = float(ruta.get("peso_kg", 0))
         pct_util  = float(ruta.get("pct_utilizacion", 0))
         es_sub    = ruta.get("tipo", "") == "subruta"
@@ -515,7 +522,7 @@ def _tabla_vehiculo(veh_abrev: str, veh_placas: str, rutas: list,
             col = C_MAY_TEXT if es_may else colors.black
 
             data_rows.append([
-                _pc(dia_lbl, sz=SZ_DAT, bold=True) if i == 0 else "",
+                _pc(dia_txt, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(aux_txt, sz=SZ_DAT, bold=True) if i == 0 else "",
                 _pc(str(p.get("orden", i + 1)), sz=SZ_DAT, color=col),
                 _p(nombre, sz=SZ_DAT, color=col, bold=es_may),
@@ -801,6 +808,48 @@ def _backfill_documento(mayoristas: list, doc_por_cliente: dict) -> None:
                 m["documento"] = doc_por_cliente.get(int(id_cl), "")
 
 
+def _chofer_efectivo(ruta: dict, chofer_default: str) -> str:
+    """Chofer de una ruta: override del día > chofer guardado en la ruta > el del camión.
+    `chofer_override` llega de BD como {"nombre", "chofer_id"} (o texto legado)."""
+    ov = ruta.get("chofer_override")
+    if isinstance(ov, dict):
+        ov = ov.get("nombre")
+    return (ov or ruta.get("chofer") or chofer_default or "").strip()
+
+
+def _agrupar_rutas_por_vehiculo(rutas: list, chofer_por_placas: dict) -> list:
+    """
+    Una tabla por camión, aunque lo maneje más de un chofer en la semana.
+
+    El encabezado lleva al chofer con más días; en empate, al chofer por
+    defecto del camión (o el primero por día). Cada ruta recibe `_chofer_dia`
+    para que `_tabla_vehiculo` anote bajo el día al chofer que difiere.
+    Devuelve [{"veh", "placas", "chofer", "ton", "rutas"}] ordenado por camión.
+    """
+    por_veh: dict = {}
+    for r in rutas:
+        veh  = r.get("vehiculo_abrev") or "S/N"
+        plac = r.get("vehiculo_placas") or "—"
+        info = chofer_por_placas.get(plac, {})
+        chofer_default = info.get("chofer", "") if isinstance(info, dict) else ""
+        ton            = info.get("ton", 0.0)   if isinstance(info, dict) else 0.0
+        g = por_veh.setdefault((veh, plac), {
+            "veh": veh, "placas": plac, "ton": ton, "_default": chofer_default, "rutas": []})
+        g["rutas"].append(dict(r, _chofer_dia=_chofer_efectivo(r, chofer_default)))
+
+    grupos = []
+    for g in por_veh.values():
+        g["rutas"].sort(key=lambda r: ORDEN_DIA.get((r.get("dia") or "").lower(), 99))
+        cuenta = Counter(r["_chofer_dia"] for r in g["rutas"] if r["_chofer_dia"])
+        tope = max(cuenta.values(), default=0)
+        empatados = [c for c in cuenta if cuenta[c] == tope]
+        g["chofer"] = (g["_default"] if g["_default"] in empatados
+                       else (empatados[0] if empatados else g["_default"]))
+        del g["_default"]
+        grupos.append(g)
+    return sorted(grupos, key=lambda g: (g["veh"] or "", g["placas"] or ""))
+
+
 def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     """
     Genera el reporte PDF de pesos.
@@ -1009,28 +1058,8 @@ def generar_pdf(datos_sesion: dict, rutas_inyectadas: list = None) -> str:
     except Exception as e:
         print(f"[generar_pdf] Error al leer choferes: {e}")
 
-    # Agrupar por (vehículo, chofer efectivo): una ruta con chofer
-    # personalizado (cambiado solo para ese día/ruta en Modificación) recibe
-    # su propio bloque dentro del mismo vehículo, sin afectar las demás rutas.
-    grupos: dict = {}
-    for r in rutas:
-        veh  = r.get("vehiculo_abrev") or "S/N"
-        plac = r.get("vehiculo_placas") or "—"
-        veh_info = chofer_por_placas.get(plac, {})
-        chofer_default = veh_info.get("chofer", "") if isinstance(veh_info, dict) else ""
-        ton            = veh_info.get("ton", 0.0)   if isinstance(veh_info, dict) else 0.0
-        chofer_efectivo = r.get("chofer_override") or r.get("chofer") or chofer_default
-
-        clave = (veh, chofer_efectivo)
-        if clave not in grupos:
-            grupos[clave] = {
-                "veh": veh, "placas": plac, "chofer": chofer_efectivo, "ton": ton, "rutas": [],
-            }
-        grupos[clave]["rutas"].append(r)
-
     elements = []
-    for clave in sorted(grupos, key=lambda k: (k[0] or "", k[1] or "")):
-        info = grupos[clave]
+    for info in _agrupar_rutas_por_vehiculo(rutas, chofer_por_placas):
         elements.extend(_tabla_vehiculo(info["veh"], info["placas"], info["rutas"], info["chofer"], info["ton"], db, vol_map, cfg_tiempo))
 
     doc_pdf.build(elements)

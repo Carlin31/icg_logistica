@@ -13,6 +13,7 @@ Delegación de cálculos:
   logic/logic_extraccion/calculadora.py    → calcular_peso / calcular_volumen
   logic/logic_extraccion/lector_mayoristas → LectorMayoristas
 """
+import re
 import pandas as pd
 from logic.logic_extraccion.lector_icg        import LectorICG
 from logic.logic_extraccion.lector_bimbo      import LectorBimbo
@@ -20,6 +21,23 @@ from logic.logic_extraccion.lector_proalmex   import LectorProalmex
 from logic.logic_extraccion.lector_mayoristas import LectorMayoristas
 from logic.logic_extraccion.calculadora       import calcular_peso, calcular_volumen
 from logic.configuracion_logic                import listar_productos, listar_productos_proalmex, listar_productos_bimbo, listar_sucursales
+
+
+# Coma de miles dentro de un tamaño ('1,890 Ml'): dígito, coma, exactamente 3 dígitos.
+# No toca la coma decimal ('1,5 Lt') ni el punto decimal ('3.785 Lt').
+_COMA_DE_MILES = re.compile(r'(?<=\d),(?=\d{3}(?!\d))')
+
+
+def _clave_proalmex(linea, tamano) -> tuple:
+    """Clave de cruce de un producto Proalmex: (línea, tamaño) normalizados.
+
+    Case-insensitive, sin espacios en los extremos y sin coma de miles en el
+    tamaño: la BD tenía '1,890 Ml' y el Excel de Proalmex trae '1890 Ml', y
+    esa diferencia dejaba a Horchata de Arroz/Coco 1890 Ml como "no encontrada"
+    (0 kg / 0 m³). Se usa para construir los mapas desde la BD y para consultar
+    cada fila del Excel, así ambos lados se normalizan igual."""
+    tam = '' if tamano is None else str(tamano).strip().lower()
+    return (str(linea).strip().lower(), _COMA_DE_MILES.sub('', tam))
 
 
 def _mapa_nombre_sucursal(sucursales_db: list, campo: str) -> dict:
@@ -79,19 +97,13 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
     # Mapa de peso Proalmex: (linea, tamano) → peso_kg
     # Normalización: strip + lower para tolerancia a diferencias de mayúsculas/espacios
     map_peso_proalmex: dict[tuple, float] = {
-        (
-            str(p.get('linea',  '')).strip().lower(),
-            str(p.get('tamano', '')).strip().lower(),
-        ): float(p.get('peso', 0) or 0)
+        _clave_proalmex(p.get('linea', ''), p.get('tamano', '')): float(p.get('peso', 0) or 0)
         for p in productos_proalmex_db
     }
 
     # Mapa de volumen Proalmex: (linea, tamano) → volumen_m3 (misma clave que el de peso)
     map_volumen_proalmex: dict[tuple, float] = {
-        (
-            str(p.get('linea',  '')).strip().lower(),
-            str(p.get('tamano', '')).strip().lower(),
-        ): float(p.get('volumen', 0) or 0)
+        _clave_proalmex(p.get('linea', ''), p.get('tamano', '')): float(p.get('volumen', 0) or 0)
         for p in productos_proalmex_db
     }
 
@@ -210,7 +222,7 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
                 etiqueta = f'{desc} ({tamano})' if tamano else desc
                 claves_proalmex_total.add(etiqueta)
 
-                clave = (desc.lower(), tamano.lower())
+                clave = _clave_proalmex(desc, tamano)
                 if clave not in map_peso_proalmex:
                     claves_proalmex_no_encontradas.add(etiqueta)
                 return map_peso_proalmex.get(clave, 0.0)
@@ -228,7 +240,7 @@ def procesar_archivos_extraccion(archivos: dict) -> dict:
                     return 0.0
                 desc   = str(desc_raw).strip()
                 tamano = '' if (pd.isnull(tamano_raw) or str(tamano_raw).strip().lower() == 'nan') else str(tamano_raw).strip()
-                return map_volumen_proalmex.get((desc.lower(), tamano.lower()), 0.0)
+                return map_volumen_proalmex.get(_clave_proalmex(desc, tamano), 0.0)
 
             df_proalmex['volumen_precalc'] = (
                 df_proalmex.apply(_volumen_unitario_proalmex, axis=1) * df_proalmex['Piezas']
